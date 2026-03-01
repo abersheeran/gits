@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "npm run db:migrate:local && wrangler dev --local --env-file .env",
-    "deploy": "wrangler deploy --minify --env-file .env",
+    "dev:api": "npm run dev",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm run build:web",
+    "build:web": "npm --prefix web run build",
+    "deploy": "npm run build:web && wrangler deploy --minify --env-file .env",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "d1:create:remote": "wrangler d1 create gits",
     "db:migrate": "wrangler d1 migrations apply DB",
     "db:migrate:local": "wrangler d1 migrations apply DB --local"
   },
@@ -24,6 +29,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260227.0",
     "@types/bcryptjs": "^2.4.6",
+    "shadcn": "^3.8.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "wrangler": "^4.4.0"

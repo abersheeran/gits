@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import apiRoutes from "./routes/api";
 import gitRoutes from "./routes/git";
-import webRoutes from "./routes/web";
 import { errorHandler } from "./middleware/error-handler";
 import type { AppEnv } from "./types";
 
@@ -14,7 +13,28 @@ app.get("/healthz", (c) => {
 });
 
 app.route("/api", apiRoutes);
-app.route("/", webRoutes);
 app.route("/", gitRoutes);
+app.all("*", async (c) => {
+  if (!c.env.ASSETS) {
+    return c.notFound();
+  }
+
+  const response = await c.env.ASSETS.fetch(c.req.raw);
+  if (response.status !== 404) {
+    return response;
+  }
+
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+    return response;
+  }
+
+  const accept = c.req.header("accept") ?? "";
+  if (!accept.includes("text/html")) {
+    return response;
+  }
+
+  const fallbackUrl = new URL("/index.html", c.req.url);
+  return c.env.ASSETS.fetch(new Request(fallbackUrl.toString(), c.req.raw));
+});
 
 export default app;

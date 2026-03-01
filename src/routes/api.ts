@@ -130,6 +130,10 @@ function assertCollaboratorPermission(value: unknown): "read" | "write" | "admin
 
 const router = new Hono<AppEnv>();
 
+function sessionCookieSecure(url: string): boolean {
+  return new URL(url).protocol === "https:";
+}
+
 function isUniqueConstraintError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -171,7 +175,7 @@ router.post("/auth/register", async (c) => {
   setCookie(c, "session", sessionToken, {
     path: "/",
     httpOnly: true,
-    secure: true,
+    secure: sessionCookieSecure(c.req.url),
     sameSite: "Lax",
     maxAge: 60 * 60 * 24 * 7
   });
@@ -197,7 +201,7 @@ router.post("/auth/login", async (c) => {
   setCookie(c, "session", sessionToken, {
     path: "/",
     httpOnly: true,
-    secure: true,
+    secure: sessionCookieSecure(c.req.url),
     sameSite: "Lax",
     maxAge: 60 * 60 * 24 * 7
   });
@@ -215,6 +219,14 @@ router.post("/auth/logout", requireSession, async (c) => {
 router.get("/me", optionalSession, async (c) => {
   const user = c.get("sessionUser") ?? null;
   return c.json({ user });
+});
+
+router.get("/public/repos", async (c) => {
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repositories = await repositoryService.listPublicRepositories(
+    parseLimit(c.req.query("limit"), 50)
+  );
+  return c.json({ repositories });
 });
 
 router.post("/auth/tokens", requireSession, async (c) => {

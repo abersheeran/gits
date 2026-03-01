@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
+import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
@@ -63,6 +64,64 @@ describe("API validation", () => {
     expect(response.status).toBe(400);
     const body = await response.text();
     expect(body).toContain("Invalid username");
+  });
+
+  it("returns public repository list", async () => {
+    const app = createApp();
+    const env = createBaseEnv(createMockD1Database([]));
+    vi.spyOn(RepositoryService.prototype, "listPublicRepositories").mockResolvedValue([
+      {
+        id: "repo-1",
+        owner_id: "user-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 0,
+        created_at: Date.now()
+      }
+    ]);
+
+    const response = await app.fetch(new Request("http://localhost/api/public/repos?limit=5"), env);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      repositories: Array<{ owner_username: string; name: string }>;
+    };
+    expect(body.repositories).toHaveLength(1);
+    expect(body.repositories[0]).toEqual(
+      expect.objectContaining({
+        owner_username: "alice",
+        name: "demo"
+      })
+    );
+  });
+
+  it("sets non-secure session cookie for http register requests", async () => {
+    const app = createApp();
+    const env = createBaseEnv(createMockD1Database([]));
+    vi.spyOn(AuthService.prototype, "createUser").mockResolvedValue({
+      id: "user-1",
+      username: "alice"
+    });
+    vi.spyOn(AuthService.prototype, "createSessionToken").mockResolvedValue("session-token");
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice@example.com",
+          password: "Password123"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(201);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("session=session-token");
+    expect(setCookie.toLowerCase()).not.toContain("secure");
   });
 
   it("preserves leading/trailing spaces in password before hashing", async () => {

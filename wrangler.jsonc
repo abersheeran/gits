@@ -6,17 +6,21 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS"
+  },
   "r2_buckets": [
     {
       "binding": "GIT_BUCKET",
-      "bucket_name": "git-service-objects"
+      "bucket_name": "gits"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "git-service",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_name": "gits",
+      "database_id": "ba88136f-88d3-4b71-95f4-682ffcf1cf72",
       "migrations_dir": "src/db/migrations"
     }
   ],

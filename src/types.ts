@@ -18,6 +18,7 @@ export type RepositoryRecord = {
 export type AppBindings = {
   DB: D1Database;
   GIT_BUCKET: R2Bucket;
+  ASSETS?: Fetcher;
   JWT_SECRET: string;
   APP_ORIGIN: string;
   UPLOAD_PACK_MAX_BODY_BYTES?: string;
