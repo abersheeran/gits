@@ -40,27 +40,45 @@ npm run dev
 
 ## Configure Cloudflare resources
 
-Variables are loaded from `.env` (via `wrangler --env-file .env` in npm scripts).
+Local development variables are loaded from `.env` (via `wrangler --env-file .env` in `npm run dev`).
 
 1. Update `wrangler.jsonc`:
    - `d1_databases[0].database_id`
    - `r2_buckets[0].bucket_name`
-   - optional: `vars.UPLOAD_PACK_MAX_BODY_BYTES`
-   - optional: `vars.RECEIVE_PACK_MAX_BODY_BYTES`
-2. Configure `.env`:
+2. Configure local `.env` (development only):
 
 ```bash
 APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
 ```
 
-3. Set secret (optional for Cloudflare remote environments):
+3. Configure remote non-secret variables (for example `APP_ORIGIN`, optional body-limit vars).
+   - Dashboard: Worker Settings -> Variables / Environment Variables
+   - Wrangler CLI (set/update during deployment):
+
+```bash
+wrangler deploy --minify \
+  --var APP_ORIGIN:https://gits.example.com \
+  --var UPLOAD_PACK_MAX_BODY_BYTES:8388608 \
+  --var RECEIVE_PACK_MAX_BODY_BYTES:33554432 \
+  --keep-vars
+```
+
+If you deploy with npm script, you can pass the same flags:
+
+```bash
+npm run deploy -- \
+  --var APP_ORIGIN:https://gits.example.com \
+  --keep-vars
+```
+
+4. Set remote secrets with Wrangler:
 
 ```bash
 wrangler secret put JWT_SECRET
 ```
 
-4. Apply migration:
+5. Apply migration:
 
 ```bash
 npm run db:migrate:local

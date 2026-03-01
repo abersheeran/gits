@@ -46,14 +46,14 @@ npx wrangler r2 bucket create git-service-objects
 - `d1_databases[0].database_id`
 - `r2_buckets[0].bucket_name`
 
-可选变量（控制 Git 请求体上限，字符串形式）：
+可选变量（控制 Git 请求体上限，字符串形式，建议在 Cloudflare 线上 Environment Variables 中配置）：
 
 - `vars.UPLOAD_PACK_MAX_BODY_BYTES`（默认 `8388608`，8MB）
 - `vars.RECEIVE_PACK_MAX_BODY_BYTES`（默认 `33554432`，32MB）
 
-### 3.3 配置 .env 变量
+### 3.3 配置本地与线上变量
 
-本项目通过 npm 脚本里的 `wrangler --env-file .env` 从 `.env` 读取变量。  
+`.env` 仅用于本地开发（`npm run dev` 会通过 `wrangler --env-file .env` 读取）。
 至少配置：
 
 ```bash
@@ -61,10 +61,30 @@ APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
 ```
 
-远程环境建议额外使用 secret（覆盖明文变量）：
+远程部署时，机密变量使用 `wrangler secret put`：
 
 ```bash
 npx wrangler secret put JWT_SECRET
+```
+
+非机密变量（例如 `APP_ORIGIN`、`UPLOAD_PACK_MAX_BODY_BYTES`、`RECEIVE_PACK_MAX_BODY_BYTES`）可以用两种方式配置到远程：
+
+1. Cloudflare 控制台：Worker 设置页的 Variables/Environment Variables
+2. Wrangler 命令行：在部署时通过 `--var` 写入/更新变量
+
+```bash
+npx wrangler deploy --minify \
+  --var APP_ORIGIN:https://gits.example.com \
+  --var UPLOAD_PACK_MAX_BODY_BYTES:8388608 \
+  --var RECEIVE_PACK_MAX_BODY_BYTES:33554432 \
+  --keep-vars
+```
+
+如果你使用项目脚本，也可以直接透传参数：
+
+```bash
+npm run deploy -- \
+  --var APP_ORIGIN:https://gits.example.com
 ```
 
 ### 3.4 初始化数据库
@@ -108,15 +128,15 @@ npm run deploy
 
 系统有两种认证：
 
-1. Session（JWT）  
+1. Session（JWT）
 用于 Web/API（注册、创建仓库、管理协作者、创建 PAT 等）
 
-2. PAT（Personal Access Token）+ HTTP Basic Auth  
+2. PAT（Personal Access Token）+ HTTP Basic Auth
 用于 Git push/fetch 私有仓库
 
 ### 5.1 关于本地 HTTP 的注意事项
 
-`/api/auth/register` 与 `/api/auth/login` 返回的是 `Secure` Cookie。  
+`/api/auth/register` 与 `/api/auth/login` 返回的是 `Secure` Cookie。
 如果你在 `http://localhost` 直接调试，浏览器通常不会发送该 Cookie。
 
 建议：
