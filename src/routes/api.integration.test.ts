@@ -221,6 +221,88 @@ describe("API + Git integration", () => {
     expect(body.commits[1]?.message).toContain("initial commit");
   });
 
+  it("returns repository contents for root tree", async () => {
+    const bucket = new MockR2Bucket();
+    await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/contents"),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      kind: "tree" | "blob";
+      path: string;
+      entries: Array<{ name: string; path: string; type: string }>;
+      readme: { path: string; content: string } | null;
+    };
+    expect(body.kind).toBe("tree");
+    expect(body.path).toBe("");
+    expect(body.entries.some((entry) => entry.type === "tree" && entry.path === "src")).toBe(true);
+    expect(body.entries.some((entry) => entry.type === "blob" && entry.path === "README.md")).toBe(true);
+    expect(body.readme?.path).toBe("README.md");
+    expect(body.readme?.content).toContain("# Demo");
+  });
+
+  it("returns file preview for blob path", async () => {
+    const bucket = new MockR2Bucket();
+    await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/contents?path=src%2Fapp.txt"),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      kind: "tree" | "blob";
+      path: string;
+      file: {
+        path: string;
+        size: number;
+        isBinary: boolean;
+        truncated: boolean;
+        content: string | null;
+      } | null;
+    };
+    expect(body.kind).toBe("blob");
+    expect(body.path).toBe("src/app.txt");
+    expect(body.file?.path).toBe("src/app.txt");
+    expect(body.file?.isBinary).toBe(false);
+    expect(body.file?.truncated).toBe(false);
+    expect(body.file?.size).toBeGreaterThan(0);
+    expect(body.file?.content).toContain("console.log('hello')");
+  });
+
+  it("returns 400 for invalid repository content path", async () => {
+    const bucket = new MockR2Bucket();
+    await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/contents?path=..%2Fsecret.txt"),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain("Invalid path");
+  });
+
+  it("returns 404 for missing repository content path", async () => {
+    const bucket = new MockR2Bucket();
+    await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/contents?path=missing.ts"),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(404);
+    const body = await response.text();
+    expect(body).toContain("Path not found");
+  });
+
   it("returns upload-pack result with packfile payload", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");

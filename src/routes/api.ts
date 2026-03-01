@@ -3,7 +3,11 @@ import { deleteCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
 import { mustSessionUser, optionalSession, requireSession } from "../middleware/auth";
 import { AuthService } from "../services/auth-service";
-import { RepositoryBrowserService } from "../services/repository-browser-service";
+import {
+  RepositoryBrowserService,
+  RepositoryBrowseInvalidPathError,
+  RepositoryBrowsePathNotFoundError
+} from "../services/repository-browser-service";
 import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
 import type { AppEnv } from "../types";
@@ -362,6 +366,49 @@ router.get("/repos/:owner/:repo/commits", optionalSession, async (c) => {
   const history = await browserService.listCommitHistory(historyInput);
 
   return c.json(history);
+});
+
+router.get("/repos/:owner/:repo/contents", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await repositoryService.findRepository(owner, repo);
+  if (!repository) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const sessionUser = c.get("sessionUser");
+  const canRead = await repositoryService.canReadRepository(repository, sessionUser?.id);
+  if (!canRead) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const browseInput: { owner: string; repo: string; ref?: string; path?: string } = {
+    owner,
+    repo
+  };
+  const browseRef = c.req.query("ref");
+  if (browseRef) {
+    browseInput.ref = browseRef;
+  }
+  const browsePath = c.req.query("path");
+  if (browsePath) {
+    browseInput.path = browsePath;
+  }
+
+  try {
+    const contents = await browserService.browseRepositoryContents(browseInput);
+    return c.json(contents);
+  } catch (error) {
+    if (error instanceof RepositoryBrowseInvalidPathError) {
+      throw new HTTPException(400, { message: "Invalid path" });
+    }
+    if (error instanceof RepositoryBrowsePathNotFoundError) {
+      throw new HTTPException(404, { message: "Path not found" });
+    }
+    throw error;
+  }
 });
 
 router.post("/repos", requireSession, async (c) => {

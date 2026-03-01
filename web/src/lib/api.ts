@@ -45,6 +45,35 @@ export type CommitHistoryResponse = {
   }>;
 };
 
+export type RepositoryTreeEntry = {
+  name: string;
+  path: string;
+  oid: string;
+  mode: string;
+  type: "tree" | "blob" | "commit";
+};
+
+export type RepositoryFilePreview = {
+  path: string;
+  oid: string;
+  mode: string;
+  size: number;
+  isBinary: boolean;
+  truncated: boolean;
+  content: string | null;
+};
+
+export type RepositoryContentsResponse = {
+  defaultBranch: string | null;
+  selectedRef: string | null;
+  headOid: string | null;
+  path: string;
+  kind: "tree" | "blob";
+  entries: RepositoryTreeEntry[];
+  file: RepositoryFilePreview | null;
+  readme: { path: string; content: string } | null;
+};
+
 export type AccessTokenMetadata = {
   id: string;
   token_prefix: string;
@@ -220,6 +249,22 @@ export async function getRepositoryCommits(
   }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return requestJson<CommitHistoryResponse>(`/api/repos/${owner}/${repo}/commits${suffix}`);
+}
+
+export async function getRepositoryContents(
+  owner: string,
+  repo: string,
+  input?: { ref?: string; path?: string }
+): Promise<RepositoryContentsResponse> {
+  const query = new URLSearchParams();
+  if (input?.ref) {
+    query.set("ref", input.ref);
+  }
+  if (input?.path) {
+    query.set("path", input.path);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return requestJson<RepositoryContentsResponse>(`/api/repos/${owner}/${repo}/contents${suffix}`);
 }
 
 export async function listCollaborators(
