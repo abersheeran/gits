@@ -237,4 +237,56 @@ describe("Git smart-http compatibility with git CLI", () => {
     },
     30_000
   );
+
+  it(
+    "supports authenticated git pull from private repositories",
+    async () => {
+      const bucket = new MockR2Bucket();
+      await seedSampleRepositoryToR2(bucket, "alice", "private-pull");
+      const db = createPrivateOwnedRepositoryDb("alice", "private-pull");
+      const env = createEnv(db, bucket as unknown as R2Bucket);
+      vi.spyOn(AuthService.prototype, "verifyAccessToken").mockImplementation(
+        async (token: string) => {
+          if (token === "pat-ok") {
+            return { id: "user-1", username: "alice" };
+          }
+          return null;
+        }
+      );
+
+      const server = await startAppServer(env);
+      const tempRoot = await mkdtemp(join(tmpdir(), "gits-cli-pull-"));
+      const workDir = join(tempRoot, "work");
+      const mirrorDir = join(tempRoot, "mirror");
+
+      try {
+        const remoteUrl = `${server.origin.replace("http://", "http://alice:pat-ok@")}/alice/private-pull.git`;
+        await runGit(["clone", remoteUrl, workDir], tempRoot);
+        const beforePull = (await runGit(["rev-parse", "HEAD"], workDir)).trim();
+
+        await runGit(["clone", remoteUrl, mirrorDir], tempRoot);
+        await runGit(["config", "user.name", "Alice"], mirrorDir);
+        await runGit(["config", "user.email", "alice@example.com"], mirrorDir);
+        const readmePath = join(mirrorDir, "README.md");
+        const readmeContent = await readFile(readmePath, "utf8");
+        await writeFile(readmePath, `${readmeContent}\nupdate from mirror\n`, "utf8");
+        await runGit(["add", "README.md"], mirrorDir);
+        await runGit(["commit", "-m", "update from mirror"], mirrorDir);
+        const pushedCommit = (await runGit(["rev-parse", "HEAD"], mirrorDir)).trim();
+        await runGit(["push", "origin", "main"], mirrorDir);
+
+        await runGit(["pull", "origin", "main"], workDir);
+        const afterPull = (await runGit(["rev-parse", "HEAD"], workDir)).trim();
+        const pulledReadme = await readFile(join(workDir, "README.md"), "utf8");
+
+        expect(afterPull).not.toBe(beforePull);
+        expect(afterPull).toBe(pushedCommit);
+        expect(pulledReadme).toContain("update from mirror");
+      } finally {
+        await server.close();
+        await rm(tempRoot, { recursive: true, force: true });
+      }
+    },
+    30_000
+  );
 });

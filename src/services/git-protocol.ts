@@ -5,10 +5,12 @@ const textDecoder = new TextDecoder();
 
 const OID_REGEX = /^[0-9a-f]{40}$/i;
 const ZERO_OID = "0000000000000000000000000000000000000000";
-const MAX_PKT_LINE_LENGTH = 0xffff;
+// Git pkt-line length field caps at 0xfff0 (65520), not 0xffff.
+const MAX_PKT_LINE_LENGTH = 0xfff0;
 const MAX_REQUEST_PKT_LINES = 20000;
-const SIDE_BAND_PAYLOAD_SIZE = 999;
-const SIDE_BAND_64K_PAYLOAD_SIZE = 65519;
+// side-band payload limits subtract 4-byte pkt header and 1-byte channel marker.
+const SIDE_BAND_PAYLOAD_SIZE = 995;
+const SIDE_BAND_64K_PAYLOAD_SIZE = 65515;
 
 function encodeLength(length: number): Uint8Array {
   return textEncoder.encode(length.toString(16).padStart(4, "0"));

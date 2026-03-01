@@ -304,6 +304,10 @@ export async function computeCommitSetForPack(
 ): Promise<CommitPackSelection> {
   const stopSet = new Set(normalizeOidList(args.commonOids));
   const deepenNotStopSet = await resolveDeepenNotExcludeSet(args, args.deepenNot ?? []);
+  const useShallowBoundaries =
+    args.deepen !== undefined ||
+    args.deepenSince !== undefined ||
+    (args.deepenNot?.length ?? 0) > 0;
   const queue = normalizeOidList(args.wantCommits).map((oid) => ({ oid, depth: 1 }));
   const visited = new Set<string>();
   const shallow = new Set<string>();
@@ -357,7 +361,9 @@ export async function computeCommitSetForPack(
         continue;
       }
       if (stopSet.has(parentOid) || deepenNotStopSet.has(parentOid)) {
-        shallowBoundary = true;
+        if (useShallowBoundaries) {
+          shallowBoundary = true;
+        }
         continue;
       }
 
@@ -385,7 +391,7 @@ export async function computeCommitSetForPack(
       queue.push({ oid: parentOid, depth: next.depth + 1 });
     }
 
-    if (shallowBoundary) {
+    if (useShallowBoundaries && shallowBoundary) {
       shallow.add(next.oid);
     }
   }

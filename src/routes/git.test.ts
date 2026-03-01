@@ -23,6 +23,33 @@ function createEnv(): AppEnv["Bindings"] {
   };
 }
 
+function createPrivateRepositoryEnv(owner: string, repo: string): AppEnv["Bindings"] {
+  return {
+    DB: createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: (params) => {
+          if (params[0] !== owner || params[1] !== repo) {
+            return null;
+          }
+          return {
+            id: "repo-private-1",
+            owner_id: "user-1",
+            owner_username: owner,
+            name: repo,
+            description: "private repo",
+            is_private: 1,
+            created_at: Date.now()
+          };
+        }
+      }
+    ]),
+    GIT_BUCKET: new MockR2Bucket() as unknown as R2Bucket,
+    JWT_SECRET: "test-secret",
+    APP_ORIGIN: "http://localhost:8787"
+  };
+}
+
 describe("Git routes validation", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -35,6 +62,16 @@ describe("Git routes validation", () => {
       createEnv()
     );
     expect(response.status).toBe(400);
+  });
+
+  it("returns 401 challenge for private upload-pack info/refs when credentials are missing", async () => {
+    const app = createApp();
+    const response = await app.fetch(
+      new Request("http://localhost/alice/demo/info/refs?service=git-upload-pack"),
+      createPrivateRepositoryEnv("alice", "demo")
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe('Basic realm="Git service"');
   });
 
   it("returns 415 for upload-pack with invalid content type", async () => {
@@ -50,6 +87,22 @@ describe("Git routes validation", () => {
       createEnv()
     );
     expect(response.status).toBe(415);
+  });
+
+  it("returns 401 challenge for private upload-pack when credentials are missing", async () => {
+    const app = createApp();
+    const response = await app.fetch(
+      new Request("http://localhost/alice/demo/git-upload-pack", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-git-upload-pack-request"
+        },
+        body: "0000"
+      }),
+      createPrivateRepositoryEnv("alice", "demo")
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe('Basic realm="Git service"');
   });
 
   it("returns 413 when upload-pack body exceeds configured limit", async () => {

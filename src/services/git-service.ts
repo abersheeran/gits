@@ -142,6 +142,18 @@ export class GitService {
     private readonly storage: StorageService
   ) {}
 
+  private throwGitAuthChallenge(message: string): never {
+    throw new HTTPException(401, {
+      message,
+      res: new Response("Authentication required", {
+        status: 401,
+        headers: {
+          "WWW-Authenticate": 'Basic realm="Git service"'
+        }
+      })
+    });
+  }
+
   private async resolveRepo(args: RefsArgs | RepoAccessArgs, write = false) {
     const repo = await this.repositories.findRepository(args.owner, args.repo);
     if (!repo) {
@@ -150,6 +162,9 @@ export class GitService {
 
     const canRead = await this.repositories.canReadRepository(repo, args.user?.id);
     if (!canRead) {
+      if (!args.user && repo.is_private !== 0) {
+        this.throwGitAuthChallenge("Authentication required");
+      }
       throw new HTTPException(404, { message: "Repository not found" });
     }
 

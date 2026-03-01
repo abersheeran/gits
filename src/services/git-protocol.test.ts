@@ -54,6 +54,22 @@ function parsePktLines(raw: Uint8Array): ParsedPktLine[] {
   return lines;
 }
 
+function parsePktLineLengths(raw: Uint8Array): number[] {
+  const lengths: number[] = [];
+  let offset = 0;
+  while (offset < raw.length) {
+    const header = new TextDecoder().decode(raw.subarray(offset, offset + 4));
+    const length = Number.parseInt(header, 16);
+    lengths.push(length);
+    offset += 4;
+    if (length === 0) {
+      continue;
+    }
+    offset += length - 4;
+  }
+  return lengths;
+}
+
 describe("git-protocol", () => {
   it("parses upload-pack request lines and options", () => {
     const req = concat(
@@ -120,6 +136,21 @@ describe("git-protocol", () => {
     expect(errLine).toBeTruthy();
     const message = new TextDecoder().decode(errLine?.payload.subarray(1));
     expect(message).toContain("ERR filter unsupported");
+  });
+
+  it("keeps side-band-64k pkt-line lengths within protocol limit", () => {
+    const pack = new Uint8Array(200_000);
+    pack.fill(0x61);
+    const response = buildUploadPackResponse({
+      capabilities: ["side-band-64k"],
+      ackOids: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      packfile: pack
+    });
+
+    const lengths = parsePktLineLengths(response);
+    const nonFlush = lengths.filter((length) => length !== 0);
+    expect(nonFlush.length).toBeGreaterThan(1);
+    expect(nonFlush.every((length) => length <= 0xfff0)).toBe(true);
   });
 
   it("throws when upload-pack request has no wants", () => {
