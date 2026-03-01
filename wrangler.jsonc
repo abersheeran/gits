@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gits",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-28",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "r2_buckets": [
+    {
+      "binding": "GIT_BUCKET",
+      "bucket_name": "git-service-objects"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "git-service",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "src/db/migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

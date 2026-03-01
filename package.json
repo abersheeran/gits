@@ -1,0 +1,31 @@
+{
+  "name": "gits",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run db:migrate:local && wrangler dev --local --env-file .env",
+    "deploy": "wrangler deploy --minify --env-file .env",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "wrangler d1 migrations apply DB",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.888.0",
+    "bcryptjs": "^2.4.3",
+    "hono": "^4.12.3",
+    "isomorphic-git": "^1.35.1",
+    "jose": "^5.10.0",
+    "memfs": "^4.51.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260227.0",
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.4.0"
+  }
+}
