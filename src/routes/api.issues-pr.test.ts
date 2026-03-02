@@ -416,4 +416,170 @@ describe("API issues and pull requests", () => {
     expect(body.reviewSummary.changeRequests).toBe(0);
     expect(body.reviewSummary.comments).toBe(0);
   });
+
+  it("allows marking closing issues when creating pull requests", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+    ]);
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues",
+        all: () => [{ number: 1 }, { number: 2 }]
+      },
+      {
+        when: "state = 'open' AND base_ref = ? AND head_ref = ?",
+        first: () => null
+      },
+      {
+        when: "RETURNING pull_number_seq AS pull_number",
+        first: () => ({ pull_number: 2 })
+      },
+      {
+        when: "INSERT INTO pull_requests",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-2",
+          repository_id: "repo-1",
+          number: 2,
+          author_id: "user-2",
+          author_username: "bob",
+          title: "Close issues",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+          closed_at: null,
+          merged_at: null
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          title: "Close issues",
+          baseRef: "main",
+          headRef: "feature",
+          closeIssueNumbers: [1, 2]
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      closingIssueNumbers: number[];
+    };
+    expect(body.closingIssueNumbers).toEqual([1, 2]);
+  });
+
+  it("auto closes marked issues when pull request is merged", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const closedIssueNumbers: number[] = [];
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "user-2",
+          author_username: "bob",
+          title: "Merge this",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "UPDATE pull_requests",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM pull_request_closing_issues",
+        all: () => [{ issue_number: 1 }, { issue_number: 2 }]
+      },
+      {
+        when: "FROM issues i",
+        first: (params) => ({
+          id: `issue-${params[1]}`,
+          repository_id: "repo-1",
+          number: Number(params[1]),
+          author_id: "owner-1",
+          author_username: "alice",
+          title: `Issue ${params[1]}`,
+          body: "",
+          state: "open",
+          created_at: Date.now(),
+          updated_at: Date.now(),
+          closed_at: null
+        })
+      },
+      {
+        when: "UPDATE issues",
+        run: (params) => {
+          closedIssueNumbers.push(Number(params[4]));
+          return { success: true };
+        }
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          state: "merged"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(closedIssueNumbers.sort((a, b) => a - b)).toEqual([1, 2]);
+  });
 });

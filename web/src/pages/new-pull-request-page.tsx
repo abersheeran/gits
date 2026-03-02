@@ -38,6 +38,7 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   const [body, setBody] = useState("");
   const [baseRef, setBaseRef] = useState("");
   const [headRef, setHeadRef] = useState("");
+  const [closeIssuesInput, setCloseIssuesInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -133,6 +134,18 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
       return;
     }
 
+    const closeIssueNumbers = closeIssuesInput
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .map((item) => item.replace(/^#/, ""))
+      .map((item) => Number.parseInt(item, 10))
+      .filter((item) => Number.isInteger(item) && item > 0);
+    if (closeIssueNumbers.length === 0 && closeIssuesInput.trim().length > 0) {
+      setError("自动关闭 issue 格式无效，请使用 #1,#2 或 1,2");
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -140,7 +153,8 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         title,
         body,
         baseRef,
-        headRef
+        headRef,
+        ...(closeIssueNumbers.length > 0 ? { closeIssueNumbers } : {})
       });
       navigate(`/repo/${owner}/${repo}/pulls/${pullRequest.number}`, { replace: true });
     } catch (submitError) {
@@ -208,6 +222,18 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
               onChange={(event) => setBody(event.target.value)}
               rows={10}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pr-close-issues">合并后自动关闭的 issues</Label>
+            <Input
+              id="pr-close-issues"
+              value={closeIssuesInput}
+              onChange={(event) => setCloseIssuesInput(event.target.value)}
+              placeholder="#1, #2"
+            />
+            <p className="text-xs text-muted-foreground">
+              支持多个，例如 <code>#12,#34</code>。PR merged 时会自动关闭这些 issue。
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={submitting}>

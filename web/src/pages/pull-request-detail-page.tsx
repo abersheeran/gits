@@ -38,6 +38,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [reviews, setReviews] = useState<PullRequestReviewRecord[]>([]);
+  const [closingIssueNumbers, setClosingIssueNumbers] = useState<number[]>([]);
   const [reviewSummary, setReviewSummary] = useState<PullRequestReviewSummary>({
     approvals: 0,
     changeRequests: 0,
@@ -59,7 +60,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextPullRequest, nextReviews] = await Promise.all([
+        const [nextDetail, nextPullRequestDetail, nextReviews] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getPullRequest(owner, repo, number),
           listPullRequestReviews(owner, repo, number)
@@ -68,7 +69,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           return;
         }
         setDetail(nextDetail);
-        setPullRequest(nextPullRequest);
+        setPullRequest(nextPullRequestDetail.pullRequest);
+        setClosingIssueNumbers(nextPullRequestDetail.closingIssueNumbers);
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
       } catch (loadError) {
@@ -112,7 +114,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReview = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
 
-  async function changeState(nextState: "open" | "closed") {
+  async function changeState(nextState: "open" | "closed" | "merged") {
     if (updating) {
       return;
     }
@@ -123,6 +125,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         state: nextState
       });
       setPullRequest(updated);
+      if (nextState === "merged") {
+        const next = await getPullRequest(owner, repo, number);
+        setClosingIssueNumbers(next.closingIssueNumbers);
+      }
     } catch (updateError) {
       setError(formatApiError(updateError));
     } finally {
@@ -180,6 +186,20 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <Badge variant="outline">Changes requested: {reviewSummary.changeRequests}</Badge>
           <Badge variant="outline">Comments: {reviewSummary.comments}</Badge>
         </div>
+        {closingIssueNumbers.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Will close on merge:</span>
+            {closingIssueNumbers.map((issueNumber) => (
+              <Link
+                key={issueNumber}
+                className="text-[#0969da] hover:underline"
+                to={`/repo/${owner}/${repo}/issues/${issueNumber}`}
+              >
+                #{issueNumber}
+              </Link>
+            ))}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
             <Link to={`/repo/${owner}/${repo}/pulls`}>返回 Pull requests</Link>
@@ -193,6 +213,16 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               }}
             >
               {pullRequest.state === "open" ? "Close pull request" : "Reopen pull request"}
+            </Button>
+          ) : null}
+          {canUpdate && pullRequest.state === "open" ? (
+            <Button
+              disabled={updating}
+              onClick={() => {
+                void changeState("merged");
+              }}
+            >
+              Merge pull request
             </Button>
           ) : null}
         </div>

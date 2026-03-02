@@ -62,12 +62,14 @@ type CreatePullRequestInput = {
   body?: string;
   baseRef: string;
   headRef: string;
+  closeIssueNumbers?: number[];
 };
 
 type UpdatePullRequestInput = {
   title?: string;
   body?: string;
   state?: PullRequestState;
+  closeIssueNumbers?: number[];
 };
 
 type CreatePullRequestReviewInput = {
@@ -233,6 +235,25 @@ function assertPositiveInteger(value: string, field: string): number {
     throw new HTTPException(400, { message: `Field '${field}' must be a positive integer` });
   }
   return parsed;
+}
+
+function assertOptionalIssueNumberArray(value: unknown, field: string): number[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new HTTPException(400, { message: `Field '${field}' must be an array` });
+  }
+  const numbers: number[] = [];
+  for (const item of value) {
+    if (!Number.isInteger(item) || item <= 0) {
+      throw new HTTPException(400, {
+        message: `Field '${field}' must contain positive integers`
+      });
+    }
+    numbers.push(item);
+  }
+  return Array.from(new Set(numbers)).sort((a, b) => a - b);
 }
 
 function normalizeBranchRef(value: unknown, field: string): string {
@@ -716,8 +737,11 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
   if (!pullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
-  const reviewSummary = await pullRequestService.summarizePullRequestReviews(repository.id, number);
-  return c.json({ pullRequest, reviewSummary });
+  const [reviewSummary, closingIssueNumbers] = await Promise.all([
+    pullRequestService.summarizePullRequestReviews(repository.id, number),
+    pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
+  ]);
+  return c.json({ pullRequest, reviewSummary, closingIssueNumbers });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number/reviews", optionalSession, async (c) => {
@@ -804,6 +828,10 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
   if (payload.body !== undefined) {
     input.body = assertOptionalString(payload.body, "body") ?? "";
   }
+  const closeIssueNumbers = assertOptionalIssueNumberArray(payload.closeIssueNumbers, "closeIssueNumbers");
+  if (closeIssueNumbers !== undefined) {
+    input.closeIssueNumbers = closeIssueNumbers;
+  }
   if (input.baseRef === input.headRef) {
     throw new HTTPException(400, { message: "Field 'headRef' must differ from 'baseRef'" });
   }
@@ -836,6 +864,17 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
   }
 
   const pullRequestService = new PullRequestService(c.env.DB);
+  const issueService = new IssueService(c.env.DB);
+  if (input.closeIssueNumbers && input.closeIssueNumbers.length > 0) {
+    const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, input.closeIssueNumbers);
+    if (existingIssueNumbers.length !== input.closeIssueNumbers.length) {
+      const existingSet = new Set(existingIssueNumbers);
+      const missing = input.closeIssueNumbers.filter((item) => !existingSet.has(item));
+      throw new HTTPException(404, {
+        message: `Issues not found: ${missing.map((item) => `#${item}`).join(", ")}`
+      });
+    }
+  }
   try {
     const pullRequest = await pullRequestService.createPullRequest({
       repositoryId: repository.id,
@@ -847,7 +886,13 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
       baseOid: baseRef.oid,
       headOid: headRef.oid
     });
-    return c.json({ pullRequest }, 201);
+    const closingIssueNumbers = await pullRequestService.replacePullRequestClosingIssueNumbers({
+      repositoryId: repository.id,
+      pullRequestId: pullRequest.id,
+      pullRequestNumber: pullRequest.number,
+      issueNumbers: input.closeIssueNumbers ?? []
+    });
+    return c.json({ pullRequest, closingIssueNumbers }, 201);
   } catch (error) {
     if (error instanceof DuplicateOpenPullRequestError) {
       throw new HTTPException(409, { message: error.message });
@@ -868,16 +913,20 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
   if (payload.body !== undefined) {
     patch.body = assertOptionalString(payload.body, "body") ?? "";
   }
+  const closeIssueNumbers = assertOptionalIssueNumberArray(payload.closeIssueNumbers, "closeIssueNumbers");
+  if (closeIssueNumbers !== undefined) {
+    patch.closeIssueNumbers = closeIssueNumbers;
+  }
   if (payload.state !== undefined) {
     const nextState = assertPullRequestState(payload.state);
-    if (nextState === "merged") {
-      throw new HTTPException(400, {
-        message: "Merging pull requests is not supported yet"
-      });
-    }
     patch.state = nextState;
   }
-  if (patch.title === undefined && patch.body === undefined && patch.state === undefined) {
+  if (
+    patch.title === undefined &&
+    patch.body === undefined &&
+    patch.state === undefined &&
+    patch.closeIssueNumbers === undefined
+  ) {
     throw new HTTPException(400, { message: "No updatable fields provided" });
   }
 
@@ -898,11 +947,37 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
   }
 
   const pullRequestService = new PullRequestService(c.env.DB);
+  const issueService = new IssueService(c.env.DB);
+  const existingPullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  if (!existingPullRequest) {
+    throw new HTTPException(404, { message: "Pull request not found" });
+  }
+  if (patch.closeIssueNumbers !== undefined) {
+    const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, patch.closeIssueNumbers);
+    if (existingIssueNumbers.length !== patch.closeIssueNumbers.length) {
+      const existingSet = new Set(existingIssueNumbers);
+      const missing = patch.closeIssueNumbers.filter((item) => !existingSet.has(item));
+      throw new HTTPException(404, {
+        message: `Issues not found: ${missing.map((item) => `#${item}`).join(", ")}`
+      });
+    }
+    await pullRequestService.replacePullRequestClosingIssueNumbers({
+      repositoryId: repository.id,
+      pullRequestId: existingPullRequest.id,
+      pullRequestNumber: number,
+      issueNumbers: patch.closeIssueNumbers
+    });
+  }
+
   const pullRequest = await pullRequestService.updatePullRequest(repository.id, number, patch);
   if (!pullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
-  return c.json({ pullRequest });
+  const closingIssueNumbers = await pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number);
+  if (patch.state === "merged" && closingIssueNumbers.length > 0) {
+    await issueService.closeIssuesByNumbers(repository.id, closingIssueNumbers);
+  }
+  return c.json({ pullRequest, closingIssueNumbers });
 });
 
 router.post("/repos", requireSession, async (c) => {

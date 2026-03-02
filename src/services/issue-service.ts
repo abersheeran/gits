@@ -5,6 +5,10 @@ export type IssueListState = IssueState | "all";
 export class IssueService {
   constructor(private readonly db: D1Database) {}
 
+  private normalizeIssueNumbers(numbers: number[]): number[] {
+    return Array.from(new Set(numbers)).sort((a, b) => a - b);
+  }
+
   private async nextIssueNumber(repositoryId: string): Promise<number> {
     const row = await this.db
       .prepare(
@@ -204,5 +208,35 @@ export class IssueService {
       .first<{ count: number }>();
 
     return Number(row?.count ?? 0);
+  }
+
+  async listIssueNumbers(repositoryId: string, numbers: number[]): Promise<number[]> {
+    const normalized = this.normalizeIssueNumbers(numbers);
+    if (normalized.length === 0) {
+      return [];
+    }
+
+    const placeholders = normalized.map(() => "?").join(", ");
+    const rows = await this.db
+      .prepare(
+        `SELECT number
+         FROM issues
+         WHERE repository_id = ? AND number IN (${placeholders})`
+      )
+      .bind(repositoryId, ...normalized)
+      .all<{ number: number }>();
+
+    return rows.results.map((item) => item.number).sort((a, b) => a - b);
+  }
+
+  async closeIssuesByNumbers(repositoryId: string, numbers: number[]): Promise<void> {
+    const normalized = this.normalizeIssueNumbers(numbers);
+    for (const issueNumber of normalized) {
+      const issue = await this.findIssueByNumber(repositoryId, issueNumber);
+      if (!issue || issue.state === "closed") {
+        continue;
+      }
+      await this.updateIssue(repositoryId, issueNumber, { state: "closed" });
+    }
   }
 }

@@ -17,6 +17,10 @@ export class DuplicateOpenPullRequestError extends Error {
 export class PullRequestService {
   constructor(private readonly db: D1Database) {}
 
+  private normalizeIssueNumbers(numbers: number[]): number[] {
+    return Array.from(new Set(numbers)).sort((a, b) => a - b);
+  }
+
   private async nextPullRequestNumber(repositoryId: string): Promise<number> {
     const row = await this.db
       .prepare(
@@ -396,5 +400,68 @@ export class PullRequestService {
       throw new Error("Created pull request review not found");
     }
     return created;
+  }
+
+  async listPullRequestClosingIssueNumbers(
+    repositoryId: string,
+    pullRequestNumber: number
+  ): Promise<number[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT issue_number
+         FROM pull_request_closing_issues
+         WHERE repository_id = ? AND pull_request_number = ?
+         ORDER BY issue_number ASC`
+      )
+      .bind(repositoryId, pullRequestNumber)
+      .all<{ issue_number: number }>();
+
+    return rows.results.map((item) => item.issue_number);
+  }
+
+  async replacePullRequestClosingIssueNumbers(input: {
+    repositoryId: string;
+    pullRequestId: string;
+    pullRequestNumber: number;
+    issueNumbers: number[];
+  }): Promise<number[]> {
+    await this.db
+      .prepare(
+        `DELETE FROM pull_request_closing_issues
+         WHERE repository_id = ? AND pull_request_id = ?`
+      )
+      .bind(input.repositoryId, input.pullRequestId)
+      .run();
+
+    const issueNumbers = this.normalizeIssueNumbers(input.issueNumbers);
+    if (issueNumbers.length === 0) {
+      return [];
+    }
+
+    const now = Date.now();
+    for (const issueNumber of issueNumbers) {
+      await this.db
+        .prepare(
+          `INSERT INTO pull_request_closing_issues (
+            id,
+            repository_id,
+            pull_request_id,
+            pull_request_number,
+            issue_number,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          crypto.randomUUID(),
+          input.repositoryId,
+          input.pullRequestId,
+          input.pullRequestNumber,
+          issueNumber,
+          now
+        )
+        .run();
+    }
+
+    return issueNumbers;
   }
 }

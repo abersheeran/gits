@@ -140,6 +140,12 @@ export type PullRequestRecord = {
   merged_at: number | null;
 };
 
+export type PullRequestDetailResponse = {
+  pullRequest: PullRequestRecord;
+  reviewSummary: PullRequestReviewSummary;
+  closingIssueNumbers: number[];
+};
+
 export type PullRequestReviewRecord = {
   id: string;
   repository_id: string;
@@ -415,19 +421,24 @@ export async function getPullRequest(
   owner: string,
   repo: string,
   number: number
-): Promise<PullRequestRecord> {
-  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+): Promise<PullRequestDetailResponse> {
+  return requestJson<PullRequestDetailResponse>(
     `/api/repos/${owner}/${repo}/pulls/${number}`
   );
-  return response.pullRequest;
 }
 
 export async function createPullRequest(
   owner: string,
   repo: string,
-  input: { title: string; body?: string; baseRef: string; headRef: string }
+  input: {
+    title: string;
+    body?: string;
+    baseRef: string;
+    headRef: string;
+    closeIssueNumbers?: number[];
+  }
 ): Promise<PullRequestRecord> {
-  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+  const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
     `/api/repos/${owner}/${repo}/pulls`,
     {
       method: "POST",
@@ -441,9 +452,14 @@ export async function updatePullRequest(
   owner: string,
   repo: string,
   number: number,
-  input: { title?: string; body?: string; state?: PullRequestState }
+  input: {
+    title?: string;
+    body?: string;
+    state?: PullRequestState;
+    closeIssueNumbers?: number[];
+  }
 ): Promise<PullRequestRecord> {
-  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+  const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
     `/api/repos/${owner}/${repo}/pulls/${number}`,
     {
       method: "PATCH",
