@@ -17,6 +17,11 @@ export type RepositoryRecord = {
 
 export type RepositoryDetailResponse = {
   repository: RepositoryRecord;
+  openIssueCount: number;
+  openPullRequestCount: number;
+  permissions: {
+    canCreateIssueOrPullRequest: boolean;
+  };
   defaultBranch: string | null;
   selectedRef: string | null;
   headOid: string | null;
@@ -89,6 +94,68 @@ export type CollaboratorRecord = {
   username: string;
   permission: CollaboratorPermission;
   created_at: number;
+};
+
+export type IssueState = "open" | "closed";
+
+export type PullRequestState = "open" | "closed" | "merged";
+
+export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
+
+export type IssueListState = IssueState | "all";
+
+export type PullRequestListState = PullRequestState | "all";
+
+export type IssueRecord = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  body: string;
+  state: IssueState;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+};
+
+export type PullRequestRecord = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  body: string;
+  state: PullRequestState;
+  base_ref: string;
+  head_ref: string;
+  base_oid: string;
+  head_oid: string;
+  merge_commit_oid: string | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  merged_at: number | null;
+};
+
+export type PullRequestReviewRecord = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  reviewer_id: string;
+  reviewer_username: string;
+  decision: PullRequestReviewDecision;
+  body: string;
+  created_at: number;
+};
+
+export type PullRequestReviewSummary = {
+  approvals: number;
+  changeRequests: number;
+  comments: number;
 };
 
 type ApiRequestInit = RequestInit & {
@@ -265,6 +332,150 @@ export async function getRepositoryContents(
   }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return requestJson<RepositoryContentsResponse>(`/api/repos/${owner}/${repo}/contents${suffix}`);
+}
+
+export async function listIssues(
+  owner: string,
+  repo: string,
+  input?: { state?: IssueListState; limit?: number }
+): Promise<IssueRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.state) {
+    query.set("state", input.state);
+  }
+  if (input?.limit) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await requestJson<{ issues: IssueRecord[] }>(
+    `/api/repos/${owner}/${repo}/issues${suffix}`
+  );
+  return response.issues;
+}
+
+export async function getIssue(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<IssueRecord> {
+  const response = await requestJson<{ issue: IssueRecord }>(
+    `/api/repos/${owner}/${repo}/issues/${number}`
+  );
+  return response.issue;
+}
+
+export async function createIssue(
+  owner: string,
+  repo: string,
+  input: { title: string; body?: string }
+): Promise<IssueRecord> {
+  const response = await requestJson<{ issue: IssueRecord }>(`/api/repos/${owner}/${repo}/issues`, {
+    method: "POST",
+    bodyJson: input
+  });
+  return response.issue;
+}
+
+export async function updateIssue(
+  owner: string,
+  repo: string,
+  number: number,
+  input: { title?: string; body?: string; state?: IssueState }
+): Promise<IssueRecord> {
+  const response = await requestJson<{ issue: IssueRecord }>(
+    `/api/repos/${owner}/${repo}/issues/${number}`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
+  return response.issue;
+}
+
+export async function listPullRequests(
+  owner: string,
+  repo: string,
+  input?: { state?: PullRequestListState; limit?: number }
+): Promise<PullRequestRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.state) {
+    query.set("state", input.state);
+  }
+  if (input?.limit) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await requestJson<{ pullRequests: PullRequestRecord[] }>(
+    `/api/repos/${owner}/${repo}/pulls${suffix}`
+  );
+  return response.pullRequests;
+}
+
+export async function getPullRequest(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<PullRequestRecord> {
+  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}`
+  );
+  return response.pullRequest;
+}
+
+export async function createPullRequest(
+  owner: string,
+  repo: string,
+  input: { title: string; body?: string; baseRef: string; headRef: string }
+): Promise<PullRequestRecord> {
+  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+    `/api/repos/${owner}/${repo}/pulls`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.pullRequest;
+}
+
+export async function updatePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  input: { title?: string; body?: string; state?: PullRequestState }
+): Promise<PullRequestRecord> {
+  const response = await requestJson<{ pullRequest: PullRequestRecord }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
+  return response.pullRequest;
+}
+
+export async function listPullRequestReviews(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<{ reviews: PullRequestReviewRecord[]; reviewSummary: PullRequestReviewSummary }> {
+  return requestJson<{ reviews: PullRequestReviewRecord[]; reviewSummary: PullRequestReviewSummary }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/reviews`
+  );
+}
+
+export async function createPullRequestReview(
+  owner: string,
+  repo: string,
+  number: number,
+  input: { decision: PullRequestReviewDecision; body?: string }
+): Promise<{ review: PullRequestReviewRecord; reviewSummary: PullRequestReviewSummary }> {
+  return requestJson<{ review: PullRequestReviewRecord; reviewSummary: PullRequestReviewSummary }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/reviews`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
 }
 
 export async function listCollaborators(

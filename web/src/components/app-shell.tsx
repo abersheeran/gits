@@ -55,9 +55,8 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
       <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex min-h-16 w-[min(1080px,92vw)] items-center justify-between gap-3">
           <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight">
-            <span className="inline-grid h-7 min-w-7 place-content-center rounded-md bg-primary px-1 text-primary-foreground">
-              gits
-            </span>
+            <img src="/logo.svg" alt="gits logo" className="h-7 w-7 rounded-md" />
+            <span>gits</span>
           </Link>
           <nav className="flex flex-wrap items-center gap-2">
             <Button variant={navVariant(isExploreActive)} asChild>

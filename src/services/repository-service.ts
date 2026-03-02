@@ -1,7 +1,24 @@
-import type { RepositoryRecord } from "../types";
+import type { CollaboratorPermission, RepositoryRecord } from "../types";
 
 export class RepositoryService {
   constructor(private readonly db: D1Database) {}
+
+  async findCollaboratorPermission(
+    repositoryId: string,
+    userId: string
+  ): Promise<CollaboratorPermission | null> {
+    const membership = await this.db
+      .prepare(
+        `SELECT permission
+         FROM repository_collaborators
+         WHERE repository_id = ? AND user_id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, userId)
+      .first<{ permission: CollaboratorPermission }>();
+
+    return membership?.permission ?? null;
+  }
 
   async listPublicRepositories(limit = 50): Promise<RepositoryRecord[]> {
     const rows = await this.db
@@ -111,17 +128,19 @@ export class RepositoryService {
       return true;
     }
 
-    const membership = await this.db
-      .prepare(
-        `SELECT permission
-         FROM repository_collaborators
-         WHERE repository_id = ? AND user_id = ?
-         LIMIT 1`
-      )
-      .bind(repo.id, userId)
-      .first<{ permission: string }>();
+    const permission = await this.findCollaboratorPermission(repo.id, userId);
+    return permission !== null;
+  }
 
-    return Boolean(membership);
+  async isOwnerOrCollaborator(repo: RepositoryRecord, userId?: string): Promise<boolean> {
+    if (!userId) {
+      return false;
+    }
+    if (repo.owner_id === userId) {
+      return true;
+    }
+    const permission = await this.findCollaboratorPermission(repo.id, userId);
+    return permission !== null;
   }
 
   async canWriteRepository(repo: RepositoryRecord, userId?: string): Promise<boolean> {
@@ -133,17 +152,8 @@ export class RepositoryService {
       return true;
     }
 
-    const membership = await this.db
-      .prepare(
-        `SELECT permission
-         FROM repository_collaborators
-         WHERE repository_id = ? AND user_id = ?
-         LIMIT 1`
-      )
-      .bind(repo.id, userId)
-      .first<{ permission: string }>();
-
-    return membership?.permission === "write" || membership?.permission === "admin";
+    const permission = await this.findCollaboratorPermission(repo.id, userId);
+    return permission === "write" || permission === "admin";
   }
 
   async canAdminRepository(repo: RepositoryRecord, userId?: string): Promise<boolean> {
@@ -155,17 +165,8 @@ export class RepositoryService {
       return true;
     }
 
-    const membership = await this.db
-      .prepare(
-        `SELECT permission
-         FROM repository_collaborators
-         WHERE repository_id = ? AND user_id = ?
-         LIMIT 1`
-      )
-      .bind(repo.id, userId)
-      .first<{ permission: string }>();
-
-    return membership?.permission === "admin";
+    const permission = await this.findCollaboratorPermission(repo.id, userId);
+    return permission === "admin";
   }
 
   async findUserByUsername(username: string): Promise<{ id: string; username: string } | null> {

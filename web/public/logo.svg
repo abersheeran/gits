@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 70 260 260" width="400" height="400">
+  <defs>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF"/>
+      <stop offset="100%" stop-color="#0055FF"/>
+    </linearGradient>
+
+    <linearGradient id="markGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#A0C0E0"/>
+    </linearGradient>
+
+    <filter id="dotglow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="10" result="b1"/>
+      <feGaussianBlur stdDeviation="20" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="lineglow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="stemglow" x="-60%" y="-5%" width="220%" height="110%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="ambglow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+
+    <clipPath id="sq">
+      <rect width="400" height="400" rx="80"/>
+    </clipPath>
+  </defs>
+
+  <rect width="400" height="400" rx="80" fill="#090E18"/>
+
+  <circle cx="200" cy="128" r="60" fill="#00AAFF" opacity="0.18" filter="url(#ambglow)" clip-path="url(#sq)"/>
+
+  <circle cx="200" cy="128" r="32" fill="none" stroke="#00E5FF" stroke-width="1" opacity="0.15"/>
+  <circle cx="200" cy="128" r="23" fill="none" stroke="#00CCFF" stroke-width="1.2" opacity="0.3"/>
+  <circle cx="200" cy="128" r="15" fill="none" stroke="#00EEFF" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="200" cy="128" r="10" fill="url(#cyanGrad)" filter="url(#dotglow)"/>
+  <circle cx="196" cy="124" r="3.5" fill="white" opacity="0.65"/>
+
+  <rect x="194" y="148" width="12" height="98" rx="6" fill="url(#markGrad)" filter="url(#stemglow)"/>
+
+  <circle cx="200" cy="222" r="7" fill="url(#markGrad)"/>
+
+  <path d="M 200 222 C 200 248 138 248 138 274" fill="none" stroke="url(#markGrad)" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 200 222 C 200 248 262 248 262 274" fill="none" stroke="url(#markGrad)" stroke-width="9" stroke-linecap="round"/>
+
+  <circle cx="138" cy="282" r="11" fill="url(#cyanGrad)" filter="url(#dotglow)"/>
+  <circle cx="262" cy="282" r="11" fill="url(#markGrad)"/>
+
+  <circle cx="138" cy="282" r="18" fill="none" stroke="#00E5FF" stroke-width="1" opacity="0.35" filter="url(#lineglow)"/>
+
+  <rect width="400" height="400" rx="80" fill="none" stroke="#ffffff08" stroke-width="2"/>
+</svg>

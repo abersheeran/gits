@@ -1,0 +1,224 @@
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  createPullRequest,
+  formatApiError,
+  getRepositoryDetail,
+  type AuthUser,
+  type RepositoryDetailResponse
+} from "@/lib/api";
+
+type NewPullRequestPageProps = {
+  user: AuthUser | null;
+};
+
+export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
+  const navigate = useNavigate();
+  const params = useParams<{ owner: string; repo: string }>();
+  const owner = params.owner ?? "";
+  const repo = params.repo ?? "";
+
+  const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [baseRef, setBaseRef] = useState("");
+  const [headRef, setHeadRef] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let canceled = false;
+
+    async function load() {
+      if (!owner || !repo) {
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const nextDetail = await getRepositoryDetail(owner, repo);
+        if (canceled) {
+          return;
+        }
+        setDetail(nextDetail);
+        const defaultBase =
+          nextDetail.defaultBranch && nextDetail.branches.some((item) => item.name === nextDetail.defaultBranch)
+            ? nextDetail.defaultBranch
+            : nextDetail.branches[0]?.name ?? "";
+        const defaultHead =
+          nextDetail.branches.find((item) => item.name !== defaultBase)?.name ??
+          nextDetail.branches[0]?.name ??
+          "";
+        setBaseRef(defaultBase);
+        setHeadRef(defaultHead);
+      } catch (loadError) {
+        if (!canceled) {
+          setError(formatApiError(loadError));
+        }
+      } finally {
+        if (!canceled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      canceled = true;
+    };
+  }, [owner, repo]);
+
+  const branchNames = useMemo(() => detail?.branches.map((item) => item.name) ?? [], [detail]);
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!owner || !repo) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>参数错误</AlertTitle>
+        <AlertDescription>仓库路径不完整。</AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>加载失败</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (loading || !detail) {
+    return <p className="text-sm text-muted-foreground">正在加载仓库信息...</p>;
+  }
+
+  if (!detail.permissions.canCreateIssueOrPullRequest) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>无权限</AlertTitle>
+        <AlertDescription>只有仓库 owner 或 collaborator 可创建 pull request。</AlertDescription>
+      </Alert>
+    );
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting) {
+      return;
+    }
+    if (!baseRef || !headRef) {
+      setError("请选择 base 与 head 分支。");
+      return;
+    }
+    if (baseRef === headRef) {
+      setError("base 与 head 必须不同。");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const pullRequest = await createPullRequest(owner, repo, {
+        title,
+        body,
+        baseRef,
+        headRef
+      });
+      navigate(`/repo/${owner}/${repo}/pulls/${pullRequest.number}`, { replace: true });
+    } catch (submitError) {
+      setError(formatApiError(submitError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>New pull request · {owner}/{repo}</CardTitle>
+        <CardDescription>选择分支并创建 PR。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>提交失败</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pr-base-ref">Base branch</Label>
+              <Select value={baseRef} onValueChange={setBaseRef}>
+                <SelectTrigger id="pr-base-ref">
+                  <SelectValue placeholder="选择 base 分支" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchNames.map((branchName) => (
+                    <SelectItem key={`base-${branchName}`} value={branchName}>
+                      {branchName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pr-head-ref">Head branch</Label>
+              <Select value={headRef} onValueChange={setHeadRef}>
+                <SelectTrigger id="pr-head-ref">
+                  <SelectValue placeholder="选择 head 分支" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchNames.map((branchName) => (
+                    <SelectItem key={`head-${branchName}`} value={branchName}>
+                      {branchName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pr-title">标题</Label>
+            <Input id="pr-title" value={title} onChange={(event) => setTitle(event.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pr-body">描述</Label>
+            <Textarea
+              id="pr-body"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              rows={10}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "提交中..." : "Create pull request"}
+            </Button>
+            <Button variant="ghost" asChild>
+              <Link to={`/repo/${owner}/${repo}/pulls`}>返回列表</Link>
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

@@ -564,16 +564,26 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
           <Code2 className="h-4 w-4" />
           Code
         </Link>
-        <span className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground">
+        <Link
+          to={`/repo/${owner}/${repo}/issues`}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+        >
           <MessageSquareText className="h-4 w-4" />
           Issues
-          <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">0</span>
-        </span>
-        <span className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground">
+          <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
+            {detail.openIssueCount}
+          </span>
+        </Link>
+        <Link
+          to={`/repo/${owner}/${repo}/pulls`}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+        >
           <GitPullRequest className="h-4 w-4" />
           Pull requests
-          <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">0</span>
-        </span>
+          <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
+            {detail.openPullRequestCount}
+          </span>
+        </Link>
       </nav>
 
       <section className="rounded-md border">

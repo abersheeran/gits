@@ -4,11 +4,17 @@ import { AppShell } from "@/components/app-shell";
 import { getCurrentUser, type AuthUser } from "@/lib/api";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { HomePage } from "@/pages/home-page";
+import { IssueDetailPage } from "@/pages/issue-detail-page";
 import { LoginPage } from "@/pages/login-page";
+import { NewIssuePage } from "@/pages/new-issue-page";
+import { NewPullRequestPage } from "@/pages/new-pull-request-page";
 import { NewRepositoryPage } from "@/pages/new-repository-page";
+import { PullRequestDetailPage } from "@/pages/pull-request-detail-page";
 import { RegisterPage } from "@/pages/register-page";
 import { RepositoryCollaboratorsPage } from "@/pages/repository-collaborators-page";
+import { RepositoryIssuesPage } from "@/pages/repository-issues-page";
 import { RepositoryPage } from "@/pages/repository-page";
+import { RepositoryPullsPage } from "@/pages/repository-pulls-page";
 import { RepositorySettingsPage } from "@/pages/repository-settings-page";
 import { TokensPage } from "@/pages/tokens-page";
 
@@ -22,6 +28,42 @@ function formatRepositoryName(owner?: string, repo?: string): string {
 }
 
 function titleForPath(pathname: string): string {
+  const newIssue = matchPath("/repo/:owner/:repo/issues/new", pathname);
+  if (newIssue) {
+    const repository = formatRepositoryName(newIssue.params.owner, newIssue.params.repo);
+    return `New Issue · ${repository} · ${APP_NAME}`;
+  }
+
+  const issueDetail = matchPath("/repo/:owner/:repo/issues/:number", pathname);
+  if (issueDetail) {
+    const repository = formatRepositoryName(issueDetail.params.owner, issueDetail.params.repo);
+    return `Issue #${issueDetail.params.number} · ${repository} · ${APP_NAME}`;
+  }
+
+  const issues = matchPath("/repo/:owner/:repo/issues", pathname);
+  if (issues) {
+    const repository = formatRepositoryName(issues.params.owner, issues.params.repo);
+    return `Issues · ${repository} · ${APP_NAME}`;
+  }
+
+  const newPullRequest = matchPath("/repo/:owner/:repo/pulls/new", pathname);
+  if (newPullRequest) {
+    const repository = formatRepositoryName(newPullRequest.params.owner, newPullRequest.params.repo);
+    return `New Pull Request · ${repository} · ${APP_NAME}`;
+  }
+
+  const pullRequestDetail = matchPath("/repo/:owner/:repo/pulls/:number", pathname);
+  if (pullRequestDetail) {
+    const repository = formatRepositoryName(pullRequestDetail.params.owner, pullRequestDetail.params.repo);
+    return `Pull Request #${pullRequestDetail.params.number} · ${repository} · ${APP_NAME}`;
+  }
+
+  const pulls = matchPath("/repo/:owner/:repo/pulls", pathname);
+  if (pulls) {
+    const repository = formatRepositoryName(pulls.params.owner, pulls.params.repo);
+    return `Pull Requests · ${repository} · ${APP_NAME}`;
+  }
+
   const repoSettings = matchPath("/repo/:owner/:repo/settings", pathname);
   if (repoSettings) {
     const repository = formatRepositoryName(repoSettings.params.owner, repoSettings.params.repo);
@@ -107,6 +149,15 @@ function App() {
         <Route
           path="/repo/:owner/:repo/collaborators"
           element={<RepositoryCollaboratorsPage user={user} />}
+        />
+        <Route path="/repo/:owner/:repo/issues" element={<RepositoryIssuesPage user={user} />} />
+        <Route path="/repo/:owner/:repo/issues/new" element={<NewIssuePage user={user} />} />
+        <Route path="/repo/:owner/:repo/issues/:number" element={<IssueDetailPage user={user} />} />
+        <Route path="/repo/:owner/:repo/pulls" element={<RepositoryPullsPage user={user} />} />
+        <Route path="/repo/:owner/:repo/pulls/new" element={<NewPullRequestPage user={user} />} />
+        <Route
+          path="/repo/:owner/:repo/pulls/:number"
+          element={<PullRequestDetailPage user={user} />}
         />
         <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
         <Route path="/repo/:owner/:repo/:kind/:ref/*" element={<RepositoryPage user={user} />} />
