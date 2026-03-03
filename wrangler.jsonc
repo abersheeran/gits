@@ -1,68 +1,68 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gits",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-02-28",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "containers": [
-    {
-      "class_name": "ActionsContainer",
-      "image": "./containers/actions-runner/Dockerfile",
-      "max_instances": 10
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "ACTIONS_RUNNER",
-        "class_name": "ActionsContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "actions-container-v1",
-      "new_sqlite_classes": [
-        "ActionsContainer"
-      ]
-    }
-  ],
-  "assets": {
-    "directory": "./web/dist",
-    "binding": "ASSETS"
-  },
-  "r2_buckets": [
-    {
-      "binding": "GIT_BUCKET",
-      "bucket_name": "gits"
-    }
-  ],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "gits",
-      "database_id": "ba88136f-88d3-4b71-95f4-682ffcf1cf72",
-      "migrations_dir": "src/db/migrations"
-    }
-  ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "ACTIONS_QUEUE",
-        "queue": "gits-actions"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "gits-actions",
-        "max_batch_size": 10,
-        "max_batch_timeout": 5
-      }
-    ]
-  },
-  "observability": {
-    "enabled": true
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gits",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-02-28",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"containers": [
+		{
+			"class_name": "ActionsContainer",
+			"image": "./containers/actions-runner/Dockerfile",
+			"max_instances": 10
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "ACTIONS_RUNNER",
+				"class_name": "ActionsContainer"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "actions-container-v1",
+			"new_sqlite_classes": [
+				"ActionsContainer"
+			]
+		}
+	],
+	"assets": {
+		"directory": "./web/dist",
+		"binding": "ASSETS"
+	},
+	"r2_buckets": [
+		{
+			"binding": "GIT_BUCKET",
+			"bucket_name": "gits"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "gits",
+			"database_id": "ba88136f-88d3-4b71-95f4-682ffcf1cf72",
+			"migrations_dir": "src/db/migrations"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "ACTIONS_QUEUE",
+				"queue": "gits-actions"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "gits-actions",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5
+			}
+		]
+	},
+	"observability": {
+		"enabled": true
+	}
 }
