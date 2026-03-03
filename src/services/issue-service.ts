@@ -1,4 +1,4 @@
-import type { IssueRecord, IssueState } from "../types";
+import type { IssueCommentRecord, IssueRecord, IssueState } from "../types";
 
 export type IssueListState = IssueState | "all";
 
@@ -109,6 +109,29 @@ export class IssueService {
     return row ?? null;
   }
 
+  async listIssueComments(repositoryId: string, issueNumber: number): Promise<IssueCommentRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          c.id,
+          c.repository_id,
+          c.issue_id,
+          c.issue_number,
+          c.author_id,
+          u.username AS author_username,
+          c.body,
+          c.created_at,
+          c.updated_at
+         FROM issue_comments c
+         JOIN users u ON u.id = c.author_id
+         WHERE c.repository_id = ? AND c.issue_number = ?
+         ORDER BY c.created_at ASC, c.id ASC`
+      )
+      .bind(repositoryId, issueNumber)
+      .all<IssueCommentRecord>();
+    return rows.results;
+  }
+
   async createIssue(input: {
     repositoryId: string;
     authorId: string;
@@ -149,6 +172,65 @@ export class IssueService {
     const created = await this.findIssueByNumber(input.repositoryId, number);
     if (!created) {
       throw new Error("Created issue not found");
+    }
+    return created;
+  }
+
+  async createIssueComment(input: {
+    repositoryId: string;
+    issueId: string;
+    issueNumber: number;
+    authorId: string;
+    body: string;
+  }): Promise<IssueCommentRecord> {
+    const now = Date.now();
+    const id = crypto.randomUUID();
+    await this.db
+      .prepare(
+        `INSERT INTO issue_comments (
+          id,
+          repository_id,
+          issue_id,
+          issue_number,
+          author_id,
+          body,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        input.repositoryId,
+        input.issueId,
+        input.issueNumber,
+        input.authorId,
+        input.body,
+        now,
+        now
+      )
+      .run();
+
+    const created = await this.db
+      .prepare(
+        `SELECT
+          c.id,
+          c.repository_id,
+          c.issue_id,
+          c.issue_number,
+          c.author_id,
+          u.username AS author_username,
+          c.body,
+          c.created_at,
+          c.updated_at
+         FROM issue_comments c
+         JOIN users u ON u.id = c.author_id
+         WHERE c.id = ?
+         LIMIT 1`
+      )
+      .bind(id)
+      .first<IssueCommentRecord>();
+    if (!created) {
+      throw new Error("Created issue comment not found");
     }
     return created;
   }

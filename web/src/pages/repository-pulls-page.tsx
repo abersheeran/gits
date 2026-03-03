@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText } from "lucide-react";
+import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  listLatestActionRunsBySource,
   formatApiError,
   getRepositoryDetail,
   listPullRequests,
+  type ActionRunRecord,
   type AuthUser,
   type PullRequestListState,
   type PullRequestRecord,
@@ -23,6 +25,19 @@ function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
 }
 
+function actionStatusDotClass(status: ActionRunRecord["status"]): string {
+  if (status === "success") {
+    return "bg-emerald-500";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "bg-red-500";
+  }
+  if (status === "running") {
+    return "bg-sky-500";
+  }
+  return "bg-slate-400";
+}
+
 export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
   const owner = params.owner ?? "";
@@ -30,6 +45,9 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequests, setPullRequests] = useState<PullRequestRecord[]>([]);
+  const [latestRunByPullNumber, setLatestRunByPullNumber] = useState<Record<number, ActionRunRecord>>(
+    {}
+  );
   const [state, setState] = useState<PullRequestListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,11 +66,26 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
           getRepositoryDetail(owner, repo),
           listPullRequests(owner, repo, { state, limit: 100 })
         ]);
+        const pullNumbers = nextPullRequests.map((pullRequest) => pullRequest.number);
+        const latestRunItems =
+          pullNumbers.length > 0
+            ? await listLatestActionRunsBySource(owner, repo, {
+                sourceType: "pull_request",
+                numbers: pullNumbers
+              })
+            : [];
+        const nextRunByPullNumber: Record<number, ActionRunRecord> = {};
+        for (const item of latestRunItems) {
+          if (item.run) {
+            nextRunByPullNumber[item.sourceNumber] = item.run;
+          }
+        }
         if (canceled) {
           return;
         }
         setDetail(nextDetail);
         setPullRequests(nextPullRequests);
+        setLatestRunByPullNumber(nextRunByPullNumber);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -69,6 +102,38 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
       canceled = true;
     };
   }, [owner, repo, state]);
+
+  const hasPendingRun = pullRequests.some((pullRequest) => {
+    const run = latestRunByPullNumber[pullRequest.number];
+    return run ? run.status === "queued" || run.status === "running" : false;
+  });
+
+  useEffect(() => {
+    if (!hasPendingRun || !owner || !repo || pullRequests.length === 0) {
+      return;
+    }
+    const timer = window.setInterval(async () => {
+      const pullNumbers = pullRequests.map((pullRequest) => pullRequest.number);
+      try {
+        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
+          sourceType: "pull_request",
+          numbers: pullNumbers
+        });
+        const nextRunByPullNumber: Record<number, ActionRunRecord> = {};
+        for (const item of latestRunItems) {
+          if (item.run) {
+            nextRunByPullNumber[item.sourceNumber] = item.run;
+          }
+        }
+        setLatestRunByPullNumber(nextRunByPullNumber);
+      } catch {
+        // Ignore transient polling errors.
+      }
+    }, 3500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasPendingRun, owner, repo, pullRequests]);
 
   if (!owner || !repo) {
     return (
@@ -131,6 +196,13 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
               {detail.openPullRequestCount}
             </span>
           </Link>
+          <Link
+            to={`/repo/${owner}/${repo}/actions`}
+            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
+          >
+            <Workflow className="h-4 w-4" />
+            Actions
+          </Link>
         </nav>
       </header>
 
@@ -178,8 +250,10 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
           <div className="p-6 text-sm text-muted-foreground">当前筛选下没有 pull request。</div>
         ) : (
           <ul className="divide-y">
-            {pullRequests.map((pullRequest) => (
-              <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
+            {pullRequests.map((pullRequest) => {
+              const actionRun = latestRunByPullNumber[pullRequest.number];
+              return (
+                <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
                     <Link
@@ -192,6 +266,19 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                     <p className="text-xs text-muted-foreground">
                       {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
                     </p>
+                    {actionRun ? (
+                      <Link
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                        to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(actionRun.status)} ${
+                            actionRun.status === "running" ? "animate-pulse" : ""
+                          }`}
+                        />
+                        action {actionRun.status}
+                      </Link>
+                    ) : null}
                   </div>
                   <Badge
                     variant={pullRequest.state === "open" ? "default" : "secondary"}
@@ -209,8 +296,9 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                 <p className="text-xs text-muted-foreground">
                   updated at {formatDateTime(pullRequest.updated_at)}
                 </p>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

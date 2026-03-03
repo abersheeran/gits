@@ -6,6 +6,29 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "containers": [
+    {
+      "class_name": "ActionsContainer",
+      "image": "./containers/actions-runner/Dockerfile",
+      "max_instances": 10
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ACTIONS_RUNNER",
+        "class_name": "ActionsContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "actions-container-v1",
+      "new_sqlite_classes": [
+        "ActionsContainer"
+      ]
+    }
+  ],
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS"
@@ -24,6 +47,21 @@
       "migrations_dir": "src/db/migrations"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "ACTIONS_QUEUE",
+        "queue": "gits-actions"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "gits-actions",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5
+      }
+    ]
+  },
   "observability": {
     "enabled": true
   }

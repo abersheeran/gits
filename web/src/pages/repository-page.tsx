@@ -11,7 +11,8 @@ import {
   Globe,
   History,
   Lock,
-  MessageSquareText
+  MessageSquareText,
+  Workflow
 } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -583,6 +584,13 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
           <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
             {detail.openPullRequestCount}
           </span>
+        </Link>
+        <Link
+          to={`/repo/${owner}/${repo}/actions`}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <Workflow className="h-4 w-4" />
+          Actions
         </Link>
       </nav>
 

@@ -1,6 +1,6 @@
 # Git Service (Workers + D1 + R2)
 
-Minimal personal Git hosting service scaffold.  
+Minimal personal Git hosting service scaffold.
 Current code includes:
 
 - Hono app structure (`routes`, `services`, `middleware`, `views`)
@@ -52,7 +52,7 @@ APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
 ```
 
-3. Configure remote non-secret variables (for example `APP_ORIGIN`, optional body-limit vars).
+1. Configure remote non-secret variables (for example `APP_ORIGIN`, optional body-limit vars).
    - Dashboard: Worker Settings -> Variables / Environment Variables
    - Wrangler CLI (set/update during deployment):
 

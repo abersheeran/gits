@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as git from "isomorphic-git";
 import { Volume, createFsFromVolume } from "memfs";
-import app from "../index";
+import app from "../app";
 import { AuthService } from "../services/auth-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";

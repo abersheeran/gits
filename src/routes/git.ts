@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { optionalSession, requireGitBasicAuth } from "../middleware/auth";
+import { isZeroOid, parseReceivePackRequest } from "../services/git-protocol";
+import { triggerActionWorkflows } from "../services/action-trigger-service";
 import { GitService } from "../services/git-service";
 import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
@@ -15,6 +17,26 @@ function parseService(raw: string | undefined): GitServiceName {
 
 function normalizeRepoName(raw: string): string {
   return raw.endsWith(".git") ? raw.slice(0, -4) : raw;
+}
+
+function getOptionalExecutionCtx(source: { executionCtx?: unknown }): ExecutionContext | undefined {
+  let executionCtx: unknown;
+  try {
+    executionCtx = source.executionCtx;
+  } catch {
+    return undefined;
+  }
+  if (!executionCtx || typeof executionCtx !== "object") {
+    return undefined;
+  }
+  return executionCtx as ExecutionContext;
+}
+
+function executionCtxArg(source: {
+  executionCtx?: unknown;
+}): { executionCtx: ExecutionContext } | Record<string, never> {
+  const executionCtx = getOptionalExecutionCtx(source);
+  return executionCtx ? { executionCtx } : {};
 }
 
 const MAX_UPLOAD_PACK_BODY_BYTES = 8 * 1024 * 1024;
@@ -155,6 +177,12 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
     new StorageService(c.env.GIT_BUCKET)
   );
   const body = await readBodyWithLimit(c, receivePackBodyLimit(c));
+  let receivePackRequest: ReturnType<typeof parseReceivePackRequest> | null = null;
+  try {
+    receivePackRequest = parseReceivePackRequest(body);
+  } catch {
+    receivePackRequest = null;
+  }
 
   const user = c.get("basicAuthUser");
   const requestInput: {
@@ -171,7 +199,44 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
     requestInput.user = user;
   }
 
-  return serviceImpl.handleReceivePack(requestInput);
+  const response = await serviceImpl.handleReceivePack(requestInput);
+  if (!response.ok || !receivePackRequest || !user) {
+    return response;
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await repositoryService.findRepository(owner, repo);
+  if (!repository) {
+    return response;
+  }
+  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const refs = await storageService.listRefs(owner, repo, "refs/");
+  const refsByName = new Map(refs.map((ref) => [ref.name, ref.oid]));
+
+  for (const command of receivePackRequest.commands) {
+    if (isZeroOid(command.newOid)) {
+      continue;
+    }
+    if (!command.refName.startsWith("refs/heads/") && !command.refName.startsWith("refs/tags/")) {
+      continue;
+    }
+    if (refsByName.get(command.refName) !== command.newOid) {
+      continue;
+    }
+
+    await triggerActionWorkflows({
+      env: c.env,
+      ...executionCtxArg(c),
+      repository,
+      triggerEvent: "push",
+      triggerRef: command.refName,
+      triggerSha: command.newOid,
+      triggeredByUser: user,
+      requestOrigin: new URL(c.req.url).origin
+    });
+  }
+
+  return response;
 });
 
 export default router;

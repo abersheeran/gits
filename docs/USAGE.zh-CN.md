@@ -61,11 +61,22 @@ APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
 ```
 
-远程部署时，机密变量使用 `wrangler secret put`：
+远程 production 环境（Cloudflare）机密变量：
 
 ```bash
-npx wrangler secret put JWT_SECRET
+npm run secret:prod
 ```
+
+本地 development 环境（写入项目根目录 `.env`）：
+
+```bash
+npm run secret:dev
+```
+
+说明：
+
+- 这里只配置 `JWT_SECRET`。
+- Actions 全局设置页只编辑并映射配置文件内容（`/root/.codex/config.toml` 与 `/root/.claude/settings.json`）。
 
 非机密变量（例如 `APP_ORIGIN`、`UPLOAD_PACK_MAX_BODY_BYTES`、`RECEIVE_PACK_MAX_BODY_BYTES`）可以用两种方式配置到远程：
 
@@ -112,6 +123,12 @@ npm run dev
 ```
 
 Wrangler 默认优先使用 `http://127.0.0.1:8787`，端口被占用时会自动顺延到下一个可用端口。
+
+如果你的本地 Docker 不是默认 socket，请先设置（Cloudflare 文档推荐方式）：
+
+```bash
+export DOCKER_HOST=unix:///var/run/docker.sock
+```
 
 部署：
 

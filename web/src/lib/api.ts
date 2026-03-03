@@ -120,6 +120,18 @@ export type IssueRecord = {
   closed_at: number | null;
 };
 
+export type IssueCommentRecord = {
+  id: string;
+  repository_id: string;
+  issue_id: string;
+  issue_number: number;
+  author_id: string;
+  author_username: string;
+  body: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export type PullRequestRecord = {
   id: string;
   repository_id: string;
@@ -162,6 +174,74 @@ export type PullRequestReviewSummary = {
   approvals: number;
   changeRequests: number;
   comments: number;
+};
+
+export type ActionWorkflowTrigger =
+  | "issue_created"
+  | "pull_request_created"
+  | "mention_actions"
+  | "push";
+
+export type ActionAgentType = "codex" | "claude_code";
+
+export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
+export type ActionRunSourceType = "issue" | "pull_request";
+
+export type ActionWorkflowRecord = {
+  id: string;
+  repository_id: string;
+  name: string;
+  trigger_event: ActionWorkflowTrigger;
+  agent_type: ActionAgentType;
+  prompt: string;
+  push_branch_regex: string | null;
+  push_tag_regex: string | null;
+  enabled: number;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type ActionRunRecord = {
+  id: string;
+  repository_id: string;
+  run_number: number;
+  workflow_id: string;
+  workflow_name: string;
+  trigger_event: ActionWorkflowTrigger;
+  trigger_ref: string | null;
+  trigger_sha: string | null;
+  trigger_source_type: ActionRunSourceType | null;
+  trigger_source_number: number | null;
+  trigger_source_comment_id: string | null;
+  triggered_by: string | null;
+  triggered_by_username: string | null;
+  status: ActionRunStatus;
+  agent_type: ActionAgentType;
+  prompt: string;
+  logs: string;
+  exit_code: number | null;
+  container_instance: string | null;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
+};
+
+export type ActionRunLatestBySourceItem = {
+  sourceNumber: number;
+  run: ActionRunRecord | null;
+};
+
+export type ActionRunLatestByCommentItem = {
+  commentId: string;
+  run: ActionRunRecord | null;
+};
+
+export type ActionsGlobalConfig = {
+  codexConfigFileContent: string;
+  claudeCodeConfigFileContent: string;
+  updated_at: number | null;
 };
 
 type ApiRequestInit = RequestInit & {
@@ -398,6 +478,33 @@ export async function updateIssue(
   return response.issue;
 }
 
+export async function listIssueComments(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<IssueCommentRecord[]> {
+  const response = await requestJson<{ comments: IssueCommentRecord[] }>(
+    `/api/repos/${owner}/${repo}/issues/${number}/comments`
+  );
+  return response.comments;
+}
+
+export async function createIssueComment(
+  owner: string,
+  repo: string,
+  number: number,
+  input: { body: string }
+): Promise<IssueCommentRecord> {
+  const response = await requestJson<{ comment: IssueCommentRecord }>(
+    `/api/repos/${owner}/${repo}/issues/${number}/comments`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.comment;
+}
+
 export async function listPullRequests(
   owner: string,
   repo: string,
@@ -492,6 +599,163 @@ export async function createPullRequestReview(
       bodyJson: input
     }
   );
+}
+
+export async function getActionsGlobalConfig(): Promise<ActionsGlobalConfig> {
+  const response = await requestJson<{ config: ActionsGlobalConfig }>("/api/settings/actions");
+  return response.config;
+}
+
+export async function updateActionsGlobalConfig(input: {
+  codexConfigFileContent?: string | null;
+  claudeCodeConfigFileContent?: string | null;
+}): Promise<ActionsGlobalConfig> {
+  const response = await requestJson<{ config: ActionsGlobalConfig }>("/api/settings/actions", {
+    method: "PATCH",
+    bodyJson: input
+  });
+  return response.config;
+}
+
+export async function listActionWorkflows(
+  owner: string,
+  repo: string
+): Promise<ActionWorkflowRecord[]> {
+  const response = await requestJson<{ workflows: ActionWorkflowRecord[] }>(
+    `/api/repos/${owner}/${repo}/actions/workflows`
+  );
+  return response.workflows;
+}
+
+export async function createActionWorkflow(
+  owner: string,
+  repo: string,
+  input: {
+    name: string;
+    triggerEvent: ActionWorkflowTrigger;
+    agentType: ActionAgentType;
+    prompt: string;
+    pushBranchRegex?: string | null;
+    pushTagRegex?: string | null;
+    enabled?: boolean;
+  }
+): Promise<ActionWorkflowRecord> {
+  const response = await requestJson<{ workflow: ActionWorkflowRecord }>(
+    `/api/repos/${owner}/${repo}/actions/workflows`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.workflow;
+}
+
+export async function updateActionWorkflow(
+  owner: string,
+  repo: string,
+  workflowId: string,
+  input: {
+    name?: string;
+    triggerEvent?: ActionWorkflowTrigger;
+    agentType?: ActionAgentType;
+    prompt?: string;
+    pushBranchRegex?: string | null;
+    pushTagRegex?: string | null;
+    enabled?: boolean;
+  }
+): Promise<ActionWorkflowRecord> {
+  const response = await requestJson<{ workflow: ActionWorkflowRecord }>(
+    `/api/repos/${owner}/${repo}/actions/workflows/${workflowId}`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
+  return response.workflow;
+}
+
+export async function listActionRuns(
+  owner: string,
+  repo: string,
+  input?: { limit?: number }
+): Promise<ActionRunRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.limit) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await requestJson<{ runs: ActionRunRecord[] }>(
+    `/api/repos/${owner}/${repo}/actions/runs${suffix}`
+  );
+  return response.runs;
+}
+
+export async function listLatestActionRunsBySource(
+  owner: string,
+  repo: string,
+  input: { sourceType: ActionRunSourceType; numbers: number[] }
+): Promise<ActionRunLatestBySourceItem[]> {
+  const query = new URLSearchParams();
+  query.set("sourceType", input.sourceType);
+  query.set("numbers", input.numbers.join(","));
+  const response = await requestJson<{ items: ActionRunLatestBySourceItem[] }>(
+    `/api/repos/${owner}/${repo}/actions/runs/latest?${query.toString()}`
+  );
+  return response.items;
+}
+
+export async function listLatestActionRunsByCommentIds(
+  owner: string,
+  repo: string,
+  commentIds: string[]
+): Promise<ActionRunLatestByCommentItem[]> {
+  const query = new URLSearchParams();
+  query.set("commentIds", commentIds.join(","));
+  const response = await requestJson<{ items: ActionRunLatestByCommentItem[] }>(
+    `/api/repos/${owner}/${repo}/actions/runs/latest-by-comments?${query.toString()}`
+  );
+  return response.items;
+}
+
+export async function getActionRun(
+  owner: string,
+  repo: string,
+  runId: string
+): Promise<ActionRunRecord> {
+  const response = await requestJson<{ run: ActionRunRecord }>(
+    `/api/repos/${owner}/${repo}/actions/runs/${runId}`
+  );
+  return response.run;
+}
+
+export async function rerunActionRun(
+  owner: string,
+  repo: string,
+  runId: string
+): Promise<ActionRunRecord> {
+  const response = await requestJson<{ run: ActionRunRecord }>(
+    `/api/repos/${owner}/${repo}/actions/runs/${runId}/rerun`,
+    {
+      method: "POST"
+    }
+  );
+  return response.run;
+}
+
+export async function dispatchActionWorkflow(
+  owner: string,
+  repo: string,
+  workflowId: string,
+  input?: { ref?: string; sha?: string }
+): Promise<ActionRunRecord> {
+  const response = await requestJson<{ run: ActionRunRecord }>(
+    `/api/repos/${owner}/${repo}/actions/workflows/${workflowId}/dispatch`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
+  );
+  return response.run;
 }
 
 export async function listCollaborators(

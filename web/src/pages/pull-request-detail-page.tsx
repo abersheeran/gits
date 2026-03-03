@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  listLatestActionRunsBySource,
   createPullRequestReview,
   formatApiError,
   getPullRequest,
   getRepositoryDetail,
   listPullRequestReviews,
   updatePullRequest,
+  type ActionRunRecord,
   type AuthUser,
   type PullRequestReviewDecision,
   type PullRequestReviewRecord,
@@ -29,6 +31,19 @@ function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
 }
 
+function actionStatusDotClass(status: ActionRunRecord["status"]): string {
+  if (status === "success") {
+    return "bg-emerald-500";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "bg-red-500";
+  }
+  if (status === "running") {
+    return "bg-sky-500";
+  }
+  return "bg-slate-400";
+}
+
 export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
   const owner = params.owner ?? "";
@@ -38,6 +53,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [reviews, setReviews] = useState<PullRequestReviewRecord[]>([]);
+  const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [closingIssueNumbers, setClosingIssueNumbers] = useState<number[]>([]);
   const [reviewSummary, setReviewSummary] = useState<PullRequestReviewSummary>({
     approvals: 0,
@@ -65,6 +81,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           getPullRequest(owner, repo, number),
           listPullRequestReviews(owner, repo, number)
         ]);
+        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
+          sourceType: "pull_request",
+          numbers: [number]
+        });
         if (canceled) {
           return;
         }
@@ -73,6 +93,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setClosingIssueNumbers(nextPullRequestDetail.closingIssueNumbers);
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
+        setLatestActionRun(latestRunItems[0]?.run ?? null);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -88,6 +109,30 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       canceled = true;
     };
   }, [owner, repo, number]);
+
+  const hasPendingRun =
+    latestActionRun !== null &&
+    (latestActionRun.status === "queued" || latestActionRun.status === "running");
+
+  useEffect(() => {
+    if (!hasPendingRun || !owner || !repo || !Number.isInteger(number) || number <= 0) {
+      return;
+    }
+    const timer = window.setInterval(async () => {
+      try {
+        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
+          sourceType: "pull_request",
+          numbers: [number]
+        });
+        setLatestActionRun(latestRunItems[0]?.run ?? null);
+      } catch {
+        // Ignore transient polling errors.
+      }
+    }, 3500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasPendingRun, number, owner, repo]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (
@@ -177,6 +222,19 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <span>{pullRequest.author_username}</span>
           <span>opened {formatRelativeTime(pullRequest.created_at)}</span>
           <span>updated {formatDateTime(pullRequest.updated_at)}</span>
+          {latestActionRun ? (
+            <Link
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+              to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(latestActionRun.status)} ${
+                  latestActionRun.status === "running" ? "animate-pulse" : ""
+                }`}
+              />
+              action {latestActionRun.status}
+            </Link>
+          ) : null}
         </div>
         <p className="text-sm text-muted-foreground">
           {stripHeadsRef(pullRequest.head_ref)} → {stripHeadsRef(pullRequest.base_ref)}

@@ -29,6 +29,8 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
     pathname === "/repositories/new" ||
     pathname.startsWith("/repositories/");
   const isTokensActive = pathname === "/tokens" || pathname.startsWith("/tokens/");
+  const isActionsSettingsActive =
+    pathname === "/settings/actions" || pathname.startsWith("/settings/actions/");
   const isLoginActive = pathname === "/login";
   const isRegisterActive = pathname === "/register";
 
@@ -74,6 +76,14 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                 <Button variant={navVariant(isTokensActive)} asChild>
                   <Link to="/tokens" aria-current={isTokensActive ? "page" : undefined}>
                     Tokens
+                  </Link>
+                </Button>
+                <Button variant={navVariant(isActionsSettingsActive)} asChild>
+                  <Link
+                    to="/settings/actions"
+                    aria-current={isActionsSettingsActive ? "page" : undefined}
+                  >
+                    Actions Config
                   </Link>
                 </Button>
                 <Button variant="ghost" onClick={handleLogout} disabled={logoutPending}>

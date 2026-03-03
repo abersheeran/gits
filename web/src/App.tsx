@@ -6,11 +6,13 @@ import { DashboardPage } from "@/pages/dashboard-page";
 import { HomePage } from "@/pages/home-page";
 import { IssueDetailPage } from "@/pages/issue-detail-page";
 import { LoginPage } from "@/pages/login-page";
+import { ActionsSettingsPage } from "@/pages/actions-settings-page";
 import { NewIssuePage } from "@/pages/new-issue-page";
 import { NewPullRequestPage } from "@/pages/new-pull-request-page";
 import { NewRepositoryPage } from "@/pages/new-repository-page";
 import { PullRequestDetailPage } from "@/pages/pull-request-detail-page";
 import { RegisterPage } from "@/pages/register-page";
+import { RepositoryActionsPage } from "@/pages/repository-actions-page";
 import { RepositoryCollaboratorsPage } from "@/pages/repository-collaborators-page";
 import { RepositoryIssuesPage } from "@/pages/repository-issues-page";
 import { RepositoryPage } from "@/pages/repository-page";
@@ -64,6 +66,12 @@ function titleForPath(pathname: string): string {
     return `Pull Requests · ${repository} · ${APP_NAME}`;
   }
 
+  const actions = matchPath("/repo/:owner/:repo/actions", pathname);
+  if (actions) {
+    const repository = formatRepositoryName(actions.params.owner, actions.params.repo);
+    return `Actions · ${repository} · ${APP_NAME}`;
+  }
+
   const repoSettings = matchPath("/repo/:owner/:repo/settings", pathname);
   if (repoSettings) {
     const repository = formatRepositoryName(repoSettings.params.owner, repoSettings.params.repo);
@@ -96,6 +104,9 @@ function titleForPath(pathname: string): string {
   }
   if (pathname === "/tokens") {
     return `Access Tokens · ${APP_NAME}`;
+  }
+  if (pathname === "/settings/actions") {
+    return `Actions Config · ${APP_NAME}`;
   }
   if (pathname === "/login") {
     return `登录 · ${APP_NAME}`;
@@ -145,6 +156,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage user={user} />} />
         <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
         <Route path="/tokens" element={<TokensPage user={user} />} />
+        <Route path="/settings/actions" element={<ActionsSettingsPage user={user} />} />
         <Route path="/repo/:owner/:repo/settings" element={<RepositorySettingsPage user={user} />} />
         <Route
           path="/repo/:owner/:repo/collaborators"
@@ -159,6 +171,7 @@ function App() {
           path="/repo/:owner/:repo/pulls/:number"
           element={<PullRequestDetailPage user={user} />}
         />
+        <Route path="/repo/:owner/:repo/actions" element={<RepositoryActionsPage user={user} />} />
         <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
         <Route path="/repo/:owner/:repo/:kind/:ref/*" element={<RepositoryPage user={user} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import app from "./index";
+import app from "./app";
 import { createMockD1Database } from "./test-utils/mock-d1";
 import type { AppEnv } from "./types";
 

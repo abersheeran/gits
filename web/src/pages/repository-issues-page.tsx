@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText } from "lucide-react";
+import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  listLatestActionRunsBySource,
   formatApiError,
   getRepositoryDetail,
   listIssues,
+  type ActionRunRecord,
   type AuthUser,
   type IssueListState,
   type IssueRecord,
@@ -19,6 +21,19 @@ type RepositoryIssuesPageProps = {
   user: AuthUser | null;
 };
 
+function actionStatusDotClass(status: ActionRunRecord["status"]): string {
+  if (status === "success") {
+    return "bg-emerald-500";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "bg-red-500";
+  }
+  if (status === "running") {
+    return "bg-sky-500";
+  }
+  return "bg-slate-400";
+}
+
 export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
   const owner = params.owner ?? "";
@@ -26,6 +41,9 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issues, setIssues] = useState<IssueRecord[]>([]);
+  const [latestRunByIssueNumber, setLatestRunByIssueNumber] = useState<Record<number, ActionRunRecord>>(
+    {}
+  );
   const [state, setState] = useState<IssueListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,11 +62,26 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           getRepositoryDetail(owner, repo),
           listIssues(owner, repo, { state, limit: 100 })
         ]);
+        const issueNumbers = nextIssues.map((issue) => issue.number);
+        const latestRunItems =
+          issueNumbers.length > 0
+            ? await listLatestActionRunsBySource(owner, repo, {
+                sourceType: "issue",
+                numbers: issueNumbers
+              })
+            : [];
+        const nextRunByIssueNumber: Record<number, ActionRunRecord> = {};
+        for (const item of latestRunItems) {
+          if (item.run) {
+            nextRunByIssueNumber[item.sourceNumber] = item.run;
+          }
+        }
         if (canceled) {
           return;
         }
         setDetail(nextDetail);
         setIssues(nextIssues);
+        setLatestRunByIssueNumber(nextRunByIssueNumber);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -65,6 +98,38 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
       canceled = true;
     };
   }, [owner, repo, state]);
+
+  const hasPendingRun = issues.some((issue) => {
+    const run = latestRunByIssueNumber[issue.number];
+    return run ? run.status === "queued" || run.status === "running" : false;
+  });
+
+  useEffect(() => {
+    if (!hasPendingRun || !owner || !repo || issues.length === 0) {
+      return;
+    }
+    const timer = window.setInterval(async () => {
+      const issueNumbers = issues.map((issue) => issue.number);
+      try {
+        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
+          sourceType: "issue",
+          numbers: issueNumbers
+        });
+        const nextRunByIssueNumber: Record<number, ActionRunRecord> = {};
+        for (const item of latestRunItems) {
+          if (item.run) {
+            nextRunByIssueNumber[item.sourceNumber] = item.run;
+          }
+        }
+        setLatestRunByIssueNumber(nextRunByIssueNumber);
+      } catch {
+        // Ignore transient polling errors.
+      }
+    }, 3500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasPendingRun, owner, repo, issues]);
 
   if (!owner || !repo) {
     return (
@@ -127,6 +192,13 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
               {detail.openPullRequestCount}
             </span>
           </Link>
+          <Link
+            to={`/repo/${owner}/${repo}/actions`}
+            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
+          >
+            <Workflow className="h-4 w-4" />
+            Actions
+          </Link>
         </nav>
       </header>
 
@@ -167,8 +239,10 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           <div className="p-6 text-sm text-muted-foreground">当前筛选下没有 issue。</div>
         ) : (
           <ul className="divide-y">
-            {issues.map((issue) => (
-              <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
+            {issues.map((issue) => {
+              const actionRun = latestRunByIssueNumber[issue.number];
+              return (
+                <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
                     <Link
@@ -181,6 +255,19 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                     <p className="text-xs text-muted-foreground">
                       {issue.author_username} opened {formatRelativeTime(issue.created_at)}
                     </p>
+                    {actionRun ? (
+                      <Link
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                        to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(actionRun.status)} ${
+                            actionRun.status === "running" ? "animate-pulse" : ""
+                          }`}
+                        />
+                        action {actionRun.status}
+                      </Link>
+                    ) : null}
                   </div>
                   <Badge variant={issue.state === "open" ? "default" : "secondary"}>{issue.state}</Badge>
                 </div>
@@ -188,8 +275,9 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                   {issue.body.trim() ? issue.body : "(no description)"}
                 </p>
                 <p className="text-xs text-muted-foreground">updated at {formatDateTime(issue.updated_at)}</p>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

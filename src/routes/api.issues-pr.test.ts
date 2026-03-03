@@ -138,6 +138,163 @@ describe("API issues and pull requests", () => {
     expect(body.issue.state).toBe("open");
   });
 
+  it("lists issue comments for readable repositories", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Issue one",
+          body: "body",
+          state: "open",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "FROM issue_comments c",
+        all: () => [
+          {
+            id: "comment-1",
+            repository_id: "repo-1",
+            issue_id: "issue-1",
+            issue_number: 1,
+            author_id: "owner-1",
+            author_username: "alice",
+            body: "First comment",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { comments: Array<{ id: string; body: string }> };
+    expect(body.comments).toHaveLength(1);
+    expect(body.comments[0]?.id).toBe("comment-1");
+    expect(body.comments[0]?.body).toBe("First comment");
+  });
+
+  it("rejects issue comment creation for non-collaborators", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => null
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "Can I help?"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("allows collaborators to create issue comments", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need bugfix",
+          body: "Steps",
+          state: "open",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "INSERT INTO issue_comments",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM issue_comments c",
+        first: () => ({
+          id: "comment-1",
+          repository_id: "repo-1",
+          issue_id: "issue-1",
+          issue_number: 1,
+          author_id: "user-2",
+          author_username: "bob",
+          body: "I can take this",
+          created_at: now,
+          updated_at: now
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "I can take this"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { comment: { id: string; author_username: string } };
+    expect(body.comment.id).toBe("comment-1");
+    expect(body.comment.author_username).toBe("bob");
+  });
+
   it("rejects pull request creation for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",
@@ -581,5 +738,295 @@ describe("API issues and pull requests", () => {
 
     expect(response.status).toBe(200);
     expect(closedIssueNumbers.sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  it("returns masked global actions config for authenticated users", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const db = createMockD1Database([
+      {
+        when: "FROM global_settings",
+        all: () => [
+          { key: "actions.codex.config_file_content", value: "model = \"gpt-5-codex\"", updated_at: 1 },
+          {
+            key: "actions.claude_code.config_file_content",
+            value: "{\n  \"permissions\": \"bypass\"\n}",
+            updated_at: 1
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/settings/actions", {
+        method: "GET",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      config: {
+        codexConfigFileContent: string;
+        claudeCodeConfigFileContent: string;
+      };
+    };
+    expect(body.config.codexConfigFileContent).toContain("gpt-5-codex");
+    expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
+  });
+
+  it("updates actions config file contents via settings API", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const settings = new Map<string, string>();
+    const db = createMockD1Database([
+      {
+        when: "INSERT INTO global_settings",
+        run: (params) => {
+          settings.set(String(params[0]), String(params[1]));
+          return { success: true };
+        }
+      },
+      {
+        when: "DELETE FROM global_settings",
+        run: (params) => {
+          settings.delete(String(params[0]));
+          return { success: true };
+        }
+      },
+      {
+        when: "FROM global_settings",
+        all: () =>
+          Array.from(settings.entries()).map(([key, value]) => ({
+            key,
+            value,
+            updated_at: 1
+          }))
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/settings/actions", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          codexConfigFileContent: "model = \"gpt-5-codex\"\napproval_policy = \"never\"",
+          claudeCodeConfigFileContent: "{\n  \"permissions\": \"bypass\"\n}"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      config: { codexConfigFileContent: string; claudeCodeConfigFileContent: string };
+    };
+    expect(body.config.codexConfigFileContent).toContain("approval_policy");
+    expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
+    expect(settings.get("actions.codex.config_file_content")).toContain("approval_policy");
+    expect(settings.get("actions.claude_code.config_file_content")).toContain("\"permissions\"");
+  });
+
+  it("rejects rerunning action runs for non-collaborators", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-3",
+      username: "charlie"
+    });
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => null
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("allows collaborators to rerun action runs", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("run-2");
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    const sourceRun = {
+      id: "run-1",
+      repository_id: "repo-1",
+      run_number: 1,
+      workflow_id: "workflow-1",
+      workflow_name: "CI",
+      trigger_event: "pull_request_created",
+      trigger_ref: "refs/heads/feature",
+      trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      trigger_source_type: "pull_request",
+      trigger_source_number: 1,
+      trigger_source_comment_id: null,
+      triggered_by: "user-2",
+      triggered_by_username: "bob",
+      status: "failed",
+      agent_type: "codex",
+      prompt: "请执行测试并修复失败。",
+      logs: "failed logs",
+      exit_code: 1,
+      container_instance: null,
+      created_at: now - 10_000,
+      started_at: now - 9_000,
+      completed_at: now - 8_000,
+      updated_at: now - 8_000
+    };
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: (params) => {
+          const runId = String(params[1]);
+          if (runId === "run-1") {
+            return sourceRun;
+          }
+          return {
+            ...sourceRun,
+            id: runId,
+            run_number: 2,
+            status: "queued",
+            logs: "",
+            exit_code: null,
+            container_instance: null,
+            created_at: now,
+            started_at: null,
+            completed_at: null,
+            updated_at: now
+          };
+        }
+      },
+      {
+        when: "RETURNING action_run_seq AS run_number",
+        first: () => ({ run_number: 2 })
+      },
+      {
+        when: "INSERT INTO action_runs",
+        run: () => ({ success: true })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { run: { id: string; run_number: number; status: string } };
+    expect(body.run.id).toBe("run-2");
+    expect(body.run.run_number).toBe(2);
+    expect(body.run.status).toBe("queued");
+    expect(enqueueRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows collaborators to create actions workflows", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "INSERT INTO action_workflows",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM action_workflows",
+        first: () => ({
+          id: "workflow-1",
+          repository_id: "repo-1",
+          name: "CI",
+          trigger_event: "pull_request_created",
+          agent_type: "codex",
+          prompt: "请执行测试并修复失败。",
+          push_branch_regex: null,
+          push_tag_regex: null,
+          enabled: 1,
+          created_by: "user-2",
+          created_at: Date.now(),
+          updated_at: Date.now()
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/workflows", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "CI",
+          triggerEvent: "pull_request_created",
+          agentType: "codex",
+          prompt: "请执行测试并修复失败。"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      workflow: { name: string; trigger_event: string; agent_type: string; prompt: string };
+    };
+    expect(body.workflow.name).toBe("CI");
+    expect(body.workflow.trigger_event).toBe("pull_request_created");
+    expect(body.workflow.agent_type).toBe("codex");
+    expect(body.workflow.prompt).toBe("请执行测试并修复失败。");
   });
 });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import app from "../index";
+import app from "../app";
 import { AuthService } from "../services/auth-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";

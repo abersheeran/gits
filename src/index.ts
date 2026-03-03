@@ -1,40 +1,16 @@
-import { Hono } from "hono";
-import apiRoutes from "./routes/api";
-import gitRoutes from "./routes/git";
-import { errorHandler } from "./middleware/error-handler";
-import type { AppEnv } from "./types";
+import { ActionsContainer } from "./actions/actions-container";
+import app from "./app";
+import { consumeActionRunQueueBatch } from "./services/action-run-queue-service";
+import type { AppBindings } from "./types";
 
-const app = new Hono<AppEnv>();
+export { ActionsContainer };
 
-app.onError(errorHandler);
-
-app.get("/healthz", (c) => {
-  return c.json({ ok: true, timestamp: Date.now() });
-});
-
-app.route("/api", apiRoutes);
-app.route("/", gitRoutes);
-app.all("*", async (c) => {
-  if (!c.env.ASSETS) {
-    return c.notFound();
+export default {
+  fetch: app.fetch,
+  async queue(batch, env) {
+    await consumeActionRunQueueBatch({
+      batch,
+      env
+    });
   }
-
-  const response = await c.env.ASSETS.fetch(c.req.raw);
-  if (response.status !== 404) {
-    return response;
-  }
-
-  if (c.req.method !== "GET" && c.req.method !== "HEAD") {
-    return response;
-  }
-
-  const accept = c.req.header("accept") ?? "";
-  if (!accept.includes("text/html")) {
-    return response;
-  }
-
-  const fallbackUrl = new URL("/index.html", c.req.url);
-  return c.env.ASSETS.fetch(new Request(fallbackUrl.toString(), c.req.raw));
-});
-
-export default app;
+} satisfies ExportedHandler<AppBindings>;
