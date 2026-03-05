@@ -22,8 +22,8 @@ function normalizeCloneOrigin(input: {
   return input.requestOrigin;
 }
 
-const CODEX_CONFIG_FILE_PATH = "/root/.codex/config.toml";
-const CLAUDE_CODE_CONFIG_FILE_PATH = "/root/.claude/settings.json";
+const CODEX_CONFIG_FILE_PATH = "/home/rootless/.codex/config.toml";
+const CLAUDE_CODE_CONFIG_FILE_PATH = "/home/rootless/.claude/settings.json";
 
 function truncateLog(log: string): string {
   if (log.length <= MAX_LOG_CHARS) {

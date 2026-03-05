@@ -38,9 +38,19 @@ type CommandSpec = {
   args: string[];
 };
 
+const ROOTLESS_HOME = "/home/rootless";
+const ROOTLESS_CODEX_CONFIG_FILE_PATH = `${ROOTLESS_HOME}/.codex/config.toml`;
+const ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH = `${ROOTLESS_HOME}/.claude/settings.json`;
+
+const CONFIG_PATH_MIGRATION_MAP = new Map<string, string>([
+  ["/root/.codex/config.toml", ROOTLESS_CODEX_CONFIG_FILE_PATH],
+  ["/root/.claude/settings.json", ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH]
+]);
+
 const ALLOWED_CONFIG_FILE_PATHS = new Set([
-  "/root/.codex/config.toml",
-  "/root/.claude/settings.json"
+  ROOTLESS_CODEX_CONFIG_FILE_PATH,
+  ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH,
+  ...CONFIG_PATH_MIGRATION_MAP.keys()
 ]);
 
 function writeJson(response: http.ServerResponse, status: number, payload: unknown): void {
@@ -327,8 +337,9 @@ async function applyConfigFiles(configFiles: Record<string, string> | undefined)
     if (!ALLOWED_CONFIG_FILE_PATHS.has(filePath)) {
       continue;
     }
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, content, "utf8");
+    const destinationPath = CONFIG_PATH_MIGRATION_MAP.get(filePath) ?? filePath;
+    await mkdir(path.dirname(destinationPath), { recursive: true });
+    await writeFile(destinationPath, content, "utf8");
   }
 }
 

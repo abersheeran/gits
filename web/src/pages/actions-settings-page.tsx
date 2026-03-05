@@ -137,7 +137,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="codex-config-file-content">
-                    配置文件内容（映射到容器 `/root/.codex/config.toml`）
+                    配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
                   </Label>
                   <Textarea
                     id="codex-config-file-content"
@@ -161,7 +161,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="claude-code-config-file-content">
-                    配置文件内容（映射到容器 `/root/.claude/settings.json`）
+                    配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
                   </Label>
                   <Textarea
                     id="claude-code-config-file-content"

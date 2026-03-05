@@ -76,7 +76,7 @@ npm run secret:dev
 说明：
 
 - 这里只配置 `JWT_SECRET`。
-- Actions 全局设置页只编辑并映射配置文件内容（`/root/.codex/config.toml` 与 `/root/.claude/settings.json`）。
+- Actions 全局设置页只编辑并映射配置文件内容（`/home/rootless/.codex/config.toml` 与 `/home/rootless/.claude/settings.json`）。
 
 非机密变量（例如 `APP_ORIGIN`、`UPLOAD_PACK_MAX_BODY_BYTES`、`RECEIVE_PACK_MAX_BODY_BYTES`）可以用两种方式配置到远程：
 
