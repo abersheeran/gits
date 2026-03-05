@@ -38,20 +38,58 @@ type CommandSpec = {
   args: string[];
 };
 
+type ConfigFileKind = "codex" | "claude_code";
+
 const ROOTLESS_HOME = "/home/rootless";
-const ROOTLESS_CODEX_CONFIG_FILE_PATH = `${ROOTLESS_HOME}/.codex/config.toml`;
-const ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH = `${ROOTLESS_HOME}/.claude/settings.json`;
+const ROOT_HOME = "/root";
+const CODEX_CONFIG_RELATIVE_PATH = ".codex/config.toml";
+const CLAUDE_CODE_CONFIG_RELATIVE_PATH = ".claude/settings.json";
 
-const CONFIG_PATH_MIGRATION_MAP = new Map<string, string>([
-  ["/root/.codex/config.toml", ROOTLESS_CODEX_CONFIG_FILE_PATH],
-  ["/root/.claude/settings.json", ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH]
-]);
+function normalizeHomePath(homePath: string | undefined): string | null {
+  const trimmed = homePath?.trim() ?? "";
+  return trimmed ? path.resolve(trimmed) : null;
+}
 
-const ALLOWED_CONFIG_FILE_PATHS = new Set([
-  ROOTLESS_CODEX_CONFIG_FILE_PATH,
-  ROOTLESS_CLAUDE_CODE_CONFIG_FILE_PATH,
-  ...CONFIG_PATH_MIGRATION_MAP.keys()
-]);
+function resolveRuntimeHomePath(): string {
+  return normalizeHomePath(process.env.HOME) ?? normalizeHomePath(os.homedir()) ?? ROOTLESS_HOME;
+}
+
+function buildKnownHomePaths(runtimeHomePath: string): string[] {
+  const normalizedPaths = [runtimeHomePath, ROOTLESS_HOME, ROOT_HOME]
+    .map((homePath) => normalizeHomePath(homePath))
+    .filter((homePath): homePath is string => Boolean(homePath));
+  return [...new Set(normalizedPaths)];
+}
+
+const RUNTIME_HOME_PATH = resolveRuntimeHomePath();
+const KNOWN_HOME_PATHS = buildKnownHomePaths(RUNTIME_HOME_PATH);
+
+function buildConfigFilePath(homePath: string, kind: ConfigFileKind): string {
+  if (kind === "codex") {
+    return path.join(homePath, CODEX_CONFIG_RELATIVE_PATH);
+  }
+  return path.join(homePath, CLAUDE_CODE_CONFIG_RELATIVE_PATH);
+}
+
+function buildConfigDestinations(kind: ConfigFileKind): string[] {
+  return KNOWN_HOME_PATHS.map((homePath) => buildConfigFilePath(homePath, kind));
+}
+
+const CONFIG_DESTINATIONS_BY_KIND: Record<ConfigFileKind, string[]> = {
+  codex: buildConfigDestinations("codex"),
+  claude_code: buildConfigDestinations("claude_code")
+};
+
+const CONFIG_DESTINATION_MAP = new Map<string, string[]>();
+
+for (const kind of ["codex", "claude_code"] as const) {
+  const destinations = CONFIG_DESTINATIONS_BY_KIND[kind];
+  for (const destinationPath of destinations) {
+    CONFIG_DESTINATION_MAP.set(destinationPath, destinations);
+  }
+}
+
+const ALLOWED_CONFIG_FILE_PATHS = new Set(CONFIG_DESTINATION_MAP.keys());
 
 function writeJson(response: http.ServerResponse, status: number, payload: unknown): void {
   response.statusCode = status;
@@ -214,6 +252,8 @@ async function runAgentPrompt(
 ): Promise<CommandResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    HOME: RUNTIME_HOME_PATH,
+    XDG_CONFIG_HOME: path.join(RUNTIME_HOME_PATH, ".config"),
     GITS_ACTION_AGENT_TYPE: agentType,
     GITS_ACTION_PROMPT: prompt,
     CODEX_APPROVAL_POLICY: "never",
@@ -333,13 +373,41 @@ async function applyConfigFiles(configFiles: Record<string, string> | undefined)
   if (!configFiles) {
     return;
   }
+
+  const isPermissionDeniedError = (error: unknown): boolean => {
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "EACCES" || code === "EPERM" || code === "EROFS";
+  };
+
   for (const [filePath, content] of Object.entries(configFiles)) {
     if (!ALLOWED_CONFIG_FILE_PATHS.has(filePath)) {
       continue;
     }
-    const destinationPath = CONFIG_PATH_MIGRATION_MAP.get(filePath) ?? filePath;
-    await mkdir(path.dirname(destinationPath), { recursive: true });
-    await writeFile(destinationPath, content, "utf8");
+
+    const destinationPaths = CONFIG_DESTINATION_MAP.get(filePath) ?? [filePath];
+    let wroteToAtLeastOneDestination = false;
+    let lastPermissionError: unknown = null;
+
+    for (const destinationPath of destinationPaths) {
+      try {
+        await mkdir(path.dirname(destinationPath), { recursive: true });
+        await writeFile(destinationPath, content, "utf8");
+        wroteToAtLeastOneDestination = true;
+      } catch (error) {
+        if (isPermissionDeniedError(error)) {
+          lastPermissionError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!wroteToAtLeastOneDestination && lastPermissionError) {
+      throw lastPermissionError;
+    }
   }
 }
 
