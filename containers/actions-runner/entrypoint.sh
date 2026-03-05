@@ -2,9 +2,16 @@
 set -eu
 
 DOCKER_LOG_FILE="/tmp/dockerd.log"
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+DEFAULT_RUNTIME_DIR="/tmp/xdg-runtime-$(id -u)"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-${DEFAULT_RUNTIME_DIR}}"
+
+if ! mkdir -p "${RUNTIME_DIR}" 2>/dev/null || [ ! -w "${RUNTIME_DIR}" ]; then
+  RUNTIME_DIR="${DEFAULT_RUNTIME_DIR}"
+  mkdir -p "${RUNTIME_DIR}"
+fi
+
+chmod 700 "${RUNTIME_DIR}"
 export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
-mkdir -p "${RUNTIME_DIR}"
 
 if [ -z "${DOCKER_HOST:-}" ]; then
   export DOCKER_HOST="unix://${RUNTIME_DIR}/docker.sock"
