@@ -70,6 +70,11 @@ export class ActionsContainer extends Container {
       return response;
     }
 
+    if (request.method === "GET" && url.pathname === "/state") {
+      const state = await this.getState();
+      return jsonResponse({ state });
+    }
+
     if (request.method === "POST" && url.pathname === "/stop") {
       await this.stop();
       return jsonResponse({ ok: true });

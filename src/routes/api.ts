@@ -29,6 +29,7 @@ import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
 import type {
   ActionAgentType,
+  ActionRunRecord,
   ActionRunSourceType,
   ActionWorkflowTrigger,
   AppEnv,
@@ -566,6 +567,128 @@ async function findReadableRepositoryOr404(args: {
     throw new HTTPException(404, { message: "Repository not found" });
   }
   return repository;
+}
+
+type ActionsContainerStatePayload = {
+  state?: {
+    status?: string;
+    exitCode?: number;
+  };
+};
+
+const TERMINAL_ACTIONS_CONTAINER_STATES = new Set(["stopped", "stopped_with_code"]);
+
+function appendContainerStateErrorLogs(input: {
+  run: ActionRunRecord;
+  containerStatus: string;
+  containerExitCode: number | null;
+}): string {
+  const lines: string[] = [];
+  if (input.run.logs.trim()) {
+    lines.push(input.run.logs.trim());
+    lines.push("");
+  }
+  lines.push("[runner_error]");
+  lines.push(
+    `Container ${input.run.container_instance ?? "(unknown)"} entered '${input.containerStatus}' before run completion.`
+  );
+  if (input.containerExitCode !== null) {
+    lines.push(`container_exit_code: ${input.containerExitCode}`);
+  }
+  lines.push("Run was marked as failed during status reconciliation.");
+  return lines.join("\n");
+}
+
+async function fetchActionsContainerState(
+  actionsRunner: DurableObjectNamespace,
+  containerInstance: string
+): Promise<ActionsContainerStatePayload["state"] | null> {
+  try {
+    const stub = actionsRunner.getByName(containerInstance);
+    const response = await stub.fetch("https://actions-container.internal/state");
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as ActionsContainerStatePayload | null;
+    if (!payload?.state || typeof payload.state !== "object") {
+      return null;
+    }
+    return payload.state;
+  } catch {
+    return null;
+  }
+}
+
+async function reconcileRunningActionRuns(input: {
+  env: Pick<AppEnv["Bindings"], "ACTIONS_RUNNER">;
+  actionsService: ActionsService;
+  repositoryId: string;
+  runs: ActionRunRecord[];
+}): Promise<ActionRunRecord[]> {
+  const actionsRunner = input.env.ACTIONS_RUNNER;
+  if (!actionsRunner) {
+    return input.runs;
+  }
+
+  const runningRuns = input.runs.filter(
+    (run) => run.status === "running" && typeof run.container_instance === "string"
+  );
+  if (runningRuns.length === 0) {
+    return input.runs;
+  }
+
+  const updatedRuns = new Map<string, ActionRunRecord>();
+  await Promise.all(
+    runningRuns.map(async (run) => {
+      const containerInstance = run.container_instance;
+      if (!containerInstance) {
+        return;
+      }
+
+      const state = await fetchActionsContainerState(actionsRunner, containerInstance);
+      const containerStatus = state?.status;
+      if (
+        typeof containerStatus !== "string" ||
+        !TERMINAL_ACTIONS_CONTAINER_STATES.has(containerStatus)
+      ) {
+        return;
+      }
+
+      const containerExitCode = typeof state?.exitCode === "number" ? state.exitCode : null;
+      const logs = appendContainerStateErrorLogs({
+        run,
+        containerStatus,
+        containerExitCode
+      });
+      const result = await input.actionsService.failRunningRunIfStillRunning(
+        input.repositoryId,
+        run.id,
+        {
+          logs,
+          exitCode: containerExitCode
+        }
+      );
+
+      if (!result.updated) {
+        return;
+      }
+
+      updatedRuns.set(run.id, {
+        ...run,
+        status: "failed",
+        logs,
+        exit_code: containerExitCode,
+        completed_at: result.completedAt,
+        updated_at: result.completedAt
+      });
+    })
+  );
+
+  if (updatedRuns.size === 0) {
+    return input.runs;
+  }
+
+  return input.runs.map((run) => updatedRuns.get(run.id) ?? run);
 }
 
 const router = new Hono<AppEnv>();
@@ -1693,7 +1816,13 @@ router.get("/repos/:owner/:repo/actions/runs", optionalSession, async (c) => {
 
   const actionsService = new ActionsService(c.env.DB);
   const runs = await actionsService.listRuns(repository.id, parseLimit(c.req.query("limit"), 30));
-  return c.json({ runs });
+  const reconciledRuns = await reconcileRunningActionRuns({
+    env: c.env,
+    actionsService,
+    repositoryId: repository.id,
+    runs
+  });
+  return c.json({ runs: reconciledRuns });
 });
 
 router.get("/repos/:owner/:repo/actions/runs/latest", optionalSession, async (c) => {
@@ -1716,8 +1845,14 @@ router.get("/repos/:owner/:repo/actions/runs/latest", optionalSession, async (c)
     sourceType,
     sourceNumbers
   );
-  const runBySourceNumber = new Map<number, (typeof latestRuns)[number]>();
-  for (const run of latestRuns) {
+  const reconciledLatestRuns = await reconcileRunningActionRuns({
+    env: c.env,
+    actionsService,
+    repositoryId: repository.id,
+    runs: latestRuns
+  });
+  const runBySourceNumber = new Map<number, (typeof reconciledLatestRuns)[number]>();
+  for (const run of reconciledLatestRuns) {
     if (run.trigger_source_number !== null) {
       runBySourceNumber.set(run.trigger_source_number, run);
     }
@@ -1747,8 +1882,14 @@ router.get("/repos/:owner/:repo/actions/runs/latest-by-comments", optionalSessio
 
   const actionsService = new ActionsService(c.env.DB);
   const latestRuns = await actionsService.listLatestRunsByCommentIds(repository.id, commentIds);
-  const runByCommentId = new Map<string, (typeof latestRuns)[number]>();
-  for (const run of latestRuns) {
+  const reconciledLatestRuns = await reconcileRunningActionRuns({
+    env: c.env,
+    actionsService,
+    repositoryId: repository.id,
+    runs: latestRuns
+  });
+  const runByCommentId = new Map<string, (typeof reconciledLatestRuns)[number]>();
+  for (const run of reconciledLatestRuns) {
     if (run.trigger_source_comment_id) {
       runByCommentId.set(run.trigger_source_comment_id, run);
     }
@@ -1780,7 +1921,13 @@ router.get("/repos/:owner/:repo/actions/runs/:runId", optionalSession, async (c)
   if (!run) {
     throw new HTTPException(404, { message: "Action run not found" });
   }
-  return c.json({ run });
+  const reconciledRuns = await reconcileRunningActionRuns({
+    env: c.env,
+    actionsService,
+    repositoryId: repository.id,
+    runs: [run]
+  });
+  return c.json({ run: reconciledRuns[0] ?? run });
 });
 
 router.post("/repos/:owner/:repo/actions/runs/:runId/rerun", requireSession, async (c) => {

@@ -837,6 +837,91 @@ describe("API issues and pull requests", () => {
     expect(settings.get("actions.claude_code.config_file_content")).toContain("\"permissions\"");
   });
 
+  it("reconciles running action runs when container is already stopped", async () => {
+    const now = Date.now();
+    const fetchContainerState = vi.fn(async () =>
+      new Response(JSON.stringify({ state: { status: "stopped_with_code", exitCode: 137 } }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "FROM action_runs r",
+        all: () => [
+          {
+            id: "run-1",
+            repository_id: "repo-1",
+            run_number: 1,
+            workflow_id: "workflow-1",
+            workflow_name: "CI",
+            trigger_event: "pull_request_created",
+            trigger_ref: "refs/heads/feature",
+            trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 1,
+            trigger_source_comment_id: null,
+            triggered_by: "owner-1",
+            triggered_by_username: "alice",
+            status: "running",
+            agent_type: "codex",
+            prompt: "run tests",
+            logs: "",
+            exit_code: null,
+            container_instance: "action-run-run-1",
+            created_at: now - 1_000,
+            started_at: now - 900,
+            completed_at: null,
+            updated_at: now - 900
+          }
+        ]
+      },
+      {
+        when: "SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs"),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: fetchContainerState
+          })
+        } as unknown as DurableObjectNamespace
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      runs: Array<{
+        id: string;
+        status: string;
+        exit_code: number | null;
+        logs: string;
+      }>;
+    };
+    expect(body.runs[0]?.id).toBe("run-1");
+    expect(body.runs[0]?.status).toBe("failed");
+    expect(body.runs[0]?.exit_code).toBe(137);
+    expect(body.runs[0]?.logs).toContain("stopped_with_code");
+    expect(fetchContainerState).toHaveBeenCalledTimes(1);
+    expect(fetchContainerState).toHaveBeenCalledWith("https://actions-container.internal/state");
+  });
+
   it("rejects rerunning action runs for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-3",

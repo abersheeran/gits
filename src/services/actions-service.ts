@@ -516,6 +516,37 @@ export class ActionsService {
       .run();
   }
 
+  async failRunningRunIfStillRunning(
+    repositoryId: string,
+    runId: string,
+    input: {
+      logs: string;
+      exitCode?: number | null;
+    }
+  ): Promise<{ updated: boolean; completedAt: number }> {
+    const completedAt = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE action_runs
+         SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'running'`
+      )
+      .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, runId)
+      .run();
+
+    const changes =
+      (result as unknown as {
+        meta?: {
+          changes?: number;
+        };
+      }).meta?.changes ?? 0;
+
+    return {
+      updated: changes > 0,
+      completedAt
+    };
+  }
+
   async listLatestRunsBySource(
     repositoryId: string,
     sourceType: ActionRunSourceType,
