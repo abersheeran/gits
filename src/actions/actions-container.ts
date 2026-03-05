@@ -62,6 +62,7 @@ export class ActionsContainer extends Container {
           sha: payload.sha,
           gitUsername: payload.gitUsername,
           gitToken: payload.gitToken,
+          env: payload.env,
           configFiles: payload.configFiles
         })
       });

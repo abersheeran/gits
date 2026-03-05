@@ -14,6 +14,7 @@ type RunRequest = {
   sha?: string;
   gitUsername?: string;
   gitToken?: string;
+  env?: Record<string, string>;
   configFiles?: Record<string, string>;
 };
 
@@ -196,7 +197,15 @@ function buildAgentCommandCandidates(agentType: AgentType, prompt: string): Comm
     return [
       {
         command: "codex",
-        args: ["exec", "--dangerously-bypass-approvals-and-sandbox", "--full-auto", prompt]
+        args: ["--dangerously-bypass-approvals-and-sandbox", "exec", prompt]
+      },
+      {
+        command: "codex",
+        args: ["--full-auto", "exec", prompt]
+      },
+      {
+        command: "codex",
+        args: ["exec", "--dangerously-bypass-approvals-and-sandbox", prompt]
       },
       {
         command: "codex",
@@ -337,7 +346,7 @@ async function setupPlatformMcpServer(
 ): Promise<string | null> {
   const apiBase = env.GITS_PLATFORM_API_BASE?.trim() ?? "";
   if (!apiBase) {
-    return null;
+    return "Skipped MCP setup because GITS_PLATFORM_API_BASE is missing";
   }
 
   if (agentType === "codex") {
@@ -349,14 +358,15 @@ async function setupPlatformMcpServer(
 async function runAgentPrompt(
   agentType: AgentType,
   prompt: string,
-  workspaceDir: string
+  workspaceDir: string,
+  runtimeEnv: Record<string, string> | undefined
 ): Promise<CommandResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...(runtimeEnv ?? {}),
     HOME: RUNTIME_HOME_PATH,
     XDG_CONFIG_HOME: path.join(RUNTIME_HOME_PATH, ".config"),
     GITS_ACTION_AGENT_TYPE: agentType,
-    GITS_ACTION_PROMPT: prompt,
     CODEX_APPROVAL_POLICY: "never",
     CLAUDE_CODE_PERMISSION_MODE: "bypass"
   };
@@ -569,7 +579,7 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
     workspaceRoot = prepared.workspaceRoot;
     await applyConfigFiles(runRequest.configFiles);
 
-    const executed = await runAgentPrompt(agentType, prompt, prepared.workspaceDir);
+    const executed = await runAgentPrompt(agentType, prompt, prepared.workspaceDir, runRequest.env);
 
     const stderr = [
       executed.stderr,
