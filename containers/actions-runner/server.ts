@@ -77,6 +77,20 @@ function buildCommandText(command: string, args: string[]): string {
   return [command, ...args.map((arg) => JSON.stringify(arg))].join(" ");
 }
 
+function buildCommandFailureDetail(result: CommandResult): string {
+  return [result.stdout, result.stderr, result.spawnError ?? ""].join("\n").trim();
+}
+
+function isShallowUnsupportedError(result: CommandResult): boolean {
+  const combined = [result.stdout, result.stderr, result.spawnError ?? ""].join("\n").toLowerCase();
+  return (
+    combined.includes("expected shallow/unshallow") ||
+    combined.includes("does not support shallow") ||
+    combined.includes("shallow file has changed") ||
+    combined.includes("dumb http transport does not support shallow")
+  );
+}
+
 async function runCommand(
   command: string,
   args: string[],
@@ -220,6 +234,38 @@ async function runAgentPrompt(
   );
 }
 
+async function gitCloneWithFallback(repositoryUrl: string, workspaceDir: string): Promise<CommandResult> {
+  const shallowClone = await runCommand("git", ["clone", "--depth", "1", repositoryUrl, workspaceDir]);
+  if (!shallowClone.spawnError && shallowClone.exitCode === 0) {
+    return shallowClone;
+  }
+  if (!isShallowUnsupportedError(shallowClone)) {
+    return shallowClone;
+  }
+
+  await rm(workspaceDir, { recursive: true, force: true }).catch(() => undefined);
+  return runCommand("git", ["clone", repositoryUrl, workspaceDir]);
+}
+
+async function gitFetchShaWithFallback(workspaceDir: string, sha: string): Promise<CommandResult> {
+  const shallowFetch = await runCommand("git", [
+    "-C",
+    workspaceDir,
+    "fetch",
+    "--depth",
+    "1",
+    "origin",
+    sha
+  ]);
+  if (!shallowFetch.spawnError && shallowFetch.exitCode === 0) {
+    return shallowFetch;
+  }
+  if (!isShallowUnsupportedError(shallowFetch)) {
+    return shallowFetch;
+  }
+  return runCommand("git", ["-C", workspaceDir, "fetch", "origin", sha]);
+}
+
 async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: string; workspaceDir: string }> {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "gits-actions-"));
   const repositoryUrl = request.repositoryUrl?.trim() ?? "";
@@ -236,9 +282,9 @@ async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: s
     request.gitToken
   );
   const workspaceDir = path.join(workspaceRoot, "repo");
-  const clone = await runCommand("git", ["clone", "--depth", "1", authenticatedRepositoryUrl, workspaceDir]);
+  const clone = await gitCloneWithFallback(authenticatedRepositoryUrl, workspaceDir);
   if (clone.spawnError || clone.exitCode !== 0) {
-    const detail = [clone.stdout, clone.stderr, clone.spawnError ?? ""].join("\n").trim();
+    const detail = buildCommandFailureDetail(clone);
     throw new Error(`git clone failed: ${detail || `exit code ${clone.exitCode}`}`);
   }
 
@@ -254,12 +300,14 @@ async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: s
   if (normalizedSha) {
     const checkoutSha = await runCommand("git", ["-C", workspaceDir, "checkout", normalizedSha]);
     if (checkoutSha.spawnError || checkoutSha.exitCode !== 0) {
-      await runCommand("git", ["-C", workspaceDir, "fetch", "--depth", "1", "origin", normalizedSha]);
+      const fetchSha = await gitFetchShaWithFallback(workspaceDir, normalizedSha);
+      if (fetchSha.spawnError || fetchSha.exitCode !== 0) {
+        const detail = buildCommandFailureDetail(fetchSha);
+        throw new Error(`git fetch sha failed: ${detail || `exit code ${fetchSha.exitCode}`}`);
+      }
       const retryCheckoutSha = await runCommand("git", ["-C", workspaceDir, "checkout", normalizedSha]);
       if (retryCheckoutSha.spawnError || retryCheckoutSha.exitCode !== 0) {
-        const detail = [retryCheckoutSha.stdout, retryCheckoutSha.stderr, retryCheckoutSha.spawnError ?? ""]
-          .join("\n")
-          .trim();
+        const detail = buildCommandFailureDetail(retryCheckoutSha);
         throw new Error(`git checkout sha failed: ${detail || `exit code ${retryCheckoutSha.exitCode}`}`);
       }
     }
