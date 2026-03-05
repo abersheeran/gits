@@ -60,7 +60,9 @@ export async function consumeActionRunQueueMessage(input: {
       agent_type: run.agent_type,
       prompt: run.prompt,
       trigger_ref: run.trigger_ref,
-      trigger_sha: run.trigger_sha
+      trigger_sha: run.trigger_sha,
+      trigger_source_type: run.trigger_source_type,
+      trigger_source_number: run.trigger_source_number
     },
     ...(triggeredByUser ? { triggeredByUser } : {}),
     requestOrigin: input.message.requestOrigin

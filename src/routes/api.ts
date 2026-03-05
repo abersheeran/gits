@@ -522,6 +522,11 @@ You are handling an issue trigger.
 1. If the issue information is sufficient to implement a fix, start coding, push a branch, and create a PR that closes #${input.issueNumber}.
 2. If information is insufficient, reply to this issue with concrete follow-up questions.
 
+[Preferred MCP Tools]
+If MCP tools are available, use them before raw HTTP:
+- gits_issue_reply: post an issue comment reply
+- gits_create_pull_request: create a pull request with closeIssueNumbers
+
 [Issue Reply API]
 method: POST
 url: ${issueCommentsApi}

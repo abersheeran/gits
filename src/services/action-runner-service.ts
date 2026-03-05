@@ -108,6 +108,8 @@ export async function executeActionRun(input: {
     prompt: string;
     trigger_ref: string | null;
     trigger_sha: string | null;
+    trigger_source_type: "issue" | "pull_request" | null;
+    trigger_source_number: number | null;
   };
   triggeredByUser?: AuthUser;
   requestOrigin: string;
@@ -135,7 +137,10 @@ export async function executeActionRun(input: {
 
   let ephemeralTokenId: string | null = null;
   let ephemeralToken: string | null = null;
-  const apiTokenIds: string[] = [];
+  let issueReplyTokenId: string | null = null;
+  let issueReplyToken: string | null = null;
+  let prCreateTokenId: string | null = null;
+  let prCreateToken: string | null = null;
   let runnerResult: RunnerExecuteResult | undefined;
   let runtimePrompt = input.run.prompt;
 
@@ -150,31 +155,52 @@ export async function executeActionRun(input: {
       ephemeralTokenId = createdToken.tokenId;
       ephemeralToken = createdToken.token;
 
-      if (runtimePrompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER)) {
+      const needsIssueReplyToken =
+        input.run.trigger_source_type === "issue" ||
+        runtimePrompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER);
+      const needsPrCreateToken =
+        input.run.trigger_source_type === "issue" ||
+        runtimePrompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER);
+
+      if (needsIssueReplyToken) {
         const replyToken = await authService.createAccessToken({
           userId: input.triggeredByUser.id,
           name: `actions-issue-reply-${input.run.run_number}`,
           expiresAt: Date.now() + 20 * 60 * 1000
         });
-        apiTokenIds.push(replyToken.tokenId);
+        issueReplyTokenId = replyToken.tokenId;
+        issueReplyToken = replyToken.token;
         runtimePrompt = runtimePrompt.replaceAll(ISSUE_REPLY_TOKEN_PLACEHOLDER, replyToken.token);
       }
-      if (runtimePrompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER)) {
+
+      if (needsPrCreateToken) {
         const prToken = await authService.createAccessToken({
           userId: input.triggeredByUser.id,
           name: `actions-pr-create-${input.run.run_number}`,
           expiresAt: Date.now() + 20 * 60 * 1000
         });
-        apiTokenIds.push(prToken.tokenId);
+        prCreateTokenId = prToken.tokenId;
+        prCreateToken = prToken.token;
         runtimePrompt = runtimePrompt.replaceAll(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER, prToken.token);
       }
     }
 
     const globalConfig = await actionsService.getGlobalConfig();
+    const repositoryOrigin = normalizeCloneOrigin({
+      requestOrigin: input.requestOrigin
+    });
     const envVars: Record<string, string> = {
       GITS_ACTION_RUN_ID: input.run.id,
       GITS_ACTION_RUN_NUMBER: String(input.run.run_number),
-      GITS_REPOSITORY: `${input.repository.owner_username}/${input.repository.name}`
+      GITS_REPOSITORY: `${input.repository.owner_username}/${input.repository.name}`,
+      GITS_PLATFORM_API_BASE: repositoryOrigin,
+      GITS_REPOSITORY_OWNER: input.repository.owner_username,
+      GITS_REPOSITORY_NAME: input.repository.name,
+      ...(input.run.trigger_source_type === "issue" && input.run.trigger_source_number !== null
+        ? { GITS_TRIGGER_ISSUE_NUMBER: String(input.run.trigger_source_number) }
+        : {}),
+      ...(issueReplyToken ? { GITS_ISSUE_REPLY_TOKEN: issueReplyToken } : {}),
+      ...(prCreateToken ? { GITS_PR_CREATE_TOKEN: prCreateToken } : {})
     };
 
     const configFiles: Record<string, string> = {};
@@ -186,9 +212,6 @@ export async function executeActionRun(input: {
     }
 
     const runnerStub = input.env.ACTIONS_RUNNER.getByName(containerInstance);
-    const repositoryOrigin = normalizeCloneOrigin({
-      requestOrigin: input.requestOrigin,
-    });
     const runnerResponse = await runnerStub.fetch("https://actions-container.internal/execute", {
       method: "POST",
       headers: {
@@ -263,13 +286,22 @@ export async function executeActionRun(input: {
       exitCode: runnerResult?.exitCode ?? null
     });
   } finally {
-    if (ephemeralTokenId && input.triggeredByUser) {
+    if (input.triggeredByUser && (ephemeralTokenId || issueReplyTokenId || prCreateTokenId)) {
       const authService = new AuthService(input.env.DB, input.env.JWT_SECRET);
-      await authService
-        .revokeAccessToken(input.triggeredByUser.id, ephemeralTokenId)
-        .catch(() => undefined);
-      for (const tokenId of apiTokenIds) {
-        await authService.revokeAccessToken(input.triggeredByUser.id, tokenId).catch(() => undefined);
+      if (ephemeralTokenId) {
+        await authService
+          .revokeAccessToken(input.triggeredByUser.id, ephemeralTokenId)
+          .catch(() => undefined);
+      }
+      if (issueReplyTokenId) {
+        await authService
+          .revokeAccessToken(input.triggeredByUser.id, issueReplyTokenId)
+          .catch(() => undefined);
+      }
+      if (prCreateTokenId) {
+        await authService
+          .revokeAccessToken(input.triggeredByUser.id, prCreateTokenId)
+          .catch(() => undefined);
       }
     }
 

@@ -78,6 +78,8 @@ export async function scheduleActionRunExecution(input: {
     prompt: string;
     trigger_ref: string | null;
     trigger_sha: string | null;
+    trigger_source_type: ActionRunSourceType | null;
+    trigger_source_number: number | null;
   };
   triggeredByUser?: AuthUser;
   requestOrigin: string;

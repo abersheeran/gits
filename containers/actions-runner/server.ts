@@ -44,6 +44,16 @@ const ROOTLESS_HOME = "/home/rootless";
 const ROOT_HOME = "/root";
 const CODEX_CONFIG_RELATIVE_PATH = ".codex/config.toml";
 const CLAUDE_CODE_CONFIG_RELATIVE_PATH = ".claude/settings.json";
+const GITS_PLATFORM_MCP_SERVER_NAME = "gits-platform";
+const GITS_PLATFORM_MCP_SERVER_SCRIPT = "/opt/actions-runner/gits-platform-mcp.js";
+const GITS_PLATFORM_MCP_ENV_KEYS = [
+  "GITS_PLATFORM_API_BASE",
+  "GITS_REPOSITORY_OWNER",
+  "GITS_REPOSITORY_NAME",
+  "GITS_TRIGGER_ISSUE_NUMBER",
+  "GITS_ISSUE_REPLY_TOKEN",
+  "GITS_PR_CREATE_TOKEN"
+] as const;
 
 function normalizeHomePath(homePath: string | undefined): string | null {
   const trimmed = homePath?.trim() ?? "";
@@ -245,6 +255,97 @@ function shouldTryNextCandidate(result: CommandResult): boolean {
   );
 }
 
+function collectPlatformMcpEnv(env: NodeJS.ProcessEnv): string[] {
+  const envEntries: string[] = [];
+  for (const key of GITS_PLATFORM_MCP_ENV_KEYS) {
+    const rawValue = env[key];
+    const normalizedValue = rawValue?.trim();
+    if (!normalizedValue) {
+      continue;
+    }
+    envEntries.push(`${key}=${normalizedValue}`);
+  }
+  return envEntries;
+}
+
+function appendStderr(result: CommandResult, extraMessage: string | null): CommandResult {
+  if (!extraMessage) {
+    return result;
+  }
+  return {
+    ...result,
+    stderr: [result.stderr, `[mcp_setup] ${extraMessage}`].filter(Boolean).join("\n")
+  };
+}
+
+async function setupCodexPlatformMcpServer(
+  workspaceDir: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const removeArgs = ["mcp", "remove", GITS_PLATFORM_MCP_SERVER_NAME];
+  await runCommand("codex", removeArgs, { cwd: workspaceDir, env });
+
+  const addArgs = ["mcp", "add", GITS_PLATFORM_MCP_SERVER_NAME];
+  for (const envEntry of collectPlatformMcpEnv(env)) {
+    addArgs.push("--env", envEntry);
+  }
+  addArgs.push("--", "node", GITS_PLATFORM_MCP_SERVER_SCRIPT);
+
+  const add = await runCommand("codex", addArgs, { cwd: workspaceDir, env });
+  if (!add.spawnError && add.exitCode === 0) {
+    return null;
+  }
+  const detail = buildCommandFailureDetail(add);
+  return detail || `codex mcp add failed with exit code ${add.exitCode}`;
+}
+
+async function setupClaudePlatformMcpServer(
+  workspaceDir: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const commandCandidates = ["claude", "claude-code"];
+  let lastFailure: string | null = null;
+
+  for (const command of commandCandidates) {
+    const removeArgs = ["mcp", "remove", "-s", "local", GITS_PLATFORM_MCP_SERVER_NAME];
+    await runCommand(command, removeArgs, { cwd: workspaceDir, env });
+
+    const addArgs = ["mcp", "add", "-s", "local"];
+    for (const envEntry of collectPlatformMcpEnv(env)) {
+      addArgs.push("-e", envEntry);
+    }
+    addArgs.push(GITS_PLATFORM_MCP_SERVER_NAME, "node", GITS_PLATFORM_MCP_SERVER_SCRIPT);
+
+    const add = await runCommand(command, addArgs, { cwd: workspaceDir, env });
+    if (!add.spawnError && add.exitCode === 0) {
+      return null;
+    }
+    if (add.spawnError) {
+      continue;
+    }
+    const detail = buildCommandFailureDetail(add);
+    lastFailure = detail || `${command} mcp add failed with exit code ${add.exitCode}`;
+  }
+
+  return lastFailure;
+}
+
+async function setupPlatformMcpServer(
+  agentType: AgentType,
+  workspaceDir: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const apiBase = env.GITS_PLATFORM_API_BASE?.trim() ?? "";
+  if (!apiBase) {
+    return null;
+  }
+
+  if (agentType === "codex") {
+    return setupCodexPlatformMcpServer(workspaceDir, env);
+  }
+  return setupClaudePlatformMcpServer(workspaceDir, env);
+}
+
 async function runAgentPrompt(
   agentType: AgentType,
   prompt: string,
@@ -260,6 +361,7 @@ async function runAgentPrompt(
     CLAUDE_CODE_PERMISSION_MODE: "bypass"
   };
 
+  const mcpSetupWarning = await setupPlatformMcpServer(agentType, workspaceDir, env);
   const candidates = buildAgentCommandCandidates(agentType, prompt);
   let lastResult: CommandResult | null = null;
   for (const candidate of candidates) {
@@ -270,18 +372,18 @@ async function runAgentPrompt(
     lastResult = result;
 
     if (!shouldTryNextCandidate(result)) {
-      return result;
+      return appendStderr(result, mcpSetupWarning);
     }
   }
 
-  return (
+  const fallbackResult =
     lastResult ?? {
       stdout: "",
       stderr: "No runnable agent command candidate found",
       exitCode: -1,
       attemptedCommand: ""
-    }
-  );
+    };
+  return appendStderr(fallbackResult, mcpSetupWarning);
 }
 
 async function gitCloneWithFallback(repositoryUrl: string, workspaceDir: string): Promise<CommandResult> {
