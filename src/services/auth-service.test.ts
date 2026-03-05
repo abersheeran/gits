@@ -6,7 +6,7 @@ describe("AuthService token lifecycle", () => {
   it("lists access tokens for a user", async () => {
     const db = createMockD1Database([
       {
-        when: "FROM access_tokens",
+        when: /FROM access_tokens[\s\S]*WHERE user_id = \? AND is_internal = 0/,
         all: () => [
           {
             id: "tok-1",

@@ -150,7 +150,8 @@ export async function executeActionRun(input: {
       const createdToken = await authService.createAccessToken({
         userId: input.triggeredByUser.id,
         name: `actions-run-${input.run.run_number}`,
-        expiresAt: Date.now() + 15 * 60 * 1000
+        expiresAt: Date.now() + 15 * 60 * 1000,
+        internal: true
       });
       ephemeralTokenId = createdToken.tokenId;
       ephemeralToken = createdToken.token;
@@ -166,7 +167,9 @@ export async function executeActionRun(input: {
         const replyToken = await authService.createAccessToken({
           userId: input.triggeredByUser.id,
           name: `actions-issue-reply-${input.run.run_number}`,
-          expiresAt: Date.now() + 20 * 60 * 1000
+          expiresAt: Date.now() + 20 * 60 * 1000,
+          internal: true,
+          displayAsActions: true
         });
         issueReplyTokenId = replyToken.tokenId;
         issueReplyToken = replyToken.token;
@@ -177,7 +180,8 @@ export async function executeActionRun(input: {
         const prToken = await authService.createAccessToken({
           userId: input.triggeredByUser.id,
           name: `actions-pr-create-${input.run.run_number}`,
-          expiresAt: Date.now() + 20 * 60 * 1000
+          expiresAt: Date.now() + 20 * 60 * 1000,
+          internal: true
         });
         prCreateTokenId = prToken.tokenId;
         prCreateToken = prToken.token;

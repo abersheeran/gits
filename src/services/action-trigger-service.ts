@@ -221,6 +221,7 @@ export async function triggerActionWorkflows(input: {
   triggerSha?: string | null;
   triggerSourceType?: ActionRunSourceType | null;
   triggerSourceNumber?: number | null;
+  triggerSourceCommentId?: string | null;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
   buildPrompt?: (workflow: ActionWorkflowRecord) => string;
@@ -254,6 +255,9 @@ export async function triggerActionWorkflows(input: {
       ...(input.triggerSha ? { triggerSha: input.triggerSha } : {}),
       ...(input.triggerSourceType ? { triggerSourceType: input.triggerSourceType } : {}),
       ...(input.triggerSourceNumber ? { triggerSourceNumber: input.triggerSourceNumber } : {}),
+      ...(input.triggerSourceCommentId
+        ? { triggerSourceCommentId: input.triggerSourceCommentId }
+        : {}),
       ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
       agentType: workflow.agent_type,
       prompt

@@ -5,6 +5,12 @@ export type AuthUser = {
   username: string;
 };
 
+export type AccessTokenContext = {
+  tokenId: string;
+  isInternal: boolean;
+  displayAsActions: boolean;
+};
+
 export type RepositoryRecord = {
   id: string;
   owner_id: string;
@@ -162,5 +168,6 @@ export type AppEnv = {
   Variables: {
     sessionUser?: AuthUser;
     basicAuthUser?: AuthUser;
+    accessTokenContext?: AccessTokenContext;
   };
 };

@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import type { AuthUser } from "../types";
+import type { AccessTokenContext, AuthUser } from "../types";
 
 type UserRow = {
   id: string;
@@ -14,6 +14,8 @@ type AccessTokenRow = {
   user_id: string;
   token_hash: string;
   token_prefix: string;
+  is_internal: number;
+  display_as_actions: number;
   revoked_at: number | null;
   expires_at: number | null;
   username: string;
@@ -38,6 +40,11 @@ export class AuthService {
   private get jwtSecretKey(): Uint8Array {
     return new TextEncoder().encode(this.jwtSecret);
   }
+
+  private static readonly ACTIONS_USER_ID = "actions-system-user";
+  private static readonly ACTIONS_USERNAME = "actions";
+  private static readonly ACTIONS_EMAIL = "actions@system.local";
+  private static readonly ACTIONS_PASSWORD_HASH = "!";
 
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 12);
@@ -109,6 +116,47 @@ export class AuthService {
     return row ?? null;
   }
 
+  async getOrCreateActionsUser(): Promise<AuthUser> {
+    const byId = await this.getUserById(AuthService.ACTIONS_USER_ID);
+    if (byId) {
+      return byId;
+    }
+
+    const byUsername = await this.db
+      .prepare(`SELECT id, username FROM users WHERE username = ? LIMIT 1`)
+      .bind(AuthService.ACTIONS_USERNAME)
+      .first<AuthUser>();
+    if (byUsername) {
+      return byUsername;
+    }
+
+    await this.db
+      .prepare(
+        `INSERT INTO users (id, username, email, password_hash, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .bind(
+        AuthService.ACTIONS_USER_ID,
+        AuthService.ACTIONS_USERNAME,
+        AuthService.ACTIONS_EMAIL,
+        AuthService.ACTIONS_PASSWORD_HASH,
+        Date.now()
+      )
+      .run()
+      .catch(() => undefined);
+
+    const created =
+      (await this.getUserById(AuthService.ACTIONS_USER_ID)) ??
+      (await this.db
+        .prepare(`SELECT id, username FROM users WHERE username = ? LIMIT 1`)
+        .bind(AuthService.ACTIONS_USERNAME)
+        .first<AuthUser>());
+    if (!created) {
+      throw new Error("Failed to create actions system user");
+    }
+    return created;
+  }
+
   async createSessionToken(user: AuthUser): Promise<string> {
     return new SignJWT({ username: user.username })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
@@ -149,6 +197,8 @@ export class AuthService {
     userId: string;
     name: string;
     expiresAt?: number;
+    internal?: boolean;
+    displayAsActions?: boolean;
   }): Promise<{ tokenId: string; token: string }> {
     const tokenId = crypto.randomUUID();
     const random = crypto.randomUUID().replaceAll("-", "");
@@ -160,8 +210,8 @@ export class AuthService {
     await this.db
       .prepare(
         `INSERT INTO access_tokens (
-          id, user_id, token_hash, token_prefix, name, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+          id, user_id, token_hash, token_prefix, name, is_internal, display_as_actions, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         tokenId,
@@ -169,6 +219,8 @@ export class AuthService {
         tokenHash,
         tokenPrefix,
         input.name,
+        input.internal ? 1 : 0,
+        input.displayAsActions ? 1 : 0,
         createdAt,
         input.expiresAt ?? null
       )
@@ -180,7 +232,9 @@ export class AuthService {
     };
   }
 
-  async verifyAccessToken(token: string): Promise<AuthUser | null> {
+  async verifyAccessTokenWithMetadata(
+    token: string
+  ): Promise<{ user: AuthUser; context: AccessTokenContext } | null> {
     if (!token) {
       return null;
     }
@@ -194,6 +248,8 @@ export class AuthService {
           t.user_id,
           t.token_hash,
           t.token_prefix,
+          t.is_internal,
+          t.display_as_actions,
           t.revoked_at,
           t.expires_at,
           u.username
@@ -222,12 +278,24 @@ export class AuthService {
         .run();
 
       return {
-        id: row.user_id,
-        username: row.username
+        user: {
+          id: row.user_id,
+          username: row.username
+        },
+        context: {
+          tokenId: row.id,
+          isInternal: row.is_internal === 1,
+          displayAsActions: row.display_as_actions === 1
+        }
       };
     }
 
     return null;
+  }
+
+  async verifyAccessToken(token: string): Promise<AuthUser | null> {
+    const verified = await this.verifyAccessTokenWithMetadata(token);
+    return verified?.user ?? null;
   }
 
   async listAccessTokens(userId: string): Promise<AccessTokenMetadata[]> {
@@ -239,10 +307,10 @@ export class AuthService {
           name,
           created_at,
           expires_at,
-          last_used_at,
-          revoked_at
+         last_used_at,
+         revoked_at
          FROM access_tokens
-         WHERE user_id = ?
+         WHERE user_id = ? AND is_internal = 0
          ORDER BY created_at DESC`
       )
       .bind(userId)

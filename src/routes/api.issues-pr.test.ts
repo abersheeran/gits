@@ -295,6 +295,358 @@ describe("API issues and pull requests", () => {
     expect(body.comment.author_username).toBe("bob");
   });
 
+  it("creates issue comments as actions when token requests actions identity", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(null);
+    vi.spyOn(AuthService.prototype, "verifyAccessTokenWithMetadata").mockResolvedValue({
+      user: { id: "user-2", username: "bob" },
+      context: {
+        tokenId: "tok-actions",
+        isInternal: true,
+        displayAsActions: true
+      }
+    });
+    vi.spyOn(AuthService.prototype, "getOrCreateActionsUser").mockResolvedValue({
+      id: "actions-system-user",
+      username: "actions"
+    });
+
+    const now = Date.now();
+    let insertedAuthorId: string | null = null;
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need bugfix",
+          body: "Steps",
+          state: "open",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "INSERT INTO issue_comments",
+        run: (params) => {
+          insertedAuthorId = String(params[4] ?? "");
+          return { success: true };
+        }
+      },
+      {
+        when: "FROM issue_comments c",
+        first: () => ({
+          id: "comment-1",
+          repository_id: "repo-1",
+          issue_id: "issue-1",
+          issue_number: 1,
+          author_id: "actions-system-user",
+          author_username: "actions",
+          body: "I can take this",
+          created_at: now,
+          updated_at: now
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer pat-actions",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "I can take this"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    expect(insertedAuthorId).toBe("actions-system-user");
+    const body = (await response.json()) as { comment: { author_username: string } };
+    expect(body.comment.author_username).toBe("actions");
+  });
+
+  it("does not trigger actions for comments authored as actions identity", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(null);
+    vi.spyOn(AuthService.prototype, "verifyAccessTokenWithMetadata").mockResolvedValue({
+      user: { id: "user-2", username: "bob" },
+      context: {
+        tokenId: "tok-actions",
+        isInternal: true,
+        displayAsActions: true
+      }
+    });
+    vi.spyOn(AuthService.prototype, "getOrCreateActionsUser").mockResolvedValue({
+      id: "actions-system-user",
+      username: "actions"
+    });
+
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need bugfix",
+          body: "Steps",
+          state: "open",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "INSERT INTO issue_comments",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM issue_comments c",
+        first: () => ({
+          id: "comment-1",
+          repository_id: "repo-1",
+          issue_id: "issue-1",
+          issue_number: 1,
+          author_id: "actions-system-user",
+          author_username: "actions",
+          body: "@actions please run",
+          created_at: now,
+          updated_at: now
+        }),
+        all: () => [
+          {
+            id: "comment-1",
+            repository_id: "repo-1",
+            issue_id: "issue-1",
+            issue_number: 1,
+            author_id: "actions-system-user",
+            author_username: "actions",
+            body: "@actions please run",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer pat-actions",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "@actions please run"
+        })
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(201);
+    expect(enqueueRun).not.toHaveBeenCalled();
+  });
+
+  it("triggers issue actions on issue comment creation with full conversation history", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    vi.spyOn(StorageService.prototype, "readHead").mockResolvedValue("ref: refs/heads/main\n");
+    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    ]);
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    let createdRunPrompt = "";
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need bugfix",
+          body: "Initial issue details",
+          state: "open",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "INSERT INTO issue_comments",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM issue_comments c",
+        first: () => ({
+          id: "comment-2",
+          repository_id: "repo-1",
+          issue_id: "issue-1",
+          issue_number: 1,
+          author_id: "user-2",
+          author_username: "bob",
+          body: "Added logs below",
+          created_at: now,
+          updated_at: now
+        }),
+        all: () => [
+          {
+            id: "comment-1",
+            repository_id: "repo-1",
+            issue_id: "issue-1",
+            issue_number: 1,
+            author_id: "owner-1",
+            author_username: "alice",
+            body: "Can you share stack trace?",
+            created_at: now - 1_000,
+            updated_at: now - 1_000
+          },
+          {
+            id: "comment-2",
+            repository_id: "repo-1",
+            issue_id: "issue-1",
+            issue_number: 1,
+            author_id: "user-2",
+            author_username: "bob",
+            body: "Added logs below",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      },
+      {
+        when: "WHERE repository_id = ? AND trigger_event = ? AND enabled = 1",
+        all: () => [
+          {
+            id: "workflow-1",
+            repository_id: "repo-1",
+            name: "Issue Bot",
+            trigger_event: "issue_created",
+            agent_type: "codex",
+            prompt: "Issue workflow prompt",
+            push_branch_regex: null,
+            push_tag_regex: null,
+            enabled: 1,
+            created_by: "owner-1",
+            created_at: now,
+            updated_at: now
+          }
+        ]
+      },
+      {
+        when: "RETURNING action_run_seq AS run_number",
+        first: () => ({ run_number: 1 })
+      },
+      {
+        when: "INSERT INTO action_runs",
+        run: (params) => {
+          createdRunPrompt = String(params[14] ?? "");
+          return { success: true };
+        }
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () => ({
+          id: "run-1",
+          repository_id: "repo-1",
+          run_number: 1,
+          workflow_id: "workflow-1",
+          workflow_name: "Issue Bot",
+          trigger_event: "issue_created",
+          trigger_ref: "refs/heads/main",
+          trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          trigger_source_type: "issue",
+          trigger_source_number: 1,
+          trigger_source_comment_id: "comment-2",
+          triggered_by: "user-2",
+          triggered_by_username: "bob",
+          status: "queued",
+          agent_type: "codex",
+          prompt: createdRunPrompt,
+          logs: "",
+          exit_code: null,
+          container_instance: null,
+          created_at: now,
+          started_at: null,
+          completed_at: null,
+          updated_at: now
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "Added logs below"
+        })
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(201);
+    expect(enqueueRun).toHaveBeenCalledTimes(1);
+    expect(createdRunPrompt).toContain("trigger_reason: issue_comment_added");
+    expect(createdRunPrompt).toContain("trigger_comment_id: comment-2");
+    expect(createdRunPrompt).toContain("issue_conversation_history:");
+    expect(createdRunPrompt).toContain("Initial issue details");
+    expect(createdRunPrompt).toContain("Can you share stack trace?");
+    expect(createdRunPrompt).toContain("Added logs below");
+    expect(createdRunPrompt).toContain("summarize/compress");
+  });
+
   it("rejects pull request creation for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",

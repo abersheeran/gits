@@ -66,6 +66,26 @@ describe("API validation", () => {
     expect(body).toContain("Invalid username");
   });
 
+  it("returns 400 for reserved username actions", async () => {
+    const app = createApp();
+    const env = createBaseEnv(createMockD1Database([]));
+
+    const request = new Request("http://localhost/api/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: "actions",
+        email: "actions@example.com",
+        password: "Password123"
+      })
+    });
+    const response = await app.fetch(request, env);
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(body).toContain("reserved");
+  });
+
   it("returns public repository list", async () => {
     const app = createApp();
     const env = createBaseEnv(createMockD1Database([]));

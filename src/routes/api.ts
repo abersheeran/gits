@@ -33,6 +33,7 @@ import type {
   ActionRunSourceType,
   ActionWorkflowTrigger,
   AppEnv,
+  IssueCommentRecord,
   IssueState,
   PullRequestReviewDecision,
   PullRequestState,
@@ -130,6 +131,7 @@ const USERNAME_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?$/;
 const REPO_NAME_REGEX = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH = 120_000;
+const RESERVED_USERNAMES = new Set(["actions"]);
 
 async function parseJsonObject(request: Request): Promise<Record<string, unknown>> {
   let parsed: unknown;
@@ -186,6 +188,11 @@ function assertUsername(value: string): void {
     throw new HTTPException(400, {
       message:
         "Invalid username. Use letters/numbers and ._- only, length 1-32, no leading/trailing punctuation."
+    });
+  }
+  if (RESERVED_USERNAMES.has(value.toLowerCase())) {
+    throw new HTTPException(400, {
+      message: "This username is reserved"
     });
   }
 }
@@ -461,6 +468,44 @@ function buildMentionPrompt(input: { title: string; body: string }): string {
   return `${input.title}\n\n${input.body}`;
 }
 
+function buildIssueConversationHistory(input: {
+  issueAuthorUsername: string;
+  issueBody: string;
+  comments: readonly IssueCommentRecord[];
+}): string {
+  const sections: string[] = [];
+  sections.push(`[Issue Description by @${input.issueAuthorUsername}]`);
+  sections.push(input.issueBody.trim() ? input.issueBody : "(empty)");
+
+  if (input.comments.length === 0) {
+    sections.push("");
+    sections.push("[Comments]");
+    sections.push("(none)");
+    return sections.join("\n");
+  }
+
+  sections.push("");
+  sections.push("[Comments]");
+  for (const comment of input.comments) {
+    sections.push(`- comment_id: ${comment.id}`);
+    sections.push(`  author: @${comment.author_username}`);
+    sections.push("  body:");
+    const body = comment.body.trim() ? comment.body : "(empty)";
+    for (const line of body.split("\n")) {
+      sections.push(`    ${line}`);
+    }
+  }
+  return sections.join("\n");
+}
+
+function buildIssueCommentMentionPrompt(input: {
+  issueNumber: number;
+  issueTitle: string;
+  issueConversationHistory: string;
+}): string {
+  return `Issue #${input.issueNumber}: ${input.issueTitle}\n\nFull conversation history:\n${input.issueConversationHistory}`;
+}
+
 async function resolveDefaultBranchTarget(
   storageService: StorageService,
   owner: string,
@@ -499,6 +544,10 @@ function buildIssueCreatedAgentPrompt(input: {
   issueNumber: number;
   issueTitle: string;
   issueBody: string;
+  issueConversationHistory: string;
+  triggerReason: "issue_created" | "issue_comment_added";
+  triggerCommentId?: string;
+  triggerCommentAuthorUsername?: string;
   defaultBranchRef: string | null;
   requestOrigin: string;
   triggeredByUsername: string;
@@ -506,6 +555,14 @@ function buildIssueCreatedAgentPrompt(input: {
   const issueCommentsApi = `${input.requestOrigin}/api/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`;
   const pullsApi = `${input.requestOrigin}/api/repos/${input.owner}/${input.repo}/pulls`;
   const defaultBranchName = input.defaultBranchRef?.replace(/^refs\/heads\//, "") ?? "main";
+  const triggerCommentLines = [
+    input.triggerCommentId ? `trigger_comment_id: ${input.triggerCommentId}` : "",
+    input.triggerCommentAuthorUsername
+      ? `trigger_comment_author: @${input.triggerCommentAuthorUsername}`
+      : ""
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
 
   return `${input.workflowPrompt}
 
@@ -514,9 +571,16 @@ type: issue
 repository: ${input.owner}/${input.repo}
 issue_number: #${input.issueNumber}
 issue_title: ${input.issueTitle}
-issue_body:
+trigger_reason: ${input.triggerReason}
+${triggerCommentLines ? `${triggerCommentLines}\n` : ""}issue_body:
 ${input.issueBody || "(empty)"}
+issue_conversation_history:
+${input.issueConversationHistory}
 default_branch_ref: ${input.defaultBranchRef ?? "(not found)"}
+
+[History Handling]
+The conversation history above is complete and may be long.
+Before deciding, summarize/compress it into key facts for yourself, then proceed.
 
 [Required Decision]
 You are handling an issue trigger.
@@ -1144,6 +1208,11 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
     title: input.title,
     ...(input.body !== undefined ? { body: input.body } : {})
   });
+  const issueConversationHistory = buildIssueConversationHistory({
+    issueAuthorUsername: issue.author_username,
+    issueBody: issue.body,
+    comments: []
+  });
   const storageService = new StorageService(c.env.GIT_BUCKET);
   const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
   const requestOrigin = new URL(c.req.url).origin;
@@ -1167,6 +1236,8 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
         issueNumber: issue.number,
         issueTitle: issue.title,
         issueBody: issue.body,
+        issueConversationHistory,
+        triggerReason: "issue_created",
         defaultBranchRef: defaultBranchTarget.ref,
         requestOrigin,
         triggeredByUsername: sessionUser.username
@@ -1291,29 +1362,81 @@ router.post("/repos/:owner/:repo/issues/:number/comments", requireSession, async
     throw new HTTPException(404, { message: "Issue not found" });
   }
 
+  let commentAuthorId = sessionUser.id;
+  const accessTokenContext = c.get("accessTokenContext");
+  const isActionsComment = accessTokenContext?.displayAsActions === true;
+  if (isActionsComment) {
+    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const actionsUser = await authService.getOrCreateActionsUser();
+    commentAuthorId = actionsUser.id;
+  }
+
   const comment = await issueService.createIssueComment({
     repositoryId: repository.id,
     issueId: issue.id,
     issueNumber: issue.number,
-    authorId: sessionUser.id,
+    authorId: commentAuthorId,
     body: input.body
   });
+  const comments = await issueService.listIssueComments(repository.id, issue.number);
+  const issueConversationHistory = buildIssueConversationHistory({
+    issueAuthorUsername: issue.author_username,
+    issueBody: issue.body,
+    comments
+  });
+  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const requestOrigin = new URL(c.req.url).origin;
 
-  if (containsActionsMention({ title: issue.title, body: comment.body })) {
-    const storageService = new StorageService(c.env.GIT_BUCKET);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
-    await triggerMentionActionRun({
+  if (!isActionsComment) {
+    await triggerActionWorkflows({
       env: c.env,
       ...executionCtxArg(c),
       repository,
-      prompt: `Issue #${issue.number}: ${issue.title}\n\nComment:\n${comment.body}`,
+      triggerEvent: "issue_created",
       ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
       ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
       triggerSourceType: "issue",
       triggerSourceNumber: issue.number,
       triggerSourceCommentId: comment.id,
       triggeredByUser: sessionUser,
-      requestOrigin: new URL(c.req.url).origin
+      requestOrigin,
+      buildPrompt: (workflow) =>
+        buildIssueCreatedAgentPrompt({
+          workflowPrompt: workflow.prompt,
+          owner,
+          repo,
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+          issueBody: issue.body,
+          issueConversationHistory,
+          triggerReason: "issue_comment_added",
+          triggerCommentId: comment.id,
+          triggerCommentAuthorUsername: comment.author_username,
+          defaultBranchRef: defaultBranchTarget.ref,
+          requestOrigin,
+          triggeredByUsername: sessionUser.username
+        })
+    });
+  }
+
+  if (!isActionsComment && containsActionsMention({ title: issue.title, body: comment.body })) {
+    await triggerMentionActionRun({
+      env: c.env,
+      ...executionCtxArg(c),
+      repository,
+      prompt: buildIssueCommentMentionPrompt({
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        issueConversationHistory
+      }),
+      ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
+      ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
+      triggerSourceType: "issue",
+      triggerSourceNumber: issue.number,
+      triggerSourceCommentId: comment.id,
+      triggeredByUser: sessionUser,
+      requestOrigin
     });
   }
 

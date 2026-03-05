@@ -51,7 +51,11 @@ export const optionalSession: MiddlewareHandler<AppEnv> = async (c, next) => {
     user = await authService.verifySessionToken(bearerToken);
     if (!user) {
       try {
-        user = await authService.verifyAccessToken(bearerToken);
+        const verified = await authService.verifyAccessTokenWithMetadata(bearerToken);
+        user = verified?.user ?? null;
+        if (verified?.context) {
+          c.set("accessTokenContext", verified.context);
+        }
       } catch {
         user = null;
       }
