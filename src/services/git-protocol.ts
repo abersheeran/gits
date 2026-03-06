@@ -409,7 +409,11 @@ export function encodeAckNak(ackOids: string[]): Uint8Array[] {
   if (uniqueAcks.length === 0) {
     return [encodeTextPktLine("NAK\n")];
   }
-  return uniqueAcks.map((oid) => encodeTextPktLine(`ACK ${oid}\n`));
+  return [encodeTextPktLine(`ACK ${uniqueAcks[0]}\n`)];
+}
+
+export function buildUploadPackNegotiationResponse(ackOids: string[]): Uint8Array {
+  return concatBytes(encodeAckNak(ackOids));
 }
 
 export function encodeShallowLines(shallowOids: string[]): Uint8Array[] {
@@ -438,6 +442,7 @@ export function encodeProtocolError(
 
 export type UploadPackResponseArgs = {
   capabilities: Iterable<string>;
+  ackLines?: string[];
   ackOids?: string[];
   shallowOids?: string[];
   packfile?: Uint8Array;
@@ -450,7 +455,11 @@ export function buildUploadPackResponse(args: UploadPackResponseArgs): Uint8Arra
   const useSideBand = supportsSideBand(capabilities);
   const parts: Uint8Array[] = [];
 
-  parts.push(...(args.packfile ? [encodeTextPktLine("NAK\n")] : encodeAckNak(args.ackOids ?? [])));
+  if (args.ackLines && args.ackLines.length > 0) {
+    parts.push(...args.ackLines.map((line) => encodeTextPktLine(line)));
+  } else {
+    parts.push(...encodeAckNak(args.ackOids ?? []));
+  }
   parts.push(...encodeShallowLines(args.shallowOids ?? []));
 
   if (args.errorMessage) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReceivePackReport,
+  buildUploadPackNegotiationResponse,
   buildUploadPackResponse,
   encodeAckNak,
   encodeProtocolError,
@@ -94,7 +95,7 @@ describe("git-protocol", () => {
     expect(parsed.clientShallows).toEqual(["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
   });
 
-  it("encodes a single NAK and side-band response with pack payload", () => {
+  it("encodes a single ACK and side-band response with pack payload", () => {
     const ack = encodeAckNak(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
     expect(new TextDecoder().decode(ack[0])).toContain("ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
@@ -110,7 +111,9 @@ describe("git-protocol", () => {
     if (lines[0]?.kind !== "data") {
       throw new Error("expected data line");
     }
-    expect(new TextDecoder().decode(lines[0].payload)).toBe("NAK\n");
+    expect(new TextDecoder().decode(lines[0].payload)).toBe(
+      "ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    );
     const sideBandLines = lines.filter(
       (line) => line.kind === "data" && (line.payload[0] === 1 || line.payload[0] === 2)
     );
@@ -151,7 +154,7 @@ describe("git-protocol", () => {
     expect(nonFlush.every((length) => length <= 0xfff0)).toBe(true);
   });
 
-  it("does not emit ACK lines ahead of side-band pack data", () => {
+  it("emits only one ACK line ahead of side-band pack data", () => {
     const response = buildUploadPackResponse({
       capabilities: ["side-band-64k"],
       ackOids: [
@@ -165,8 +168,34 @@ describe("git-protocol", () => {
       .filter((line): line is Extract<ParsedPktLine, { kind: "data" }> => line.kind === "data")
       .map((line) => new TextDecoder().decode(line.payload));
 
-    expect(textLines[0]).toBe("NAK\n");
-    expect(textLines.some((line) => line.startsWith("ACK "))).toBe(false);
+    expect(textLines[0]).toBe("ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+    expect(textLines.filter((line) => line.startsWith("ACK "))).toHaveLength(1);
+  });
+
+  it("encodes only the first ACK when multiple common commits are provided", () => {
+    const ackLines = encodeAckNak([
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]);
+
+    expect(ackLines).toHaveLength(1);
+    expect(new TextDecoder().decode(ackLines[0]!)).toContain(
+      "ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    );
+  });
+
+  it("omits trailing flush packets in upload-pack negotiation responses", () => {
+    const response = buildUploadPackNegotiationResponse([
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]);
+    const lines = parsePktLines(response);
+    const textLines = lines
+      .filter((line): line is Extract<ParsedPktLine, { kind: "data" }> => line.kind === "data")
+      .map((line) => new TextDecoder().decode(line.payload));
+
+    expect(textLines).toEqual(["ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"]);
+    expect(lines.some((line) => line.kind === "flush")).toBe(false);
   });
 
   it("throws when upload-pack request has no wants", () => {

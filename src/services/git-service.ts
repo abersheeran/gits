@@ -2,6 +2,7 @@ import { HTTPException } from "hono/http-exception";
 import * as git from "isomorphic-git";
 import {
   buildReceivePackReport,
+  buildUploadPackNegotiationResponse,
   buildUploadPackResponse,
   encodeFlushPktLine,
   encodeProtocolError,
@@ -83,6 +84,8 @@ function resolveHeadRef(
 function capabilityListFor(service: GitServiceName, headRef: string | null): string {
   if (service === "git-upload-pack") {
     const capabilities = [
+      "multi_ack_detailed",
+      "no-done",
       "side-band",
       "side-band-64k",
       "ofs-delta",
@@ -332,12 +335,11 @@ export class GitService {
         haves: request.haves,
         cache
       });
+      const supportsNoDone =
+        request.capabilities.has("no-done") && request.capabilities.has("multi_ack_detailed");
 
-      if (!request.done) {
-        const negotiationPayload = buildUploadPackResponse({
-          capabilities: request.capabilities,
-          ackOids: common
-        });
+      if (!request.done && (!supportsNoDone || common.length === 0)) {
+        const negotiationPayload = buildUploadPackNegotiationResponse(common);
         return this.uploadPackResponse(negotiationPayload);
       }
 
@@ -362,15 +364,6 @@ export class GitService {
         cache
       });
 
-      if (packObjectOids.length === 0) {
-        const emptyPayload = buildUploadPackResponse({
-          capabilities: request.capabilities,
-          ackOids: common,
-          shallowOids: commitSelection.shallowOids
-        });
-        return this.uploadPackResponse(emptyPayload);
-      }
-
       let packfile: Uint8Array | undefined;
       try {
         const pack = await git.packObjects({
@@ -391,6 +384,16 @@ export class GitService {
 
       const payload = buildUploadPackResponse({
         capabilities: request.capabilities,
+        ...(supportsNoDone && !request.done && common.length > 0
+          ? {
+              ackLines: [
+                ...common.map((oid) => `ACK ${oid} common\n`),
+                `ACK ${common.at(-1)} ready\n`,
+                "NAK\n",
+                `ACK ${common.at(-1)}\n`
+              ]
+            }
+          : {}),
         ackOids: common,
         shallowOids: commitSelection.shallowOids,
         packfile,

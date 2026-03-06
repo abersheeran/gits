@@ -356,11 +356,40 @@ describe("API + Git integration", () => {
     expect(response.status).toBe(200);
     const lines = parsePktTextPrefix(new Uint8Array(await response.arrayBuffer()));
     expect(lines).toContain(`ACK ${seeded.initialCommit}\n`);
-    expect(lines).toContain("FLUSH");
+    expect(lines).not.toContain("FLUSH");
     expect(lines.some((line) => line.includes("PACK"))).toBe(false);
   });
 
-  it("returns a single NAK before packfile when common commits are present", async () => {
+  it("returns only the first ACK without a trailing flush during negotiation", async () => {
+    const bucket = new MockR2Bucket();
+    const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+
+    const body = concat(
+      pktLine(`want ${seeded.latestCommit}\n`),
+      pktLine(`have ${seeded.initialCommit}\n`),
+      pktLine(`have ${seeded.latestCommit}\n`),
+      new TextEncoder().encode("0000")
+    );
+    const response = await app.fetch(
+      new Request("http://localhost/alice/demo/git-upload-pack", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-git-upload-pack-request"
+        },
+        body
+      }),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(200);
+    const lines = parsePktTextPrefix(new Uint8Array(await response.arrayBuffer()));
+    expect(lines.filter((line) => line.startsWith("ACK "))).toEqual([`ACK ${seeded.initialCommit}\n`]);
+    expect(lines).not.toContain("FLUSH");
+    expect(lines.some((line) => line.includes("PACK"))).toBe(false);
+  });
+
+  it("returns a single ACK before packfile when common commits are present", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
     const db = createPublicRepositoryDb("alice", "demo");
@@ -384,8 +413,8 @@ describe("API + Git integration", () => {
 
     expect(response.status).toBe(200);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const prefix = new TextDecoder().decode(bytes.subarray(0, 8));
-    expect(prefix).toBe("0008NAK\n");
+    const prefix = new TextDecoder().decode(bytes.subarray(0, 49));
+    expect(prefix).toBe(`0031ACK ${seeded.initialCommit}\n`);
     expect(containsPackSignature(bytes)).toBe(true);
   });
 
@@ -471,7 +500,7 @@ describe("API + Git integration", () => {
     expect(response.status).toBe(200);
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(new TextDecoder().decode(bytes).includes("ERR")).toBe(false);
-    expect(containsPackSignature(bytes)).toBe(false);
+    expect(containsPackSignature(bytes)).toBe(true);
   });
 
   it("supports blob:none filter requests", async () => {
