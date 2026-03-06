@@ -450,7 +450,7 @@ export function buildUploadPackResponse(args: UploadPackResponseArgs): Uint8Arra
   const useSideBand = supportsSideBand(capabilities);
   const parts: Uint8Array[] = [];
 
-  parts.push(...encodeAckNak(args.ackOids ?? []));
+  parts.push(...(args.packfile ? [encodeTextPktLine("NAK\n")] : encodeAckNak(args.ackOids ?? [])));
   parts.push(...encodeShallowLines(args.shallowOids ?? []));
 
   if (args.errorMessage) {

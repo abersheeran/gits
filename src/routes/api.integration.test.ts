@@ -360,6 +360,35 @@ describe("API + Git integration", () => {
     expect(lines.some((line) => line.includes("PACK"))).toBe(false);
   });
 
+  it("returns a single NAK before packfile when common commits are present", async () => {
+    const bucket = new MockR2Bucket();
+    const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const db = createPublicRepositoryDb("alice", "demo");
+
+    const body = concat(
+      pktLine(`want ${seeded.latestCommit}\n`),
+      pktLine(`have ${seeded.initialCommit}\n`),
+      pktLine("done\n"),
+      new TextEncoder().encode("0000")
+    );
+    const response = await app.fetch(
+      new Request("http://localhost/alice/demo/git-upload-pack", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-git-upload-pack-request"
+        },
+        body
+      }),
+      createEnv(db, bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(200);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const prefix = new TextDecoder().decode(bytes.subarray(0, 8));
+    expect(prefix).toBe("0008NAK\n");
+    expect(containsPackSignature(bytes)).toBe(true);
+  });
+
   it("returns shallow lines when deepen is requested", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");

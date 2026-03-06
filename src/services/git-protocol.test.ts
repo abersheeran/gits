@@ -94,7 +94,7 @@ describe("git-protocol", () => {
     expect(parsed.clientShallows).toEqual(["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
   });
 
-  it("encodes ACK lines and side-band response with pack payload", () => {
+  it("encodes a single NAK and side-band response with pack payload", () => {
     const ack = encodeAckNak(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
     expect(new TextDecoder().decode(ack[0])).toContain("ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
@@ -110,9 +110,7 @@ describe("git-protocol", () => {
     if (lines[0]?.kind !== "data") {
       throw new Error("expected data line");
     }
-    expect(new TextDecoder().decode(lines[0].payload)).toBe(
-      "ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-    );
+    expect(new TextDecoder().decode(lines[0].payload)).toBe("NAK\n");
     const sideBandLines = lines.filter(
       (line) => line.kind === "data" && (line.payload[0] === 1 || line.payload[0] === 2)
     );
@@ -151,6 +149,24 @@ describe("git-protocol", () => {
     const nonFlush = lengths.filter((length) => length !== 0);
     expect(nonFlush.length).toBeGreaterThan(1);
     expect(nonFlush.every((length) => length <= 0xfff0)).toBe(true);
+  });
+
+  it("does not emit ACK lines ahead of side-band pack data", () => {
+    const response = buildUploadPackResponse({
+      capabilities: ["side-band-64k"],
+      ackOids: [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      packfile: new Uint8Array([0x50, 0x41, 0x43, 0x4b])
+    });
+    const lines = parsePktLines(response);
+    const textLines = lines
+      .filter((line): line is Extract<ParsedPktLine, { kind: "data" }> => line.kind === "data")
+      .map((line) => new TextDecoder().decode(line.payload));
+
+    expect(textLines[0]).toBe("NAK\n");
+    expect(textLines.some((line) => line.startsWith("ACK "))).toBe(false);
   });
 
   it("throws when upload-pack request has no wants", () => {
