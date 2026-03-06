@@ -39,6 +39,44 @@ type CommandSpec = {
   args: string[];
 };
 
+type RunCommandStreamOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+  signal?: AbortSignal;
+};
+
+type AgentCommandResult = CommandResult & {
+  stderrStreamed: boolean;
+  mcpSetupWarning?: string;
+};
+
+type BoundedOutputBuffer = {
+  text: string;
+  truncatedChars: number;
+};
+
+type RunStreamEvent =
+  | {
+      type: "stdout";
+      data: string;
+    }
+  | {
+      type: "stderr";
+      data: string;
+    }
+  | {
+      type: "result";
+      exitCode: number;
+      durationMs: number;
+      error?: string;
+      stderr?: string;
+      spawnError?: string;
+      attemptedCommand?: string;
+      mcpSetupWarning?: string;
+    };
+
 type ConfigFileKind = "codex" | "claude_code";
 
 const ROOTLESS_HOME = "/home/rootless";
@@ -55,6 +93,8 @@ const GITS_PLATFORM_MCP_ENV_KEYS = [
   "GITS_ISSUE_REPLY_TOKEN",
   "GITS_PR_CREATE_TOKEN"
 ] as const;
+const MAX_CAPTURED_OUTPUT_CHARS = 256_000;
+const ABORT_KILL_TIMEOUT_MS = 5_000;
 
 function normalizeHomePath(homePath: string | undefined): string | null {
   const trimmed = homePath?.trim() ?? "";
@@ -108,6 +148,17 @@ function writeJson(response: http.ServerResponse, status: number, payload: unkno
   response.end(JSON.stringify(payload));
 }
 
+function writeRunStreamEvent(response: http.ServerResponse, payload: RunStreamEvent): void {
+  if (response.destroyed || response.writableEnded) {
+    return;
+  }
+  try {
+    response.write(`${JSON.stringify(payload)}\n`);
+  } catch {
+    // The caller will observe the closed response via the socket close event.
+  }
+}
+
 function normalizeRef(ref: string | undefined): string {
   const trimmed = ref?.trim() ?? "";
   if (!trimmed) {
@@ -138,6 +189,44 @@ function buildCommandText(command: string, args: string[]): string {
 
 function buildCommandFailureDetail(result: CommandResult): string {
   return [result.stdout, result.stderr, result.spawnError ?? ""].join("\n").trim();
+}
+
+function createBoundedOutputBuffer(): BoundedOutputBuffer {
+  return {
+    text: "",
+    truncatedChars: 0
+  };
+}
+
+function appendOutputChunk(
+  current: BoundedOutputBuffer,
+  chunk: string,
+  limit = MAX_CAPTURED_OUTPUT_CHARS
+): BoundedOutputBuffer {
+  if (!chunk) {
+    return current;
+  }
+
+  const combined = `${current.text}${chunk}`;
+  if (combined.length <= limit) {
+    return {
+      text: combined,
+      truncatedChars: current.truncatedChars
+    };
+  }
+
+  const overflow = combined.length - limit;
+  return {
+    text: combined.slice(overflow),
+    truncatedChars: current.truncatedChars + overflow
+  };
+}
+
+function formatOutputBuffer(buffer: BoundedOutputBuffer): string {
+  if (buffer.truncatedChars === 0) {
+    return buffer.text;
+  }
+  return `[truncated ${buffer.truncatedChars} chars]\n${buffer.text}`;
 }
 
 function isShallowUnsupportedError(result: CommandResult): boolean {
@@ -189,6 +278,116 @@ async function runCommand(
         attemptedCommand: buildCommandText(command, args)
       });
     });
+  });
+}
+
+async function runCommandStreaming(
+  command: string,
+  args: string[],
+  options?: RunCommandStreamOptions
+): Promise<CommandResult & { stderrStreamed: boolean }> {
+  return new Promise<CommandResult & { stderrStreamed: boolean }>((resolve) => {
+    const attemptedCommand = buildCommandText(command, args);
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, {
+        cwd: options?.cwd,
+        env: options?.env ?? process.env
+      });
+    } catch (error) {
+      resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: -1,
+        spawnError: toErrorMessage(error),
+        attemptedCommand,
+        stderrStreamed: false
+      });
+      return;
+    }
+
+    let stdout = createBoundedOutputBuffer();
+    let stderr = createBoundedOutputBuffer();
+    let stderrStreamed = false;
+    let settled = false;
+    let abortKillTimer: NodeJS.Timeout | null = null;
+
+    const handleStdout = (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      stdout = appendOutputChunk(stdout, text);
+      options?.onStdout?.(text);
+    };
+
+    const handleStderr = (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      stderr = appendOutputChunk(stderr, text);
+      stderrStreamed = true;
+      options?.onStderr?.(text);
+    };
+
+    const cleanup = () => {
+      options?.signal?.removeEventListener("abort", abortChildProcess);
+      if (abortKillTimer) {
+        clearTimeout(abortKillTimer);
+        abortKillTimer = null;
+      }
+      child.stdout?.off("data", handleStdout);
+      child.stderr?.off("data", handleStderr);
+      child.off("error", handleError);
+      child.off("close", handleClose);
+    };
+
+    const finalize = (result: CommandResult & { stderrStreamed: boolean }) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    const abortChildProcess = () => {
+      if (settled || child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      child.kill("SIGTERM");
+      if (!abortKillTimer) {
+        abortKillTimer = setTimeout(() => {
+          if (!settled && child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+          }
+        }, ABORT_KILL_TIMEOUT_MS);
+        abortKillTimer.unref?.();
+      }
+    };
+
+    options?.signal?.addEventListener("abort", abortChildProcess, { once: true });
+
+    const handleError = (error: Error) => {
+      finalize({
+        stdout: formatOutputBuffer(stdout),
+        stderr: formatOutputBuffer(stderr),
+        exitCode: -1,
+        spawnError: error.message,
+        attemptedCommand,
+        stderrStreamed
+      });
+    };
+
+    const handleClose = (code: number | null) => {
+      finalize({
+        stdout: formatOutputBuffer(stdout),
+        stderr: formatOutputBuffer(stderr),
+        exitCode: code ?? -1,
+        attemptedCommand,
+        stderrStreamed
+      });
+    };
+
+    child.stdout?.on("data", handleStdout);
+    child.stderr?.on("data", handleStderr);
+    child.on("error", handleError);
+    child.on("close", handleClose);
   });
 }
 
@@ -359,8 +558,13 @@ async function runAgentPrompt(
   agentType: AgentType,
   prompt: string,
   workspaceDir: string,
-  runtimeEnv: Record<string, string> | undefined
-): Promise<CommandResult> {
+  runtimeEnv: Record<string, string> | undefined,
+  outputHandlers?: {
+    onStdout?: (chunk: string) => void;
+    onStderr?: (chunk: string) => void;
+  },
+  signal?: AbortSignal
+): Promise<AgentCommandResult> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...(runtimeEnv ?? {}),
@@ -373,16 +577,22 @@ async function runAgentPrompt(
 
   const mcpSetupWarning = await setupPlatformMcpServer(agentType, workspaceDir, env);
   const candidates = buildAgentCommandCandidates(agentType, prompt);
-  let lastResult: CommandResult | null = null;
+  let lastResult: (CommandResult & { stderrStreamed: boolean }) | null = null;
   for (const candidate of candidates) {
-    const result = await runCommand(candidate.command, candidate.args, {
+    const result = await runCommandStreaming(candidate.command, candidate.args, {
       cwd: workspaceDir,
-      env
+      env,
+      onStdout: outputHandlers?.onStdout,
+      onStderr: outputHandlers?.onStderr,
+      signal
     });
     lastResult = result;
 
     if (!shouldTryNextCandidate(result)) {
-      return appendStderr(result, mcpSetupWarning);
+      return {
+        ...result,
+        ...(mcpSetupWarning ? { mcpSetupWarning } : {})
+      };
     }
   }
 
@@ -391,9 +601,13 @@ async function runAgentPrompt(
       stdout: "",
       stderr: "No runnable agent command candidate found",
       exitCode: -1,
-      attemptedCommand: ""
+      attemptedCommand: "",
+      stderrStreamed: false
     };
-  return appendStderr(fallbackResult, mcpSetupWarning);
+  return {
+    ...fallbackResult,
+    ...(mcpSetupWarning ? { mcpSetupWarning } : {})
+  };
 }
 
 async function gitCloneWithFallback(repositoryUrl: string, workspaceDir: string): Promise<CommandResult> {
@@ -574,30 +788,54 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
 
   const startedAt = Date.now();
   let workspaceRoot: string | null = null;
+  const abortController = new AbortController();
+  const abortExecution = () => {
+    abortController.abort();
+  };
+  request.once("close", abortExecution);
+  response.once("close", abortExecution);
   try {
     const prepared = await prepareWorkspace(runRequest);
     workspaceRoot = prepared.workspaceRoot;
     await applyConfigFiles(runRequest.configFiles);
 
-    const executed = await runAgentPrompt(agentType, prompt, prepared.workspaceDir, runRequest.env);
+    response.statusCode = 200;
+    response.setHeader("content-type", "application/x-ndjson");
+    response.setHeader("cache-control", "no-cache");
+    response.setHeader("x-content-type-options", "nosniff");
 
-    const stderr = [
-      executed.stderr,
-      executed.spawnError,
-      executed.attemptedCommand ? `[attempted] ${executed.attemptedCommand}` : ""
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const executed = await runAgentPrompt(
+      agentType,
+      prompt,
+      prepared.workspaceDir,
+      runRequest.env,
+      {
+        onStdout: (chunk) => {
+          writeRunStreamEvent(response, {
+            type: "stdout",
+            data: chunk
+          });
+        },
+        onStderr: (chunk) => {
+          writeRunStreamEvent(response, {
+            type: "stderr",
+            data: chunk
+          });
+        }
+      },
+      abortController.signal
+    );
 
-    const result: RunResponse = {
+    writeRunStreamEvent(response, {
+      type: "result",
       exitCode: executed.exitCode,
-      stdout: executed.stdout,
-      ...(stderr ? { stderr } : {}),
       durationMs: Date.now() - startedAt,
-      ...(executed.spawnError ? { error: "failed to execute agent" } : {})
-    };
-
-    writeJson(response, 200, result);
+      ...(executed.spawnError ? { error: "failed to execute agent" } : {}),
+      ...(!executed.stderrStreamed && executed.stderr ? { stderr: executed.stderr } : {}),
+      ...(executed.spawnError ? { spawnError: executed.spawnError } : {}),
+      ...(executed.attemptedCommand ? { attemptedCommand: executed.attemptedCommand } : {}),
+      ...(executed.mcpSetupWarning ? { mcpSetupWarning: executed.mcpSetupWarning } : {})
+    });
   } catch (error) {
     const result: RunResponse = {
       exitCode: -1,
@@ -605,10 +843,25 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
       durationMs: Date.now() - startedAt,
       error: "workspace preparation failed"
     };
-    writeJson(response, 200, result);
+    if (response.headersSent) {
+      writeRunStreamEvent(response, {
+        type: "result",
+        exitCode: result.exitCode,
+        stderr: result.stderr,
+        durationMs: result.durationMs,
+        error: result.error
+      });
+    } else {
+      writeJson(response, 500, result);
+    }
   } finally {
+    request.off("close", abortExecution);
+    response.off("close", abortExecution);
     if (workspaceRoot) {
       await rm(workspaceRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+    if (!response.destroyed && !response.writableEnded) {
+      response.end();
     }
   }
 }

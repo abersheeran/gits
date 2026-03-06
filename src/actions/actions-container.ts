@@ -67,7 +67,24 @@ export class ActionsContainer extends Container {
         })
       });
 
-      return response;
+      if (!response.body) {
+        return response;
+      }
+
+      const stream = response.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform: (chunk, controller) => {
+            this.renewActivityTimeout();
+            controller.enqueue(chunk);
+          }
+        })
+      );
+
+      return new Response(stream, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+      });
     }
 
     if (request.method === "GET" && url.pathname === "/state") {

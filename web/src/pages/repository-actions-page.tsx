@@ -1,11 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
+import { Code2, GitPullRequest, MessageSquareText, Play, Workflow } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  getActionRunLogStreamPath,
+  createActionWorkflow,
+  dispatchActionWorkflow,
   formatApiError,
   getActionRun,
   getRepositoryDetail,
@@ -13,8 +28,11 @@ import {
   listActionWorkflows,
   rerunActionRun,
   updateActionWorkflow,
+  type ActionRunLogStreamEvent,
   type ActionRunRecord,
+  type ActionAgentType,
   type ActionWorkflowRecord,
+  type ActionWorkflowTrigger,
   type AuthUser,
   type RepositoryDetailResponse
 } from "@/lib/api";
@@ -37,6 +55,209 @@ function statusBadgeVariant(status: ActionRunRecord["status"]): "default" | "sec
   return "outline";
 }
 
+function isPendingRun(run: ActionRunRecord): boolean {
+  return run.status === "queued" || run.status === "running";
+}
+
+function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
+  return (
+    value === "queued" ||
+    value === "running" ||
+    value === "success" ||
+    value === "failed" ||
+    value === "cancelled"
+  );
+}
+
+function insertOrReplaceRun(currentRuns: ActionRunRecord[], nextRun: ActionRunRecord): ActionRunRecord[] {
+  const existingIndex = currentRuns.findIndex((run) => run.id === nextRun.id);
+  if (existingIndex === -1) {
+    return [...currentRuns, nextRun].sort((left, right) => right.run_number - left.run_number);
+  }
+
+  return currentRuns.map((run) => (run.id === nextRun.id ? nextRun : run));
+}
+
+function shouldPreferCurrentRun(currentRun: ActionRunRecord, nextRun: ActionRunRecord): boolean {
+  if (currentRun.updated_at !== nextRun.updated_at) {
+    return currentRun.updated_at > nextRun.updated_at;
+  }
+  return currentRun.logs.length > nextRun.logs.length;
+}
+
+function mergeRuns(currentRuns: ActionRunRecord[], nextRuns: ActionRunRecord[]): ActionRunRecord[] {
+  const mergedRuns = new Map(nextRuns.map((run) => [run.id, run] as const));
+
+  for (const currentRun of currentRuns) {
+    const nextRun = mergedRuns.get(currentRun.id);
+    if (!nextRun) {
+      mergedRuns.set(currentRun.id, currentRun);
+      continue;
+    }
+    if (shouldPreferCurrentRun(currentRun, nextRun)) {
+      mergedRuns.set(currentRun.id, currentRun);
+    }
+  }
+
+  return Array.from(mergedRuns.values()).sort((left, right) => right.run_number - left.run_number);
+}
+
+function isActionRunRecord(value: unknown): value is ActionRunRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const run = value as Partial<ActionRunRecord>;
+  return (
+    typeof run.id === "string" &&
+    typeof run.run_number === "number" &&
+    typeof run.status === "string" &&
+    typeof run.logs === "string" &&
+    typeof run.updated_at === "number"
+  );
+}
+
+function parseActionRunLogStreamEvent(
+  eventName: ActionRunLogStreamEvent["event"],
+  rawData: string
+): ActionRunLogStreamEvent | null {
+  type StreamStatusData = {
+    runId?: unknown;
+    status?: unknown;
+    exitCode?: unknown;
+    completedAt?: unknown;
+    updatedAt?: unknown;
+  };
+
+  const parsed = JSON.parse(rawData) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  if (eventName === "snapshot" || eventName === "replace") {
+    const data = parsed as { run?: unknown };
+    return isActionRunRecord(data.run)
+      ? {
+          event: eventName,
+          data: {
+            run: data.run
+          }
+        }
+      : null;
+  }
+
+  if (eventName === "append") {
+    const data = parsed as StreamStatusData & { chunk?: unknown };
+    return typeof data.runId === "string" &&
+      typeof data.chunk === "string" &&
+      isActionRunStatus(data.status) &&
+      (typeof data.exitCode === "number" || data.exitCode === null) &&
+      (typeof data.completedAt === "number" || data.completedAt === null) &&
+      typeof data.updatedAt === "number"
+      ? {
+          event: "append",
+          data: {
+            runId: data.runId,
+            chunk: data.chunk,
+            status: data.status,
+            exitCode: data.exitCode,
+            completedAt: data.completedAt,
+            updatedAt: data.updatedAt
+          }
+        }
+      : null;
+  }
+
+  if (eventName === "status" || eventName === "done") {
+    const data = parsed as StreamStatusData;
+    return typeof data.runId === "string" &&
+      isActionRunStatus(data.status) &&
+      (typeof data.exitCode === "number" || data.exitCode === null) &&
+      (typeof data.completedAt === "number" || data.completedAt === null) &&
+      typeof data.updatedAt === "number"
+      ? {
+          event: eventName,
+          data: {
+            runId: data.runId,
+            status: data.status,
+            exitCode: data.exitCode,
+            completedAt: data.completedAt,
+            updatedAt: data.updatedAt
+          }
+        }
+      : null;
+  }
+
+  if (eventName === "heartbeat") {
+    const data = parsed as { timestamp?: unknown };
+    return typeof data.timestamp === "number"
+      ? {
+          event: "heartbeat",
+          data: {
+            timestamp: data.timestamp
+          }
+        }
+      : null;
+  }
+
+  if (eventName === "stream-error") {
+    const data = parsed as { message?: unknown };
+    return typeof data.message === "string"
+      ? {
+          event: "stream-error",
+          data: {
+            message: data.message
+          }
+        }
+      : null;
+  }
+
+  return null;
+}
+
+function applyRunStreamEvent(
+  currentRuns: ActionRunRecord[],
+  streamEvent: ActionRunLogStreamEvent
+): ActionRunRecord[] {
+  if (streamEvent.event === "heartbeat" || streamEvent.event === "stream-error") {
+    return currentRuns;
+  }
+
+  if (streamEvent.event === "snapshot" || streamEvent.event === "replace") {
+    return insertOrReplaceRun(currentRuns, streamEvent.data.run);
+  }
+
+  if (streamEvent.event === "append") {
+    return currentRuns.map((run) =>
+      run.id === streamEvent.data.runId
+        ? {
+            ...run,
+            logs: `${run.logs ?? ""}${streamEvent.data.chunk}`,
+            status: streamEvent.data.status,
+            exit_code: streamEvent.data.exitCode,
+            completed_at: streamEvent.data.completedAt,
+            updated_at: streamEvent.data.updatedAt
+          }
+        : run
+    );
+  }
+
+  if (streamEvent.event === "status" || streamEvent.event === "done") {
+    return currentRuns.map((run) =>
+      run.id === streamEvent.data.runId
+        ? {
+            ...run,
+            status: streamEvent.data.status,
+            exit_code: streamEvent.data.exitCode,
+            completed_at: streamEvent.data.completedAt,
+            updated_at: streamEvent.data.updatedAt
+          }
+        : run
+    );
+  }
+
+  return currentRuns;
+}
+
 export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
   const [searchParams] = useSearchParams();
@@ -50,65 +271,132 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [creatingWorkflow, setCreatingWorkflow] = useState(false);
+  const [dispatchingWorkflowId, setDispatchingWorkflowId] = useState<string | null>(null);
   const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
 
+  const [workflowName, setWorkflowName] = useState("");
+  const [workflowTriggerEvent, setWorkflowTriggerEvent] = useState<ActionWorkflowTrigger>(
+    "pull_request_created"
+  );
+  const [workflowAgentType, setWorkflowAgentType] = useState<ActionAgentType>("codex");
+  const [workflowPrompt, setWorkflowPrompt] = useState(
+    "请完整检查这个仓库并运行测试，修复失败并提交变更。"
+  );
+  const [workflowPushBranchRegex, setWorkflowPushBranchRegex] = useState("");
+  const [workflowPushTagRegex, setWorkflowPushTagRegex] = useState("");
+  const [workflowEnabled, setWorkflowEnabled] = useState(true);
+  const backgroundRefreshInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const loadDataRef = useRef<((options?: { background?: boolean }) => Promise<void>) | null>(null);
+  const runsRef = useRef<ActionRunRecord[]>([]);
+
   const canManageActions = Boolean(user) && Boolean(detail?.permissions.canCreateIssueOrPullRequest);
 
-  async function loadData() {
-    if (!owner || !repo) {
-      return;
-    }
+  const loadData = useCallback(
+    async (options?: { background?: boolean }) => {
+      if (!owner || !repo) {
+        return;
+      }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const [nextDetail, nextWorkflows, nextRuns] = await Promise.all([
-        getRepositoryDetail(owner, repo),
-        listActionWorkflows(owner, repo),
-        listActionRuns(owner, repo, { limit: 50 })
-      ]);
-      let mergedRuns = nextRuns;
-      if (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId)) {
-        try {
-          const selectedRun = await getActionRun(owner, repo, selectedRunId);
-          mergedRuns = [selectedRun, ...nextRuns]
-            .filter((run, index, array) => array.findIndex((item) => item.id === run.id) === index)
-            .sort((left, right) => right.run_number - left.run_number);
-        } catch {
-          // Ignore missing run and keep default list.
+      if (!options?.background) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const [nextDetail, nextWorkflows, nextRuns] = await Promise.all([
+          getRepositoryDetail(owner, repo),
+          listActionWorkflows(owner, repo),
+          listActionRuns(owner, repo, { limit: 50 })
+        ]);
+        let mergedRuns = nextRuns;
+        if (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId)) {
+          try {
+            const selectedRun = await getActionRun(owner, repo, selectedRunId);
+            mergedRuns = [selectedRun, ...nextRuns]
+              .filter(
+                (run, index, array) => array.findIndex((item) => item.id === run.id) === index
+              )
+              .sort((left, right) => right.run_number - left.run_number);
+          } catch {
+            // Ignore missing run and keep default list.
+          }
+        }
+        if (!mountedRef.current) {
+          return;
+        }
+        setDetail(nextDetail);
+        setWorkflows(nextWorkflows);
+        setRuns((currentRuns) => mergeRuns(currentRuns, mergedRuns));
+      } catch (loadError) {
+        if (mountedRef.current) {
+          setError(formatApiError(loadError));
+        }
+      } finally {
+        if (!options?.background && mountedRef.current) {
+          setLoading(false);
         }
       }
-      setDetail(nextDetail);
-      setWorkflows(nextWorkflows);
-      setRuns(mergedRuns);
-    } catch (loadError) {
-      setError(formatApiError(loadError));
-    } finally {
-      setLoading(false);
+    },
+    [owner, repo, selectedRunId]
+  );
+
+  const refreshDataInBackground = useCallback(() => {
+    if (backgroundRefreshInFlightRef.current) {
+      return;
     }
-  }
+    backgroundRefreshInFlightRef.current = true;
+    void loadDataRef.current?.({ background: true }).finally(() => {
+      backgroundRefreshInFlightRef.current = false;
+    });
+  }, []);
+
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
+
+  useEffect(() => {
+    loadDataRef.current = loadData;
+  }, [loadData]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     void loadData();
-  }, [owner, repo, selectedRunId]);
+  }, [loadData]);
 
-  const hasPendingRuns = useMemo(
-    () => runs.some((run) => run.status === "queued" || run.status === "running"),
-    [runs]
+  const liveExpandedRunIds = useMemo(
+    () =>
+      runs
+        .filter((run) => expandedRunIds.includes(run.id) && isPendingRun(run))
+        .map((run) => run.id)
+        .sort(),
+    [expandedRunIds, runs]
+  );
+  const liveExpandedRunIdsKey = liveExpandedRunIds.join("|");
+  const hasPendingRunsWithoutLiveStream = useMemo(
+    () =>
+      runs.some((run) => isPendingRun(run) && !liveExpandedRunIds.includes(run.id)),
+    [liveExpandedRunIds, runs]
   );
 
   useEffect(() => {
-    if (!hasPendingRuns) {
+    if (!hasPendingRunsWithoutLiveStream) {
       return;
     }
     const timer = window.setInterval(() => {
-      void loadData();
+      refreshDataInBackground();
     }, 3500);
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRuns, owner, repo]);
+  }, [hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -126,6 +414,123 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     };
   }, [selectedRunId, runs.length]);
 
+  useEffect(() => {
+    if (!owner || !repo || liveExpandedRunIds.length === 0) {
+      return;
+    }
+
+    const sources = liveExpandedRunIds.map((runId) => {
+      const source = new EventSource(getActionRunLogStreamPath(owner, repo, runId));
+      const handleEvent = (streamEvent: ActionRunLogStreamEvent) => {
+        if (!mountedRef.current) {
+          source.close();
+          return;
+        }
+        if (streamEvent.event === "stream-error") {
+          source.close();
+          refreshDataInBackground();
+          return;
+        }
+        if (
+          (streamEvent.event === "append" ||
+            streamEvent.event === "status" ||
+            streamEvent.event === "done") &&
+          !runsRef.current.some((run) => run.id === streamEvent.data.runId)
+        ) {
+          refreshDataInBackground();
+          return;
+        }
+        setRuns((currentRuns) => applyRunStreamEvent(currentRuns, streamEvent));
+        if (streamEvent.event === "done") {
+          source.close();
+        }
+      };
+      const bind = (eventName: ActionRunLogStreamEvent["event"]) => {
+        source.addEventListener(eventName, (message) => {
+          try {
+            const event = parseActionRunLogStreamEvent(
+              eventName,
+              (message as MessageEvent<string>).data
+            );
+            if (!event) {
+              throw new Error(`Invalid ${eventName} event payload`);
+            }
+            handleEvent(event);
+          } catch (error) {
+            console.error("Failed to parse action run stream event", error);
+            source.close();
+            refreshDataInBackground();
+          }
+        });
+      };
+
+      bind("snapshot");
+      bind("append");
+      bind("replace");
+      bind("status");
+      bind("done");
+      bind("heartbeat");
+      bind("stream-error");
+      source.addEventListener("error", () => {
+        if (!mountedRef.current) {
+          source.close();
+          return;
+        }
+        if (source.readyState === EventSource.CLOSED) {
+          source.close();
+          refreshDataInBackground();
+          return;
+        }
+        console.warn("Action run log stream error", { runId, readyState: source.readyState });
+      });
+
+      return source;
+    });
+
+    return () => {
+      for (const source of sources) {
+        source.close();
+      }
+    };
+  }, [liveExpandedRunIdsKey, owner, repo]);
+
+  async function handleCreateWorkflow(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageActions || creatingWorkflow) {
+      return;
+    }
+
+    setCreatingWorkflow(true);
+    setError(null);
+    try {
+      await createActionWorkflow(owner, repo, {
+        name: workflowName,
+        triggerEvent: workflowTriggerEvent,
+        agentType: workflowAgentType,
+        prompt: workflowPrompt,
+        pushBranchRegex:
+          workflowTriggerEvent === "push"
+            ? (workflowPushBranchRegex.trim() || null)
+            : null,
+        pushTagRegex:
+          workflowTriggerEvent === "push" ? (workflowPushTagRegex.trim() || null) : null,
+        enabled: workflowEnabled
+      });
+      setWorkflowName("");
+      setWorkflowAgentType("codex");
+      setWorkflowPrompt("请完整检查这个仓库并运行测试，修复失败并提交变更。");
+      setWorkflowTriggerEvent("pull_request_created");
+      setWorkflowPushBranchRegex("");
+      setWorkflowPushTagRegex("");
+      setWorkflowEnabled(true);
+      await loadData();
+    } catch (createError) {
+      setError(formatApiError(createError));
+    } finally {
+      setCreatingWorkflow(false);
+    }
+  }
+
   async function handleToggleWorkflow(workflow: ActionWorkflowRecord) {
     if (!canManageActions) {
       return;
@@ -142,8 +547,25 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
+  async function handleDispatchWorkflow(workflow: ActionWorkflowRecord) {
+    if (!canManageActions || dispatchingWorkflowId) {
+      return;
+    }
+
+    setDispatchingWorkflowId(workflow.id);
+    setError(null);
+    try {
+      await dispatchActionWorkflow(owner, repo, workflow.id);
+      await loadData();
+    } catch (dispatchError) {
+      setError(formatApiError(dispatchError));
+    } finally {
+      setDispatchingWorkflowId(null);
+    }
+  }
+
   async function handleRerunRun(run: ActionRunRecord) {
-    if (!canManageActions || rerunningRunId) {
+    if (!canManageActions || rerunningRunId || dispatchingWorkflowId) {
       return;
     }
 
@@ -232,6 +654,108 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </nav>
       </header>
 
+      {canManageActions ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Create workflow</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={handleCreateWorkflow}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="workflow-name">Name</Label>
+                  <Input
+                    id="workflow-name"
+                    value={workflowName}
+                    onChange={(event) => setWorkflowName(event.target.value)}
+                    placeholder="CI"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="workflow-agent">Agent</Label>
+                  <Select
+                    value={workflowAgentType}
+                    onValueChange={(value) => setWorkflowAgentType(value as ActionAgentType)}
+                  >
+                    <SelectTrigger id="workflow-agent">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="codex">codex</SelectItem>
+                      <SelectItem value="claude_code">claude_code</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="workflow-event">Trigger event</Label>
+                  <Select
+                    value={workflowTriggerEvent}
+                    onValueChange={(value) => setWorkflowTriggerEvent(value as ActionWorkflowTrigger)}
+                  >
+                    <SelectTrigger id="workflow-event">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pull_request_created">pull_request_created</SelectItem>
+                      <SelectItem value="push">push</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    `issue_created` is built-in and runs automatically.
+                  </p>
+                </div>
+              </div>
+              {workflowTriggerEvent === "push" ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="workflow-push-branch-regex">Branch Regex（可选）</Label>
+                    <Input
+                      id="workflow-push-branch-regex"
+                      value={workflowPushBranchRegex}
+                      onChange={(event) => setWorkflowPushBranchRegex(event.target.value)}
+                      placeholder="^main$|^release/.*$"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="workflow-push-tag-regex">Tag Regex（可选）</Label>
+                    <Input
+                      id="workflow-push-tag-regex"
+                      value={workflowPushTagRegex}
+                      onChange={(event) => setWorkflowPushTagRegex(event.target.value)}
+                      placeholder="^v\\d+\\.\\d+\\.\\d+$"
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="workflow-prompt">Agent Prompt</Label>
+                <Textarea
+                  id="workflow-prompt"
+                  value={workflowPrompt}
+                  onChange={(event) => setWorkflowPrompt(event.target.value)}
+                  placeholder="让 agent 在容器里执行的任务描述"
+                  rows={6}
+                  required
+                />
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  checked={workflowEnabled}
+                  onCheckedChange={(checked) => setWorkflowEnabled(Boolean(checked))}
+                />
+                Enabled
+              </label>
+              <div>
+                <Button type="submit" disabled={creatingWorkflow}>
+                  {creatingWorkflow ? "Creating..." : "Create workflow"}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Workflows</CardTitle>
@@ -264,6 +788,18 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           }}
                         >
                           {workflow.enabled === 1 ? "Disable" : "Enable"}
+                        </Button>
+                      ) : null}
+                      {canManageActions ? (
+                        <Button
+                          size="sm"
+                          disabled={dispatchingWorkflowId !== null || workflow.enabled !== 1}
+                          onClick={() => {
+                            void handleDispatchWorkflow(workflow);
+                          }}
+                        >
+                          <Play className="mr-1 h-3.5 w-3.5" />
+                          Run
                         </Button>
                       ) : null}
                     </div>
@@ -321,7 +857,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={rerunningRunId !== null}
+                            disabled={rerunningRunId !== null || dispatchingWorkflowId !== null}
                             onClick={() => {
                               void handleRerunRun(run);
                             }}

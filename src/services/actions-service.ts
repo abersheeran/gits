@@ -366,10 +366,11 @@ export class ActionsService {
           exit_code,
           container_instance,
           created_at,
+          claimed_at,
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         id,
@@ -391,6 +392,7 @@ export class ActionsService {
         null,
         null,
         now,
+        null,
         null,
         null,
         now
@@ -429,6 +431,7 @@ export class ActionsService {
           r.exit_code,
           r.container_instance,
           r.created_at,
+          r.claimed_at,
           r.started_at,
           r.completed_at,
           r.updated_at
@@ -469,6 +472,7 @@ export class ActionsService {
           r.exit_code,
           r.container_instance,
           r.created_at,
+          r.claimed_at,
           r.started_at,
           r.completed_at,
           r.updated_at
@@ -484,16 +488,54 @@ export class ActionsService {
     return row ?? null;
   }
 
-  async updateRunToRunning(repositoryId: string, runId: string, containerInstance: string): Promise<void> {
+  async claimQueuedRun(
+    repositoryId: string,
+    runId: string,
+    containerInstance: string
+  ): Promise<number | null> {
     const now = Date.now();
-    await this.db
+    const result = await this.db
       .prepare(
         `UPDATE action_runs
-         SET status = 'running', container_instance = ?, started_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ?`
+         SET container_instance = ?, claimed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance IS NULL`
       )
       .bind(containerInstance, now, now, repositoryId, runId)
       .run();
+
+    const changes =
+      (result as unknown as {
+        meta?: {
+          changes?: number;
+        };
+      }).meta?.changes ?? 0;
+
+    return changes > 0 ? now : null;
+  }
+
+  async updateRunToRunning(
+    repositoryId: string,
+    runId: string,
+    containerInstance: string
+  ): Promise<number | null> {
+    const now = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE action_runs
+         SET status = 'running', started_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance = ?`
+      )
+      .bind(now, now, repositoryId, runId, containerInstance)
+      .run();
+
+    const changes =
+      (result as unknown as {
+        meta?: {
+          changes?: number;
+        };
+      }).meta?.changes ?? 0;
+
+    return changes > 0 ? now : null;
   }
 
   async completeRun(
@@ -516,20 +558,42 @@ export class ActionsService {
       .run();
   }
 
-  async failRunningRunIfStillRunning(
+  async updateRunningRunLogs(repositoryId: string, runId: string, logs: string): Promise<boolean> {
+    const updatedAt = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE action_runs
+         SET logs = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'running'`
+      )
+      .bind(logs, updatedAt, repositoryId, runId)
+      .run();
+
+    const changes =
+      (result as unknown as {
+        meta?: {
+          changes?: number;
+        };
+      }).meta?.changes ?? 0;
+
+    return changes > 0;
+  }
+
+  async failPendingRunIfStillPending(
     repositoryId: string,
     runId: string,
     input: {
       logs: string;
       exitCode?: number | null;
+      completedAt?: number;
     }
   ): Promise<{ updated: boolean; completedAt: number }> {
-    const completedAt = Date.now();
+    const completedAt = input.completedAt ?? Date.now();
     const result = await this.db
       .prepare(
         `UPDATE action_runs
          SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'running'`
+         WHERE repository_id = ? AND id = ? AND status IN ('queued', 'running')`
       )
       .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, runId)
       .run();
@@ -580,6 +644,7 @@ export class ActionsService {
           r.exit_code,
           r.container_instance,
           r.created_at,
+          r.claimed_at,
           r.started_at,
           r.completed_at,
           r.updated_at
@@ -644,6 +709,7 @@ export class ActionsService {
           r.exit_code,
           r.container_instance,
           r.created_at,
+          r.claimed_at,
           r.started_at,
           r.completed_at,
           r.updated_at

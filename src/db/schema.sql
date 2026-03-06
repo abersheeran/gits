@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS action_runs (
   exit_code INTEGER,
   container_instance TEXT,
   created_at INTEGER NOT NULL,
+  claimed_at INTEGER,
   started_at INTEGER,
   completed_at INTEGER,
   updated_at INTEGER NOT NULL,

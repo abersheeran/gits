@@ -223,10 +223,52 @@ export type ActionRunRecord = {
   exit_code: number | null;
   container_instance: string | null;
   created_at: number;
+  claimed_at: number | null;
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;
 };
+
+export type ActionRunLogStreamEvent =
+  | {
+      event: "snapshot" | "replace";
+      data: {
+        run: ActionRunRecord;
+      };
+    }
+  | {
+      event: "append";
+      data: {
+        runId: string;
+        chunk: string;
+        status: ActionRunStatus;
+        exitCode: number | null;
+        completedAt: number | null;
+        updatedAt: number;
+      };
+    }
+  | {
+      event: "status" | "done";
+      data: {
+        runId: string;
+        status: ActionRunStatus;
+        exitCode: number | null;
+        completedAt: number | null;
+        updatedAt: number;
+      };
+    }
+  | {
+      event: "heartbeat";
+      data: {
+        timestamp: number;
+      };
+    }
+  | {
+      event: "stream-error";
+      data: {
+        message: string;
+      };
+    };
 
 export type ActionRunLatestBySourceItem = {
   sourceNumber: number;
@@ -726,6 +768,10 @@ export async function getActionRun(
     `/api/repos/${owner}/${repo}/actions/runs/${runId}`
   );
   return response.run;
+}
+
+export function getActionRunLogStreamPath(owner: string, repo: string, runId: string): string {
+  return `/api/repos/${owner}/${repo}/actions/runs/${runId}/logs/stream`;
 }
 
 export async function rerunActionRun(

@@ -3,6 +3,7 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "./action-runner-prompt-tokens";
+import { buildActionRunLifecycleLines } from "./action-run-log-format";
 import { AuthService } from "./auth-service";
 import { ActionsService } from "./actions-service";
 
@@ -14,7 +15,35 @@ type RunnerExecuteResult = {
   error?: string;
 };
 
+type RunnerStreamEvent =
+  | {
+      type: "stdout";
+      data: string;
+    }
+  | {
+      type: "stderr";
+      data: string;
+    }
+  | {
+      type: "result";
+      exitCode: number;
+      durationMs: number;
+      error?: string;
+      stderr?: string;
+      spawnError?: string;
+      attemptedCommand?: string;
+      mcpSetupWarning?: string;
+    };
+
+type BoundedLogBuffer = {
+  text: string;
+  truncatedChars: number;
+};
+
 const MAX_LOG_CHARS = 120_000;
+const RUN_LOG_FLUSH_INTERVAL_MS = 1_000;
+const RUN_LOG_FLUSH_MIN_CHARS = 1_024;
+const MAX_RUNNER_STREAM_EVENT_CHARS = 256_000;
 
 function normalizeCloneOrigin(input: {
   requestOrigin: string;
@@ -33,11 +62,52 @@ function truncateLog(log: string): string {
   return `[truncated ${log.length - MAX_LOG_CHARS} chars]\n${retained}`;
 }
 
+function createBoundedLogBuffer(): BoundedLogBuffer {
+  return {
+    text: "",
+    truncatedChars: 0
+  };
+}
+
+function appendBoundedLog(
+  current: BoundedLogBuffer,
+  chunk: string,
+  limit = MAX_LOG_CHARS
+): BoundedLogBuffer {
+  if (!chunk) {
+    return current;
+  }
+
+  const combined = `${current.text}${chunk}`;
+  if (combined.length <= limit) {
+    return {
+      text: combined,
+      truncatedChars: current.truncatedChars
+    };
+  }
+
+  const overflow = combined.length - limit;
+  return {
+    text: combined.slice(overflow),
+    truncatedChars: current.truncatedChars + overflow
+  };
+}
+
+function formatBoundedLog(buffer: BoundedLogBuffer): string {
+  if (buffer.truncatedChars === 0) {
+    return buffer.text;
+  }
+  return `[truncated ${buffer.truncatedChars} chars]\n${buffer.text}`;
+}
+
 function buildRunLogs(input: {
   runId: string;
   runNumber: number;
   agentType: "codex" | "claude_code";
   prompt: string;
+  claimedAt?: number | null | undefined;
+  startedAt?: number | null | undefined;
+  reconciledAt?: number | null | undefined;
   result?: RunnerExecuteResult;
   errorMessage?: string;
 }): string {
@@ -46,6 +116,17 @@ function buildRunLogs(input: {
   lines.push(`run_number: ${input.runNumber}`);
   lines.push(`agent_type: ${input.agentType}`);
   lines.push(`prompt: ${input.prompt}`);
+  lines.push("");
+  lines.push(
+    ...buildActionRunLifecycleLines(
+      {
+        claimedAt: input.claimedAt,
+        startedAt: input.startedAt,
+        reconciledAt: input.reconciledAt
+      },
+      { includeMissing: true }
+    )
+  );
 
   if (input.result?.durationMs !== undefined) {
     lines.push(`duration_ms: ${input.result.durationMs}`);
@@ -76,6 +157,249 @@ function buildRunLogs(input: {
   }
 
   return truncateLog(lines.join("\n"));
+}
+
+function isStreamedRunnerResponse(response: Response): boolean {
+  const contentType = response.headers.get("content-type") ?? "";
+  return contentType.includes("application/x-ndjson");
+}
+
+function appendBoundedDiagnostic(
+  current: BoundedLogBuffer,
+  next: string | null | undefined
+): BoundedLogBuffer {
+  const trimmed = next?.trim();
+  if (!trimmed) {
+    return current;
+  }
+  const separator = current.text && !current.text.endsWith("\n") ? "\n" : "";
+  return appendBoundedLog(current, `${separator}${trimmed}`);
+}
+
+function parseRunnerStreamEvent(raw: string): RunnerStreamEvent {
+  try {
+    return JSON.parse(raw) as RunnerStreamEvent;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown JSON parse error";
+    throw new Error(`Invalid runner stream event: ${message}`);
+  }
+}
+
+function buildLiveRunLogs(input: {
+  runId: string;
+  runNumber: number;
+  agentType: "codex" | "claude_code";
+  prompt: string;
+  claimedAt?: number | null | undefined;
+  startedAt?: number | null | undefined;
+  stdout: string;
+  stderr: string;
+  durationMs?: number;
+  error?: string;
+}): string {
+  const result: RunnerExecuteResult = {
+    ...(input.stdout ? { stdout: input.stdout } : {}),
+    ...(input.stderr ? { stderr: input.stderr } : {}),
+    ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+    ...(input.error ? { error: input.error } : {})
+  };
+
+  return buildRunLogs({
+    runId: input.runId,
+    runNumber: input.runNumber,
+    agentType: input.agentType,
+    prompt: input.prompt,
+    claimedAt: input.claimedAt,
+    startedAt: input.startedAt,
+    result
+  });
+}
+
+async function consumeStreamedRunnerResponse(input: {
+  actionsService: ActionsService;
+  repositoryId: string;
+  runId: string;
+  runNumber: number;
+  agentType: "codex" | "claude_code";
+  prompt: string;
+  claimedAt?: number | null | undefined;
+  startedAt?: number | null | undefined;
+  response: Response;
+}): Promise<RunnerExecuteResult> {
+  if (!input.response.body) {
+    return {};
+  }
+
+  const reader = input.response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let stdout = createBoundedLogBuffer();
+  let stderr = createBoundedLogBuffer();
+  let durationMs: number | undefined;
+  let error: string | undefined;
+  let exitCode: number | undefined;
+  let pendingCharsSinceFlush = 0;
+  let lastFlushAt = 0;
+  let lastFlushedLogs = "";
+  let logPersistenceWarning: string | null = null;
+  let suspendIntermediateLogWrites = false;
+  let flushInProgress: Promise<void> | null = null;
+  let receivedResultEvent = false;
+
+  const performFlush = async (force = false): Promise<void> => {
+      const now = Date.now();
+      if (!force && suspendIntermediateLogWrites) {
+        return;
+      }
+      if (
+        !force &&
+        pendingCharsSinceFlush < RUN_LOG_FLUSH_MIN_CHARS &&
+        now - lastFlushAt < RUN_LOG_FLUSH_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      const logs = buildLiveRunLogs({
+        runId: input.runId,
+        runNumber: input.runNumber,
+        agentType: input.agentType,
+        prompt: input.prompt,
+        claimedAt: input.claimedAt,
+        startedAt: input.startedAt,
+        stdout: formatBoundedLog(stdout),
+        stderr: formatBoundedLog(stderr),
+        ...(durationMs !== undefined ? { durationMs } : {}),
+        ...(error ? { error } : {})
+      });
+
+      if (!force && logs === lastFlushedLogs) {
+        return;
+      }
+
+      try {
+        await input.actionsService.updateRunningRunLogs(input.repositoryId, input.runId, logs);
+        lastFlushedLogs = logs;
+        lastFlushAt = now;
+        pendingCharsSinceFlush = 0;
+        suspendIntermediateLogWrites = false;
+        logPersistenceWarning = null;
+      } catch (flushError) {
+        if (!logPersistenceWarning) {
+          const message = flushError instanceof Error ? flushError.message : String(flushError);
+          logPersistenceWarning = `Failed to persist streaming logs: ${message}`;
+        }
+        suspendIntermediateLogWrites = true;
+      }
+  };
+
+  const flushLogs = async (force = false): Promise<void> => {
+    while (flushInProgress) {
+      try {
+        await flushInProgress;
+      } catch {
+        // Allow the current caller to decide whether to retry or force a final flush.
+      }
+    }
+
+    const currentFlush = performFlush(force);
+    flushInProgress = currentFlush;
+    try {
+      await currentFlush;
+    } finally {
+      if (flushInProgress === currentFlush) {
+        flushInProgress = null;
+      }
+    }
+  };
+
+  const handleEvent = async (event: RunnerStreamEvent): Promise<void> => {
+    if (event.type === "stdout") {
+      stdout = appendBoundedLog(stdout, event.data);
+      pendingCharsSinceFlush += event.data.length;
+      await flushLogs();
+      return;
+    }
+
+    if (event.type === "stderr") {
+      stderr = appendBoundedLog(stderr, event.data);
+      pendingCharsSinceFlush += event.data.length;
+      await flushLogs();
+      return;
+    }
+
+    exitCode = event.exitCode;
+    durationMs = event.durationMs;
+    error = event.error;
+    receivedResultEvent = true;
+    stderr = appendBoundedDiagnostic(stderr, event.stderr);
+    stderr = appendBoundedDiagnostic(stderr, event.spawnError);
+    stderr = appendBoundedDiagnostic(
+      stderr,
+      event.mcpSetupWarning ? `[mcp_setup] ${event.mcpSetupWarning}` : null
+    );
+    stderr = appendBoundedDiagnostic(
+      stderr,
+      event.attemptedCommand ? `[attempted] ${event.attemptedCommand}` : null
+    );
+    await flushLogs(true);
+  };
+
+  let streamFailureMessage: string | null = null;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_RUNNER_STREAM_EVENT_CHARS) {
+        throw new Error("Runner stream event exceeded maximum buffered size");
+      }
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) {
+          await handleEvent(parseRunnerStreamEvent(line));
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+
+    const tail = `${buffer}${decoder.decode()}`.trim();
+    if (tail) {
+      await handleEvent(parseRunnerStreamEvent(tail));
+    }
+  } catch (streamError) {
+    streamFailureMessage = streamError instanceof Error ? streamError.message : String(streamError);
+    await reader.cancel(streamError).catch(() => undefined);
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (streamFailureMessage) {
+    error = error ?? "Runner stream terminated unexpectedly";
+    stderr = appendBoundedDiagnostic(stderr, `[runner_stream] ${streamFailureMessage}`);
+  }
+  if (!receivedResultEvent) {
+    const missingResultMessage = "Runner stream ended before result event was received";
+    error = error ?? missingResultMessage;
+    stderr = appendBoundedDiagnostic(stderr, `[runner_stream] ${missingResultMessage}`);
+  }
+  await flushLogs(true);
+  if (logPersistenceWarning) {
+    stderr = appendBoundedDiagnostic(stderr, `[log_stream_warning] ${logPersistenceWarning}`);
+  }
+
+  return {
+    ...(exitCode !== undefined ? { exitCode } : {}),
+    ...(stdout.text ? { stdout: formatBoundedLog(stdout) } : {}),
+    ...(stderr.text ? { stderr: formatBoundedLog(stderr) } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(error ? { error } : {})
+  };
 }
 
 function parseRunnerResponse(payload: unknown): RunnerExecuteResult {
@@ -117,8 +441,6 @@ export async function executeActionRun(input: {
   const actionsService = new ActionsService(input.env.DB);
   const containerInstance = `action-run-${input.run.id}`;
 
-  await actionsService.updateRunToRunning(input.repository.id, input.run.id, containerInstance);
-
   if (!input.env.ACTIONS_RUNNER) {
     const logs = buildRunLogs({
       runId: input.run.id,
@@ -135,12 +457,18 @@ export async function executeActionRun(input: {
     return;
   }
 
+  let claimedAt = await actionsService.claimQueuedRun(input.repository.id, input.run.id, containerInstance);
+  if (claimedAt === null) {
+    return;
+  }
+
   let ephemeralTokenId: string | null = null;
   let ephemeralToken: string | null = null;
   let issueReplyTokenId: string | null = null;
   let issueReplyToken: string | null = null;
   let prCreateTokenId: string | null = null;
   let prCreateToken: string | null = null;
+  let startedAt: number | null = null;
   let runnerResult: RunnerExecuteResult | undefined;
   let runtimePrompt = input.run.prompt;
 
@@ -234,14 +562,52 @@ export async function executeActionRun(input: {
       })
     });
 
-    let responsePayload: unknown = null;
-    try {
-      responsePayload = await runnerResponse.json();
-    } catch {
-      responsePayload = { error: await runnerResponse.text() };
+    startedAt = await actionsService.updateRunToRunning(
+      input.repository.id,
+      input.run.id,
+      containerInstance
+    );
+    if (startedAt === null) {
+      if (runnerResponse.body) {
+        await runnerResponse.body.cancel().catch(() => undefined);
+      }
+      return;
     }
+    await actionsService.updateRunningRunLogs(
+      input.repository.id,
+      input.run.id,
+      buildRunLogs({
+        runId: input.run.id,
+        runNumber: input.run.run_number,
+        agentType: input.run.agent_type,
+        prompt: input.run.prompt,
+        claimedAt,
+        startedAt
+      })
+    );
 
-    runnerResult = parseRunnerResponse(responsePayload);
+    if (isStreamedRunnerResponse(runnerResponse)) {
+      runnerResult = await consumeStreamedRunnerResponse({
+        actionsService,
+        repositoryId: input.repository.id,
+        runId: input.run.id,
+        runNumber: input.run.run_number,
+        agentType: input.run.agent_type,
+        prompt: input.run.prompt,
+        claimedAt,
+        startedAt,
+        response: runnerResponse
+      });
+    } else {
+      let responsePayload: unknown = null;
+      try {
+        responsePayload = await runnerResponse.json();
+      } catch {
+        responsePayload = { error: await runnerResponse.text() };
+      }
+
+      runnerResult = parseRunnerResponse(responsePayload);
+    }
 
     if (!runnerResponse.ok) {
       const logs = buildRunLogs({
@@ -249,6 +615,8 @@ export async function executeActionRun(input: {
         runNumber: input.run.run_number,
         agentType: input.run.agent_type,
         prompt: input.run.prompt,
+        claimedAt,
+        startedAt,
         result: runnerResult,
         errorMessage: `Container runner responded with HTTP ${runnerResponse.status}`
       });
@@ -266,6 +634,8 @@ export async function executeActionRun(input: {
       runNumber: input.run.run_number,
       agentType: input.run.agent_type,
       prompt: input.run.prompt,
+      claimedAt,
+      startedAt,
       result: runnerResult
     });
 
@@ -281,6 +651,8 @@ export async function executeActionRun(input: {
       runNumber: input.run.run_number,
       agentType: input.run.agent_type,
       prompt: input.run.prompt,
+      claimedAt,
+      startedAt,
       ...(runnerResult ? { result: runnerResult } : {}),
       errorMessage: message
     });

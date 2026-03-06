@@ -140,6 +140,7 @@ export type ActionRunRecord = {
   exit_code: number | null;
   container_instance: string | null;
   created_at: number;
+  claimed_at: number | null;
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;

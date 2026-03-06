@@ -6,6 +6,7 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "../services/action-runner-prompt-tokens";
+import { buildActionRunLifecycleLines } from "../services/action-run-log-format";
 import {
   containsActionsMention,
   scheduleActionRunExecution,
@@ -641,15 +642,41 @@ type ActionsContainerStatePayload = {
 };
 
 const TERMINAL_ACTIONS_CONTAINER_STATES = new Set(["stopped", "stopped_with_code"]);
+const TERMINAL_ACTION_RUN_STATUSES = new Set(["success", "failed", "cancelled"]);
+const ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS = 1_000;
+const ACTION_RUN_LOG_STREAM_MAX_DURATION_MS = 25_000;
+const ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
+const ACTION_RUN_RECONCILIATION_IDLE_GRACE_PERIOD_MS = 15_000;
+
+type SseEventPayload = {
+  event: string;
+  data: unknown;
+};
 
 function appendContainerStateErrorLogs(input: {
   run: ActionRunRecord;
   containerStatus: string;
   containerExitCode: number | null;
+  reconciledAt: number;
 }): string {
   const lines: string[] = [];
-  if (input.run.logs.trim()) {
-    lines.push(input.run.logs.trim());
+  const existingLogs = input.run.logs.trim();
+  if (existingLogs) {
+    lines.push(existingLogs);
+    lines.push("");
+    lines.push(...buildActionRunLifecycleLines({ reconciledAt: input.reconciledAt }));
+    lines.push("");
+  } else {
+    lines.push(
+      ...buildActionRunLifecycleLines(
+        {
+          claimedAt: input.run.claimed_at,
+          startedAt: input.run.started_at,
+          reconciledAt: input.reconciledAt
+        },
+        { includeMissing: true }
+      )
+    );
     lines.push("");
   }
   lines.push("[runner_error]");
@@ -683,6 +710,11 @@ async function fetchActionsContainerState(
   }
 }
 
+function shouldSkipActionRunReconciliation(run: ActionRunRecord, now: number): boolean {
+  const lastActivityAt = Math.max(run.updated_at, run.started_at ?? 0, run.created_at);
+  return now - lastActivityAt < ACTION_RUN_RECONCILIATION_IDLE_GRACE_PERIOD_MS;
+}
+
 async function reconcileRunningActionRuns(input: {
   env: Pick<AppEnv["Bindings"], "ACTIONS_RUNNER">;
   actionsService: ActionsService;
@@ -695,17 +727,23 @@ async function reconcileRunningActionRuns(input: {
   }
 
   const runningRuns = input.runs.filter(
-    (run) => run.status === "running" && typeof run.container_instance === "string"
+    (run) =>
+      (run.status === "queued" || run.status === "running") &&
+      typeof run.container_instance === "string"
   );
   if (runningRuns.length === 0) {
     return input.runs;
   }
 
+  const now = Date.now();
   const updatedRuns = new Map<string, ActionRunRecord>();
   await Promise.all(
     runningRuns.map(async (run) => {
       const containerInstance = run.container_instance;
       if (!containerInstance) {
+        return;
+      }
+      if (shouldSkipActionRunReconciliation(run, now)) {
         return;
       }
 
@@ -719,17 +757,20 @@ async function reconcileRunningActionRuns(input: {
       }
 
       const containerExitCode = typeof state?.exitCode === "number" ? state.exitCode : null;
+      const reconciledAt = Date.now();
       const logs = appendContainerStateErrorLogs({
         run,
         containerStatus,
-        containerExitCode
+        containerExitCode,
+        reconciledAt
       });
-      const result = await input.actionsService.failRunningRunIfStillRunning(
+      const result = await input.actionsService.failPendingRunIfStillPending(
         input.repositoryId,
         run.id,
         {
           logs,
-          exitCode: containerExitCode
+          exitCode: containerExitCode,
+          completedAt: reconciledAt
         }
       );
 
@@ -753,6 +794,93 @@ async function reconcileRunningActionRuns(input: {
   }
 
   return input.runs.map((run) => updatedRuns.get(run.id) ?? run);
+}
+
+function createSseEventChunk(payload: SseEventPayload): string {
+  return `event: ${payload.event}\ndata: ${JSON.stringify(payload.data)}\n\n`;
+}
+
+function buildRunLogStreamEvents(
+  previousRun: ActionRunRecord | null,
+  currentRun: ActionRunRecord
+): SseEventPayload[] {
+  if (!previousRun) {
+    return [
+      {
+        event: "snapshot",
+        data: {
+          run: currentRun
+        }
+      }
+    ];
+  }
+
+  if (currentRun.logs !== previousRun.logs) {
+    if (currentRun.logs.startsWith(previousRun.logs)) {
+      const chunk = currentRun.logs.slice(previousRun.logs.length);
+      return [
+        {
+          event: "append",
+          data: {
+            runId: currentRun.id,
+            chunk,
+            status: currentRun.status,
+            exitCode: currentRun.exit_code,
+            completedAt: currentRun.completed_at,
+            updatedAt: currentRun.updated_at
+          }
+        }
+      ];
+    }
+
+    return [
+      {
+        event: "replace",
+        data: {
+          run: currentRun
+        }
+      }
+    ];
+  }
+
+  if (
+    currentRun.status !== previousRun.status ||
+    currentRun.exit_code !== previousRun.exit_code ||
+    currentRun.completed_at !== previousRun.completed_at ||
+    currentRun.updated_at !== previousRun.updated_at
+  ) {
+    return [
+      {
+        event: "status",
+        data: {
+          runId: currentRun.id,
+          status: currentRun.status,
+          exitCode: currentRun.exit_code,
+          completedAt: currentRun.completed_at,
+          updatedAt: currentRun.updated_at
+        }
+      }
+    ];
+  }
+
+  return [];
+}
+
+async function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 const router = new Hono<AppEnv>();
@@ -2051,6 +2179,170 @@ router.get("/repos/:owner/:repo/actions/runs/:runId", optionalSession, async (c)
     runs: [run]
   });
   return c.json({ run: reconciledRuns[0] ?? run });
+});
+
+router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const runId = assertString(c.req.param("runId"), "runId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const actionsService = new ActionsService(c.env.DB);
+  const existingRun = await actionsService.findRunById(repository.id, runId);
+  if (!existingRun) {
+    throw new HTTPException(404, { message: "Action run not found" });
+  }
+
+  const encoder = new TextEncoder();
+  const cancelController = new AbortController();
+  const stream = new ReadableStream<Uint8Array>({
+    start: async (controller) => {
+      let closed = false;
+      const enqueue = (payload: SseEventPayload): boolean => {
+        if (closed || cancelController.signal.aborted) {
+          return false;
+        }
+        try {
+          controller.enqueue(encoder.encode(createSseEventChunk(payload)));
+          return true;
+        } catch {
+          closed = true;
+          cancelController.abort();
+          return false;
+        }
+      };
+      const closeController = () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // Ignore close failures after disconnects.
+        }
+      };
+
+      let currentRun = existingRun;
+      let previousRun: ActionRunRecord | null = null;
+      const deadline = Date.now() + ACTION_RUN_LOG_STREAM_MAX_DURATION_MS;
+      let lastHeartbeatAt = 0;
+
+      if (!closed) {
+        try {
+          controller.enqueue(encoder.encode("retry: 1000\n\n"));
+        } catch {
+          closed = true;
+          cancelController.abort();
+        }
+      }
+
+      try {
+        while (true) {
+          if (cancelController.signal.aborted) {
+            break;
+          }
+          if (
+            (currentRun.status === "queued" || currentRun.status === "running") &&
+            currentRun.container_instance
+          ) {
+            const reconciledRuns = await reconcileRunningActionRuns({
+              env: c.env,
+              actionsService,
+              repositoryId: repository.id,
+              runs: [currentRun]
+            });
+            currentRun = reconciledRuns[0] ?? currentRun;
+          }
+
+          for (const payload of buildRunLogStreamEvents(previousRun, currentRun)) {
+            if (!enqueue(payload)) {
+              break;
+            }
+          }
+          if (cancelController.signal.aborted || closed) {
+            break;
+          }
+          previousRun = currentRun;
+
+          if (TERMINAL_ACTION_RUN_STATUSES.has(currentRun.status)) {
+            enqueue({
+              event: "done",
+              data: {
+                runId: currentRun.id,
+                status: currentRun.status,
+                exitCode: currentRun.exit_code,
+                completedAt: currentRun.completed_at,
+                updatedAt: currentRun.updated_at
+              }
+            });
+            break;
+          }
+
+          const now = Date.now();
+          if (now >= deadline) {
+            break;
+          }
+
+          if (now - lastHeartbeatAt >= ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS) {
+            enqueue({
+              event: "heartbeat",
+              data: {
+                timestamp: now
+              }
+            });
+            lastHeartbeatAt = now;
+          }
+
+          await delay(ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS, cancelController.signal);
+          if (cancelController.signal.aborted) {
+            break;
+          }
+
+          const nextRun = await actionsService.findRunById(repository.id, runId);
+          if (!nextRun) {
+            enqueue({
+              event: "stream-error",
+              data: {
+                message: "Action run not found"
+              }
+            });
+            break;
+          }
+          currentRun = nextRun;
+        }
+      } catch (error) {
+        if (!cancelController.signal.aborted) {
+          enqueue({
+            event: "stream-error",
+            data: {
+              message: error instanceof Error ? error.message : "Unknown stream error"
+            }
+          });
+        }
+      } finally {
+        closeController();
+      }
+    },
+    cancel: () => {
+      cancelController.abort();
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-content-type-options": "nosniff"
+    }
+  });
 });
 
 router.post("/repos/:owner/:repo/actions/runs/:runId/rerun", requireSession, async (c) => {

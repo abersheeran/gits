@@ -1227,13 +1227,14 @@ describe("API issues and pull requests", () => {
             logs: "",
             exit_code: null,
             container_instance: "action-run-run-1",
-            created_at: now - 1_000,
-            started_at: now - 900,
+            created_at: now - 60_000,
+            claimed_at: now - 50_000,
+            started_at: now - 45_000,
             completed_at: null,
-            updated_at: now - 900
-          }
-        ]
-      },
+            updated_at: now - 30_000
+        }
+      ]
+    },
       {
         when: "SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?",
         run: () => ({
@@ -1270,8 +1271,277 @@ describe("API issues and pull requests", () => {
     expect(body.runs[0]?.status).toBe("failed");
     expect(body.runs[0]?.exit_code).toBe(137);
     expect(body.runs[0]?.logs).toContain("stopped_with_code");
+    expect(body.runs[0]?.logs).toContain("claimed_at:");
+    expect(body.runs[0]?.logs).toContain("started_at:");
+    expect(body.runs[0]?.logs).toContain("reconciled_at:");
     expect(fetchContainerState).toHaveBeenCalledTimes(1);
     expect(fetchContainerState).toHaveBeenCalledWith("https://actions-container.internal/state");
+  });
+
+  it("does not fail recently started runs while streaming logs", async () => {
+    const now = Date.now();
+    let readCount = 0;
+    const fetchContainerState = vi.fn(async () =>
+      new Response(JSON.stringify({ state: { status: "stopped_with_code", exitCode: 137 } }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () => {
+          readCount += 1;
+          if (readCount === 1) {
+            return {
+              id: "run-queued-starting",
+              repository_id: "repo-1",
+              run_number: 3,
+              workflow_id: "workflow-1",
+              workflow_name: "CI",
+              trigger_event: "pull_request_created",
+              trigger_ref: "refs/heads/feature",
+              trigger_sha: "cccccccccccccccccccccccccccccccccccccccc",
+              trigger_source_type: "pull_request",
+              trigger_source_number: 3,
+              trigger_source_comment_id: null,
+              triggered_by: "owner-1",
+              triggered_by_username: "alice",
+              status: "running",
+              agent_type: "codex",
+              prompt: "run tests",
+              logs: "",
+              exit_code: null,
+              container_instance: "action-run-run-queued-starting",
+              created_at: now - 2_000,
+              started_at: now - 500,
+              completed_at: null,
+              updated_at: now - 500
+            };
+          }
+          return {
+            id: "run-queued-starting",
+            repository_id: "repo-1",
+            run_number: 3,
+            workflow_id: "workflow-1",
+            workflow_name: "CI",
+            trigger_event: "pull_request_created",
+            trigger_ref: "refs/heads/feature",
+            trigger_sha: "cccccccccccccccccccccccccccccccccccccccc",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 3,
+            trigger_source_comment_id: null,
+            triggered_by: "owner-1",
+            triggered_by_username: "alice",
+            status: "success",
+            agent_type: "codex",
+            prompt: "run tests",
+            logs: "line 1",
+            exit_code: 0,
+            container_instance: "action-run-run-queued-starting",
+            created_at: now - 2_000,
+            started_at: now - 500,
+            completed_at: now + 600,
+            updated_at: now + 600
+          };
+        }
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-queued-starting/logs/stream"),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: fetchContainerState
+          })
+        } as unknown as DurableObjectNamespace
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    const events = body.trim().split("\n\n");
+    expect(events.some((event) => event.includes("event: snapshot"))).toBe(true);
+    expect(events.some((event) => event.includes("\"status\":\"running\""))).toBe(true);
+    expect(events.some((event) => event.includes("event: done"))).toBe(true);
+    expect(events.some((event) => event.includes("\"status\":\"success\""))).toBe(true);
+    expect(body).not.toContain("status reconciliation");
+    expect(fetchContainerState).not.toHaveBeenCalled();
+  });
+
+  it("streams action run logs over SSE", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () => ({
+          id: "run-1",
+          repository_id: "repo-1",
+          run_number: 1,
+          workflow_id: "workflow-1",
+          workflow_name: "CI",
+          trigger_event: "pull_request_created",
+          trigger_ref: "refs/heads/feature",
+          trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          trigger_source_type: "pull_request",
+          trigger_source_number: 1,
+          trigger_source_comment_id: null,
+          triggered_by: "owner-1",
+          triggered_by_username: "alice",
+          status: "success",
+          agent_type: "codex",
+          prompt: "run tests",
+          logs: "line 1\nline 2",
+          exit_code: 0,
+          container_instance: "action-run-run-1",
+          created_at: now - 1_000,
+          started_at: now - 900,
+          completed_at: now - 100,
+          updated_at: now - 100
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/logs/stream"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const body = await response.text();
+    const events = body.trim().split("\n\n");
+    expect(events[0]).toBe("retry: 1000");
+    expect(events[1]).toContain("event: snapshot");
+    expect(events[1]).toContain("data: {");
+    expect(events[1]).toContain("\"run\":{\"id\":\"run-1\"");
+    expect(events[1]).toContain("\"logs\":\"line 1\\nline 2\"");
+    expect(events[2]).toContain("event: done");
+    expect(events[2]).toContain("data: {");
+    expect(events[2]).toContain("\"status\":\"success\"");
+  });
+
+  it("streams append and status updates for running action runs", async () => {
+    const now = Date.now();
+    let readCount = 0;
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () => {
+          readCount += 1;
+          if (readCount === 1) {
+            return {
+              id: "run-2",
+              repository_id: "repo-1",
+              run_number: 2,
+              workflow_id: "workflow-1",
+              workflow_name: "CI",
+              trigger_event: "pull_request_created",
+              trigger_ref: "refs/heads/feature",
+              trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              trigger_source_type: "pull_request",
+              trigger_source_number: 2,
+              trigger_source_comment_id: null,
+              triggered_by: "owner-1",
+              triggered_by_username: "alice",
+              status: "running",
+              agent_type: "codex",
+              prompt: "run tests",
+              logs: "",
+              exit_code: null,
+              container_instance: null,
+              created_at: now - 2_000,
+              started_at: now - 1_900,
+              completed_at: null,
+              updated_at: now - 1_900
+            };
+          }
+          if (readCount === 2) {
+            return {
+              id: "run-2",
+              repository_id: "repo-1",
+              run_number: 2,
+              workflow_id: "workflow-1",
+              workflow_name: "CI",
+              trigger_event: "pull_request_created",
+              trigger_ref: "refs/heads/feature",
+              trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              trigger_source_type: "pull_request",
+              trigger_source_number: 2,
+              trigger_source_comment_id: null,
+              triggered_by: "owner-1",
+              triggered_by_username: "alice",
+              status: "running",
+              agent_type: "codex",
+              prompt: "run tests",
+              logs: "line 1",
+              exit_code: null,
+              container_instance: null,
+              created_at: now - 2_000,
+              started_at: now - 1_900,
+              completed_at: null,
+              updated_at: now - 900
+            };
+          }
+          return {
+            id: "run-2",
+            repository_id: "repo-1",
+            run_number: 2,
+            workflow_id: "workflow-1",
+            workflow_name: "CI",
+            trigger_event: "pull_request_created",
+            trigger_ref: "refs/heads/feature",
+            trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 2,
+            trigger_source_comment_id: null,
+            triggered_by: "owner-1",
+            triggered_by_username: "alice",
+            status: "success",
+            agent_type: "codex",
+            prompt: "run tests",
+            logs: "line 1",
+            exit_code: 0,
+            container_instance: null,
+            created_at: now - 2_000,
+            started_at: now - 1_900,
+            completed_at: now - 100,
+            updated_at: now - 100
+          };
+        }
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-2/logs/stream"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    const events = body.trim().split("\n\n");
+    expect(events.some((event) => event.includes("event: snapshot"))).toBe(true);
+    expect(events.some((event) => event.includes("event: append"))).toBe(true);
+    expect(events.some((event) => event.includes("\"chunk\":\"line 1\""))).toBe(true);
+    expect(events.some((event) => event.includes("event: status"))).toBe(true);
+    expect(events.some((event) => event.includes("event: done"))).toBe(true);
+    expect(readCount).toBeGreaterThanOrEqual(3);
   });
 
   it("rejects rerunning action runs for non-collaborators", async () => {
