@@ -1,10 +1,13 @@
 import { Volume, createFsFromVolume } from "memfs";
 import { StorageService } from "./storage-service";
 
-type MutableFs = {
+export type MutableGitFs = {
   promises: {
     mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
     writeFile(path: string, data: Uint8Array | string): Promise<void>;
+    readFile(path: string, options?: unknown): Promise<Uint8Array | string>;
+    readdir(path: string): Promise<string[]>;
+    lstat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
   };
 };
 
@@ -29,12 +32,38 @@ function ensureTrailingNewline(value: string): string {
 }
 
 async function writeFileRecursive(
-  fs: MutableFs,
+  fs: MutableGitFs,
   path: string,
   data: Uint8Array | string
 ): Promise<void> {
   await fs.promises.mkdir(dirname(path), { recursive: true });
   await fs.promises.writeFile(path, data);
+}
+
+async function listFilesRecursive(fs: MutableGitFs, root: string): Promise<string[]> {
+  let names: string[] = [];
+  try {
+    names = await fs.promises.readdir(root);
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const name of names) {
+    const fullPath = `${root}/${name}`;
+    let stats: { isDirectory(): boolean; isFile(): boolean };
+    try {
+      stats = await fs.promises.lstat(fullPath);
+    } catch {
+      continue;
+    }
+    if (stats.isDirectory()) {
+      files.push(...(await listFilesRecursive(fs, fullPath)));
+    } else if (stats.isFile()) {
+      files.push(fullPath);
+    }
+  }
+  return files;
 }
 
 export async function loadRepositoryFromStorage(
@@ -43,7 +72,7 @@ export async function loadRepositoryFromStorage(
   repo: string
 ): Promise<LoadedRepository> {
   const volume = new Volume();
-  const fs = createFsFromVolume(volume) as unknown as MutableFs;
+  const fs = createFsFromVolume(volume) as unknown as MutableGitFs;
   const dir = "/repo";
   const gitdir = "/repo/.git";
 
@@ -88,4 +117,31 @@ export async function loadRepositoryFromStorage(
     head: effectiveHead ?? null,
     headRefs
   };
+}
+
+export async function persistRepositoryToStorage(args: {
+  storage: StorageService;
+  fs: MutableGitFs;
+  gitdir: string;
+  owner: string;
+  repo: string;
+}): Promise<void> {
+  const files = await listFilesRecursive(args.fs, args.gitdir);
+  const prefix = `${args.storage.repoPrefix(args.owner, args.repo)}/`;
+  const desiredKeys = new Set<string>();
+
+  for (const file of files) {
+    const relative = file.slice(args.gitdir.length + 1);
+    const key = `${prefix}${relative}`;
+    const content = await args.fs.promises.readFile(file);
+    desiredKeys.add(key);
+    await args.storage.put(key, content as ArrayBufferView | string);
+  }
+
+  const existing = await args.storage.listRepositoryKeys(args.owner, args.repo);
+  for (const key of existing) {
+    if (!desiredKeys.has(key)) {
+      await args.storage.delete(key);
+    }
+  }
 }

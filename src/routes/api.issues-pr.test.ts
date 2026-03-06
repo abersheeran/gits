@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
+import {
+  PullRequestMergeConflictError,
+  PullRequestMergeService
+} from "../services/pull-request-merge-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
@@ -1013,6 +1017,12 @@ describe("API issues and pull requests", () => {
       id: "owner-1",
       username: "alice"
     });
+    vi.spyOn(PullRequestMergeService.prototype, "squashMergePullRequest").mockResolvedValue({
+      baseOid: "cccccccccccccccccccccccccccccccccccccccc",
+      headOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      mergeCommitOid: "cccccccccccccccccccccccccccccccccccccccc",
+      createdCommit: true
+    });
     const closedIssueNumbers: number[] = [];
     const db = createMockD1Database([
       {
@@ -1090,6 +1100,61 @@ describe("API issues and pull requests", () => {
 
     expect(response.status).toBe(200);
     expect(closedIssueNumbers.sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  it("returns conflict when squash merge cannot be applied", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    vi.spyOn(PullRequestMergeService.prototype, "squashMergePullRequest").mockRejectedValue(
+      new PullRequestMergeConflictError()
+    );
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "user-2",
+          author_username: "bob",
+          title: "Merge this",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+          closed_at: null,
+          merged_at: null
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          state: "merged"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.text()).toBe("Pull request has merge conflicts");
   });
 
   it("returns masked global actions config for authenticated users", async () => {

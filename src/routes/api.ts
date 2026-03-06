@@ -22,6 +22,12 @@ import {
 } from "../services/repository-browser-service";
 import { IssueService, type IssueListState } from "../services/issue-service";
 import {
+  PullRequestMergeBranchNotFoundError,
+  PullRequestMergeConflictError,
+  PullRequestMergeNotSupportedError,
+  PullRequestMergeService
+} from "../services/pull-request-merge-service";
+import {
   DuplicateOpenPullRequestError,
   PullRequestService,
   type PullRequestListState
@@ -1860,6 +1866,7 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     title: existingPullRequest.title,
     body: existingPullRequest.body
   });
+  const requestOrigin = new URL(c.req.url).origin;
   if (patch.closeIssueNumbers !== undefined) {
     const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, patch.closeIssueNumbers);
     if (existingIssueNumbers.length !== patch.closeIssueNumbers.length) {
@@ -1869,6 +1876,41 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
         message: `Issues not found: ${missing.map((item) => `#${item}`).join(", ")}`
       });
     }
+  }
+  let mergeResult: {
+    baseOid: string;
+    headOid: string;
+    mergeCommitOid: string;
+    createdCommit: boolean;
+  } | null = null;
+  if (patch.state === "merged") {
+    if (existingPullRequest.state !== "open") {
+      throw new HTTPException(409, { message: "Only open pull requests can be merged" });
+    }
+    const mergeService = new PullRequestMergeService(new StorageService(c.env.GIT_BUCKET));
+    try {
+      mergeResult = await mergeService.squashMergePullRequest({
+        owner,
+        repo,
+        pullRequest: {
+          ...existingPullRequest,
+          ...(patch.title !== undefined ? { title: patch.title } : {}),
+          ...(patch.body !== undefined ? { body: patch.body } : {})
+        },
+        mergedBy: sessionUser
+      });
+    } catch (error) {
+      if (
+        error instanceof PullRequestMergeConflictError ||
+        error instanceof PullRequestMergeBranchNotFoundError ||
+        error instanceof PullRequestMergeNotSupportedError
+      ) {
+        throw new HTTPException(409, { message: error.message });
+      }
+      throw error;
+    }
+  }
+  if (patch.closeIssueNumbers !== undefined) {
     await pullRequestService.replacePullRequestClosingIssueNumbers({
       repositoryId: repository.id,
       pullRequestId: existingPullRequest.id,
@@ -1877,13 +1919,34 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     });
   }
 
-  const pullRequest = await pullRequestService.updatePullRequest(repository.id, number, patch);
+  const pullRequest = await pullRequestService.updatePullRequest(repository.id, number, {
+    ...patch,
+    ...(mergeResult
+      ? {
+          mergeCommitOid: mergeResult.mergeCommitOid,
+          baseOid: mergeResult.baseOid,
+          headOid: mergeResult.headOid
+        }
+      : {})
+  });
   if (!pullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
   const closingIssueNumbers = await pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number);
   if (patch.state === "merged" && closingIssueNumbers.length > 0) {
     await issueService.closeIssuesByNumbers(repository.id, closingIssueNumbers);
+  }
+  if (patch.state === "merged" && mergeResult?.createdCommit) {
+    await triggerActionWorkflows({
+      env: c.env,
+      ...executionCtxArg(c),
+      repository,
+      triggerEvent: "push",
+      triggerRef: pullRequest.base_ref,
+      triggerSha: mergeResult.mergeCommitOid,
+      triggeredByUser: sessionUser,
+      requestOrigin
+    });
   }
   const hasActionsMention = containsActionsMention({ title: pullRequest.title, body: pullRequest.body });
   if (!hadActionsMention && hasActionsMention) {
@@ -1897,7 +1960,7 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
       triggerSourceType: "pull_request",
       triggerSourceNumber: pullRequest.number,
       triggeredByUser: sessionUser,
-      requestOrigin: new URL(c.req.url).origin
+      requestOrigin
     });
   }
 

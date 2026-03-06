@@ -10,7 +10,7 @@ import {
   parseReceivePackRequest,
   parseUploadPackRequest
 } from "./git-protocol";
-import { loadRepositoryFromStorage } from "./git-repo-loader";
+import { loadRepositoryFromStorage, persistRepositoryToStorage } from "./git-repo-loader";
 import { ProtocolError, UnsupportedFeatureError } from "./git-errors";
 import {
   computeCommitSetForPack,
@@ -226,32 +226,6 @@ export class GitService {
       }
     }
     return files;
-  }
-
-  private async syncRepositoryFromFs(args: {
-    fs: MutableFs;
-    gitdir: string;
-    owner: string;
-    repo: string;
-  }): Promise<void> {
-    const files = await this.listFilesRecursive(args.fs, args.gitdir);
-    const prefix = `${this.storage.repoPrefix(args.owner, args.repo)}/`;
-    const desiredKeys = new Set<string>();
-
-    for (const file of files) {
-      const relative = file.slice(args.gitdir.length + 1);
-      const key = `${prefix}${relative}`;
-      const content = await args.fs.promises.readFile(file);
-      desiredKeys.add(key);
-      await this.storage.put(key, content as ArrayBufferView | string);
-    }
-
-    const existing = await this.storage.listRepositoryKeys(args.owner, args.repo);
-    for (const key of existing) {
-      if (!desiredKeys.has(key)) {
-        await this.storage.delete(key);
-      }
-    }
   }
 
   private async ensureHeadAfterReceivePack(args: {
@@ -589,7 +563,8 @@ export class GitService {
         fs,
         gitdir: loaded.gitdir
       });
-      await this.syncRepositoryFromFs({
+      await persistRepositoryToStorage({
+        storage: this.storage,
         fs,
         gitdir: loaded.gitdir,
         owner: args.owner,

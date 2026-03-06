@@ -223,6 +223,8 @@ export class PullRequestService {
       body?: string;
       state?: PullRequestState;
       mergeCommitOid?: string | null;
+      baseOid?: string;
+      headOid?: string;
     }
   ): Promise<PullRequestRecord | null> {
     const updates: string[] = [];
@@ -234,6 +236,14 @@ export class PullRequestService {
     if (patch.body !== undefined) {
       updates.push("body = ?");
       params.push(patch.body);
+    }
+    if (patch.baseOid !== undefined) {
+      updates.push("base_oid = ?");
+      params.push(patch.baseOid);
+    }
+    if (patch.headOid !== undefined) {
+      updates.push("head_oid = ?");
+      params.push(patch.headOid);
     }
     if (patch.state !== undefined) {
       updates.push("state = ?");

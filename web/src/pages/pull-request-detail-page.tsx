@@ -280,7 +280,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 void changeState("merged");
               }}
             >
-              Merge pull request
+              Squash and merge
             </Button>
           ) : null}
         </div>
