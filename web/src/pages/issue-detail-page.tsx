@@ -1,43 +1,42 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { MarkdownBody } from "@/components/repository/markdown-body";
+import { MarkdownEditor } from "@/components/repository/markdown-editor";
+import { ReactionStrip } from "@/components/repository/reaction-strip";
+import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
+import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
+  addReaction,
   listLatestActionRunsByCommentIds,
   listLatestActionRunsBySource,
   createIssueComment,
   formatApiError,
   getIssue,
   getRepositoryDetail,
+  listRepositoryLabels,
+  listRepositoryMilestones,
+  listRepositoryParticipants,
   listIssueComments,
+  removeReaction,
   updateIssue,
   type ActionRunRecord,
   type AuthUser,
   type IssueCommentRecord,
   type IssueRecord,
-  type RepositoryDetailResponse
+  type ReactionContent,
+  type RepositoryLabelRecord,
+  type RepositoryDetailResponse,
+  type RepositoryMilestoneRecord,
+  type RepositoryUserSummary
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 
 type IssueDetailPageProps = {
   user: AuthUser | null;
 };
-
-function actionStatusDotClass(status: ActionRunRecord["status"]): string {
-  if (status === "success") {
-    return "bg-emerald-500";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "bg-red-500";
-  }
-  if (status === "running") {
-    return "bg-sky-500";
-  }
-  return "bg-slate-400";
-}
 
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
@@ -48,12 +47,20 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issue, setIssue] = useState<IssueRecord | null>(null);
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
+  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
+  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestRunByCommentId, setLatestRunByCommentId] = useState<Record<string, ActionRunRecord>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [metadataSaving, setMetadataSaving] = useState(false);
+  const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
@@ -99,14 +106,25 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       setLoading(true);
       setLoadError(null);
       try {
-        const [nextDetail, nextIssue, nextComments, latestRunItems] = await Promise.all([
+        const [
+          nextDetail,
+          nextIssue,
+          nextComments,
+          latestRunItems,
+          nextLabels,
+          nextMilestones,
+          nextParticipants
+        ] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getIssue(owner, repo, number),
           listIssueComments(owner, repo, number),
           listLatestActionRunsBySource(owner, repo, {
             sourceType: "issue",
             numbers: [number]
-          })
+          }),
+          listRepositoryLabels(owner, repo),
+          listRepositoryMilestones(owner, repo),
+          user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
         const latestCommentRunItems =
           nextComments.length > 0
@@ -128,6 +146,9 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setDetail(nextDetail);
         setIssue(nextIssue);
         setComments(nextComments);
+        setAvailableLabels(nextLabels);
+        setAvailableMilestones(nextMilestones);
+        setParticipants(nextParticipants);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestRunByCommentId(nextRunByCommentId);
       } catch (loadError) {
@@ -144,7 +165,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     return () => {
       canceled = true;
     };
-  }, [owner, repo, number]);
+  }, [number, owner, repo, user]);
+
+  useEffect(() => {
+    if (!issue) {
+      return;
+    }
+    setSelectedLabelIds(issue.labels.map((label) => label.id));
+    setSelectedAssigneeIds(issue.assignees.map((assignee) => assignee.id));
+    setSelectedMilestoneId(issue.milestone?.id ?? null);
+  }, [issue]);
 
   const hasPendingRun =
     latestActionRun !== null &&
@@ -200,6 +230,27 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canComment = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
+  const canReact = Boolean(user);
+
+  async function saveMetadata() {
+    if (metadataSaving) {
+      return;
+    }
+    setMetadataSaving(true);
+    setActionError(null);
+    try {
+      const updated = await updateIssue(owner, repo, number, {
+        labelIds: selectedLabelIds,
+        assigneeUserIds: selectedAssigneeIds,
+        milestoneId: selectedMilestoneId
+      });
+      setIssue(updated);
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setMetadataSaving(false);
+    }
+  }
 
   async function changeState(nextState: "open" | "closed") {
     if (updating) {
@@ -236,12 +287,80 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       });
       const nextComments = [...comments, created];
       setComments(nextComments);
+      setIssue((previous) =>
+        previous
+          ? {
+              ...previous,
+              comment_count: previous.comment_count + 1
+            }
+          : previous
+      );
       setCommentBody("");
       await Promise.all([refreshLatestRunStatus(), refreshCommentRunStatuses(nextComments)]);
     } catch (submitError) {
       setActionError(formatApiError(submitError));
     } finally {
       setCommentSubmitting(false);
+    }
+  }
+
+  async function toggleIssueReaction(content: ReactionContent, viewerReacted: boolean) {
+    if (!issue || !canReact) {
+      return;
+    }
+    const reactionKey = `issue:${issue.id}`;
+    setReactionPendingKey(reactionKey);
+    setActionError(null);
+    try {
+      const reactions = viewerReacted
+        ? await removeReaction(owner, repo, {
+            subjectType: "issue",
+            subjectId: issue.id,
+            content
+          })
+        : await addReaction(owner, repo, {
+            subjectType: "issue",
+            subjectId: issue.id,
+            content
+          });
+      setIssue((previous) => (previous ? { ...previous, reactions } : previous));
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setReactionPendingKey(null);
+    }
+  }
+
+  async function toggleCommentReaction(
+    commentId: string,
+    content: ReactionContent,
+    viewerReacted: boolean
+  ) {
+    if (!canReact) {
+      return;
+    }
+    const reactionKey = `comment:${commentId}`;
+    setReactionPendingKey(reactionKey);
+    setActionError(null);
+    try {
+      const reactions = viewerReacted
+        ? await removeReaction(owner, repo, {
+            subjectType: "issue_comment",
+            subjectId: commentId,
+            content
+          })
+        : await addReaction(owner, repo, {
+            subjectType: "issue_comment",
+            subjectId: commentId,
+            content
+          });
+      setComments((previous) =>
+        previous.map((comment) => (comment.id === commentId ? { ...comment, reactions } : comment))
+      );
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setReactionPendingKey(null);
     }
   }
 
@@ -258,7 +377,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           {issue.title} <span className="text-muted-foreground">#{issue.number}</span>
         </h1>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant={issue.state === "open" ? "default" : "secondary"}>{issue.state}</Badge>
+          <RepositoryStateBadge state={issue.state} kind="issue" />
           <span>{issue.author_username}</span>
           <span>opened {formatRelativeTime(issue.created_at)}</span>
           <span>updated {formatDateTime(issue.updated_at)}</span>
@@ -267,12 +386,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
               to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}
             >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(latestActionRun.status)} ${
-                  latestActionRun.status === "running" ? "animate-pulse" : ""
-                }`}
-              />
-              action {latestActionRun.status}
+              <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
           ) : null}
         </div>
@@ -294,78 +408,120 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         </div>
       </header>
 
-      <section className="rounded-md border p-4">
-        <pre className="whitespace-pre-wrap break-words text-sm leading-6">
-          {issue.body.trim() ? issue.body : "(no description)"}
-        </pre>
-      </section>
-
-      <section className="space-y-3 rounded-md border p-4">
-        <h2 className="text-base font-semibold">Comments ({comments.length})</h2>
-        {comments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无评论。</p>
-        ) : (
-          <ul className="space-y-3">
-            {comments.map((comment) => (
-              <li key={comment.id} className="rounded-md border bg-muted/30 p-3">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{comment.author_username}</span>
-                  <span>commented {formatRelativeTime(comment.created_at)}</span>
-                  <span>{formatDateTime(comment.created_at)}</span>
-                  {latestRunByCommentId[comment.id] ? (
-                    <Link
-                      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                      to={`/repo/${owner}/${repo}/actions?runId=${latestRunByCommentId[comment.id].id}`}
-                    >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(
-                          latestRunByCommentId[comment.id].status
-                        )} ${
-                          latestRunByCommentId[comment.id].status === "running" ? "animate-pulse" : ""
-                        }`}
-                      />
-                      action {latestRunByCommentId[comment.id].status}
-                    </Link>
-                  ) : null}
-                </div>
-                <pre className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
-                  {comment.body.trim() ? comment.body : "(empty comment)"}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {canComment ? (
-        <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-base font-semibold">Add comment</h2>
-          <div className="space-y-2">
-            <Label htmlFor="issue-comment-body">Comment</Label>
-            <Textarea
-              id="issue-comment-body"
-              rows={6}
-              value={commentBody}
-              onChange={(event) => setCommentBody(event.target.value)}
-              placeholder="Leave a comment"
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          <section className="space-y-3 rounded-md border p-4">
+            <MarkdownBody content={issue.body} emptyText="(no description)" />
+            <ReactionStrip
+              reactions={issue.reactions}
+              disabled={reactionPendingKey === `issue:${issue.id}`}
+              onToggle={
+                canReact
+                  ? (content, viewerReacted) => {
+                      void toggleIssueReaction(content, viewerReacted);
+                    }
+                  : undefined
+              }
             />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => {
-                void submitComment();
+          </section>
+
+          <section className="space-y-3 rounded-md border p-4">
+            <h2 className="text-base font-semibold">Comments ({comments.length})</h2>
+            {comments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无评论。</p>
+            ) : (
+              <ul className="space-y-3">
+                {comments.map((comment) => (
+                  <li key={comment.id} className="rounded-md border bg-muted/30 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{comment.author_username}</span>
+                      <span>commented {formatRelativeTime(comment.created_at)}</span>
+                      <span>{formatDateTime(comment.created_at)}</span>
+                      {latestRunByCommentId[comment.id] ? (
+                        <Link
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          to={`/repo/${owner}/${repo}/actions?runId=${latestRunByCommentId[comment.id].id}`}
+                        >
+                          <ActionStatusBadge
+                            status={latestRunByCommentId[comment.id].status}
+                            withDot
+                            className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
+                          />
+                        </Link>
+                      ) : null}
+                    </div>
+                    <div className="mt-2">
+                      <MarkdownBody content={comment.body} emptyText="(empty comment)" />
+                    </div>
+                    <div className="mt-3">
+                      <ReactionStrip
+                        reactions={comment.reactions}
+                        disabled={reactionPendingKey === `comment:${comment.id}`}
+                        onToggle={
+                          canReact
+                            ? (content, viewerReacted) => {
+                                void toggleCommentReaction(comment.id, content, viewerReacted);
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {canComment ? (
+            <section className="space-y-3 rounded-md border p-4">
+              <h2 className="text-base font-semibold">Add comment</h2>
+              <MarkdownEditor
+                label="Comment"
+                value={commentBody}
+                onChange={setCommentBody}
+                rows={6}
+                placeholder="Leave a comment"
+                previewEmptyText="Nothing to preview."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => {
+                    void submitComment();
+                  }}
+                  disabled={commentSubmitting}
+                >
+                  {commentSubmitting ? "Submitting..." : "Comment"}
+                </Button>
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-md border p-4 text-sm text-muted-foreground">
+              仅仓库所有者或协作者可以发表评论。
+            </section>
+          )}
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-md border p-4">
+            <RepositoryMetadataFields
+              canEdit={canUpdate}
+              labels={availableLabels}
+              selectedLabelIds={selectedLabelIds}
+              onSelectedLabelIdsChange={setSelectedLabelIds}
+              participants={participants}
+              assigneeIds={selectedAssigneeIds}
+              onAssigneeIdsChange={setSelectedAssigneeIds}
+              milestones={availableMilestones}
+              milestoneId={selectedMilestoneId}
+              onMilestoneIdChange={setSelectedMilestoneId}
+              onSave={() => {
+                void saveMetadata();
               }}
-              disabled={commentSubmitting}
-            >
-              {commentSubmitting ? "Submitting..." : "Comment"}
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <section className="rounded-md border p-4 text-sm text-muted-foreground">
-          仅仓库所有者或协作者可以发表评论。
-        </section>
-      )}
+              saving={metadataSaving}
+            />
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

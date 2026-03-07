@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { AuthorAvatar } from "@/components/repository/author-avatar";
+import { RepositoryHeader } from "@/components/repository/repository-header";
+import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
+import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,19 +26,6 @@ type RepositoryIssuesPageProps = {
   user: AuthUser | null;
 };
 
-function actionStatusDotClass(status: ActionRunRecord["status"]): string {
-  if (status === "success") {
-    return "bg-emerald-500";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "bg-red-500";
-  }
-  if (status === "running") {
-    return "bg-sky-500";
-  }
-  return "bg-slate-400";
-}
-
 export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
   const owner = params.owner ?? "";
@@ -41,6 +33,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issues, setIssues] = useState<IssueRecord[]>([]);
+  const [totalIssues, setTotalIssues] = useState(0);
   const [latestRunByIssueNumber, setLatestRunByIssueNumber] = useState<Record<number, ActionRunRecord>>(
     {}
   );
@@ -62,7 +55,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           getRepositoryDetail(owner, repo),
           listIssues(owner, repo, { state, limit: 100 })
         ]);
-        const issueNumbers = nextIssues.map((issue) => issue.number);
+        const issueNumbers = nextIssues.issues.map((issue) => issue.number);
         const latestRunItems =
           issueNumbers.length > 0
             ? await listLatestActionRunsBySource(owner, repo, {
@@ -80,7 +73,8 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           return;
         }
         setDetail(nextDetail);
-        setIssues(nextIssues);
+        setIssues(nextIssues.issues);
+        setTotalIssues(nextIssues.pagination.total);
         setLatestRunByIssueNumber(nextRunByIssueNumber);
       } catch (loadError) {
         if (!canceled) {
@@ -157,50 +151,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
 
   return (
     <div className="space-y-4">
-      <header className="space-y-3 rounded-md border bg-card p-4 shadow-sm">
-        <h1 className="text-xl font-semibold">
-          <Link className="gh-link" to={`/repo/${owner}/${repo}`}>
-            {owner}/{repo}
-          </Link>{" "}
-          <span className="text-muted-foreground">/ Issues</span>
-        </h1>
-        <nav className="flex flex-wrap items-end gap-1 border-b border-border px-1" aria-label="Repository sections">
-          <Link
-            to={`/repo/${owner}/${repo}`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <Code2 className="h-4 w-4" />
-            Code
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/issues`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-[#fd8c73] px-3 py-2 text-sm font-medium text-foreground"
-          >
-            <MessageSquareText className="h-4 w-4" />
-            Issues
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
-              {detail.openIssueCount}
-            </span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/pulls`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <GitPullRequest className="h-4 w-4" />
-            Pull requests
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
-              {detail.openPullRequestCount}
-            </span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/actions`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <Workflow className="h-4 w-4" />
-            Actions
-          </Link>
-        </nav>
-      </header>
+      <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="issues" />
 
       <section className="overflow-hidden rounded-md border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2">
@@ -227,7 +178,9 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
               All
             </Button>
           </div>
-          <div className="text-xs text-muted-foreground">Filter: {state}</div>
+          <div className="text-xs text-muted-foreground">
+            {totalIssues} issues · filter: {state}
+          </div>
           {canCreate ? (
             <Button size="sm" asChild>
               <Link to={`/repo/${owner}/${repo}/issues/new`}>New issue</Link>
@@ -243,38 +196,64 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
               const actionRun = latestRunByIssueNumber[issue.number];
               return (
                 <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
-                    <Link
-                      className="inline-flex items-center gap-2 text-sm font-medium gh-link"
-                      to={`/repo/${owner}/${repo}/issues/${issue.number}`}
-                    >
-                      <MessageSquareText className="h-4 w-4" />
-                      #{issue.number} {issue.title}
-                    </Link>
-                    <p className="text-xs text-muted-foreground">
-                      {issue.author_username} opened {formatRelativeTime(issue.created_at)}
-                    </p>
-                    {actionRun ? (
-                      <Link
-                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                        to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
-                      >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(actionRun.status)} ${
-                            actionRun.status === "running" ? "animate-pulse" : ""
-                          }`}
-                        />
-                        action {actionRun.status}
-                      </Link>
-                    ) : null}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 gap-3">
+                      <AuthorAvatar name={issue.author_username} className="h-9 w-9 text-sm" />
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            className="inline-flex items-center gap-2 text-sm font-medium gh-link"
+                            to={`/repo/${owner}/${repo}/issues/${issue.number}`}
+                          >
+                            <MessageSquareText className="h-4 w-4" />
+                            #{issue.number} {issue.title}
+                          </Link>
+                          {issue.comment_count > 0 ? (
+                            <Badge variant="outline" className="text-[11px]">
+                              {issue.comment_count} comments
+                            </Badge>
+                          ) : null}
+                          {issue.milestone ? (
+                            <Badge variant="outline" className="text-[11px]">
+                              milestone: {issue.milestone.title}
+                            </Badge>
+                          ) : null}
+                          {actionRun ? (
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                              to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
+                            >
+                              <ActionStatusBadge
+                                status={actionRun.status}
+                                withDot
+                                className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
+                              />
+                            </Link>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {issue.author_username} opened {formatRelativeTime(issue.created_at)}
+                        </p>
+                        {issue.labels.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {issue.labels.map((label) => (
+                              <RepositoryLabelChip key={label.id} label={label} />
+                            ))}
+                          </div>
+                        ) : null}
+                        {issue.assignees.length > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Assignees: {issue.assignees.map((assignee) => assignee.username).join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <RepositoryStateBadge state={issue.state} kind="issue" />
                   </div>
-                  <Badge variant={issue.state === "open" ? "default" : "secondary"}>{issue.state}</Badge>
-                </div>
-                <p className="line-clamp-2 text-sm text-muted-foreground">
-                  {issue.body.trim() ? issue.body : "(no description)"}
-                </p>
-                <p className="text-xs text-muted-foreground">updated at {formatDateTime(issue.updated_at)}</p>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {issue.body.trim() ? issue.body : "(no description)"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">updated at {formatDateTime(issue.updated_at)}</p>
                 </li>
               );
             })}

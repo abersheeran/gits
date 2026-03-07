@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
+import { GitPullRequest } from "lucide-react";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { AuthorAvatar } from "@/components/repository/author-avatar";
+import { RepositoryHeader } from "@/components/repository/repository-header";
+import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
+import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,19 +30,6 @@ function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
 }
 
-function actionStatusDotClass(status: ActionRunRecord["status"]): string {
-  if (status === "success") {
-    return "bg-emerald-500";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "bg-red-500";
-  }
-  if (status === "running") {
-    return "bg-sky-500";
-  }
-  return "bg-slate-400";
-}
-
 export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
   const owner = params.owner ?? "";
@@ -45,6 +37,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequests, setPullRequests] = useState<PullRequestRecord[]>([]);
+  const [totalPullRequests, setTotalPullRequests] = useState(0);
   const [latestRunByPullNumber, setLatestRunByPullNumber] = useState<Record<number, ActionRunRecord>>(
     {}
   );
@@ -66,7 +59,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
           getRepositoryDetail(owner, repo),
           listPullRequests(owner, repo, { state, limit: 100 })
         ]);
-        const pullNumbers = nextPullRequests.map((pullRequest) => pullRequest.number);
+        const pullNumbers = nextPullRequests.pullRequests.map((pullRequest) => pullRequest.number);
         const latestRunItems =
           pullNumbers.length > 0
             ? await listLatestActionRunsBySource(owner, repo, {
@@ -84,7 +77,8 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
           return;
         }
         setDetail(nextDetail);
-        setPullRequests(nextPullRequests);
+        setPullRequests(nextPullRequests.pullRequests);
+        setTotalPullRequests(nextPullRequests.pagination.total);
         setLatestRunByPullNumber(nextRunByPullNumber);
       } catch (loadError) {
         if (!canceled) {
@@ -161,50 +155,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
 
   return (
     <div className="space-y-4">
-      <header className="space-y-3 rounded-md border bg-card p-4 shadow-sm">
-        <h1 className="text-xl font-semibold">
-          <Link className="gh-link" to={`/repo/${owner}/${repo}`}>
-            {owner}/{repo}
-          </Link>{" "}
-          <span className="text-muted-foreground">/ Pull requests</span>
-        </h1>
-        <nav className="flex flex-wrap items-end gap-1 border-b border-border px-1" aria-label="Repository sections">
-          <Link
-            to={`/repo/${owner}/${repo}`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <Code2 className="h-4 w-4" />
-            Code
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/issues`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <MessageSquareText className="h-4 w-4" />
-            Issues
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
-              {detail.openIssueCount}
-            </span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/pulls`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-[#fd8c73] px-3 py-2 text-sm font-medium text-foreground"
-          >
-            <GitPullRequest className="h-4 w-4" />
-            Pull requests
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
-              {detail.openPullRequestCount}
-            </span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/actions`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <Workflow className="h-4 w-4" />
-            Actions
-          </Link>
-        </nav>
-      </header>
+      <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="pulls" />
 
       <section className="overflow-hidden rounded-md border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2">
@@ -238,7 +189,9 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
               All
             </Button>
           </div>
-          <div className="text-xs text-muted-foreground">Filter: {state}</div>
+          <div className="text-xs text-muted-foreground">
+            {totalPullRequests} pull requests · filter: {state}
+          </div>
           {canCreate ? (
             <Button size="sm" asChild>
               <Link to={`/repo/${owner}/${repo}/pulls/new`}>New pull request</Link>
@@ -254,48 +207,77 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
               const actionRun = latestRunByPullNumber[pullRequest.number];
               return (
                 <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
-                    <Link
-                      className="inline-flex items-center gap-2 text-sm font-medium gh-link"
-                      to={`/repo/${owner}/${repo}/pulls/${pullRequest.number}`}
-                    >
-                      <GitPullRequest className="h-4 w-4" />
-                      #{pullRequest.number} {pullRequest.title}
-                    </Link>
-                    <p className="text-xs text-muted-foreground">
-                      {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
-                    </p>
-                    {actionRun ? (
-                      <Link
-                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                        to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
-                      >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(actionRun.status)} ${
-                            actionRun.status === "running" ? "animate-pulse" : ""
-                          }`}
-                        />
-                        action {actionRun.status}
-                      </Link>
-                    ) : null}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 gap-3">
+                      <AuthorAvatar name={pullRequest.author_username} className="h-9 w-9 text-sm" />
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            className="inline-flex items-center gap-2 text-sm font-medium gh-link"
+                            to={`/repo/${owner}/${repo}/pulls/${pullRequest.number}`}
+                          >
+                            <GitPullRequest className="h-4 w-4" />
+                            #{pullRequest.number} {pullRequest.title}
+                          </Link>
+                          {pullRequest.draft ? (
+                            <Badge variant="secondary" className="text-[11px]">
+                              Draft
+                            </Badge>
+                          ) : null}
+                          {pullRequest.milestone ? (
+                            <Badge variant="outline" className="text-[11px]">
+                              milestone: {pullRequest.milestone.title}
+                            </Badge>
+                          ) : null}
+                          {actionRun ? (
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                              to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
+                            >
+                              <ActionStatusBadge
+                                status={actionRun.status}
+                                withDot
+                                className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
+                              />
+                            </Link>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
+                        </p>
+                        {pullRequest.labels.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {pullRequest.labels.map((label) => (
+                              <RepositoryLabelChip key={label.id} label={label} />
+                            ))}
+                          </div>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          {stripHeadsRef(pullRequest.head_ref)} to {stripHeadsRef(pullRequest.base_ref)}
+                        </p>
+                        {pullRequest.assignees.length > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Assignees: {pullRequest.assignees.map((assignee) => assignee.username).join(", ")}
+                          </p>
+                        ) : null}
+                        {pullRequest.requested_reviewers.length > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Reviewers:{" "}
+                            {pullRequest.requested_reviewers
+                              .map((reviewer) => reviewer.username)
+                              .join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />
                   </div>
-                  <Badge
-                    variant={pullRequest.state === "open" ? "default" : "secondary"}
-                    className="uppercase"
-                  >
-                    {pullRequest.state}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {stripHeadsRef(pullRequest.head_ref)} → {stripHeadsRef(pullRequest.base_ref)}
-                </p>
-                <p className="line-clamp-2 text-sm text-muted-foreground">
-                  {pullRequest.body.trim() ? pullRequest.body : "(no description)"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  updated at {formatDateTime(pullRequest.updated_at)}
-                </p>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {pullRequest.body.trim() ? pullRequest.body : "(no description)"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    updated at {formatDateTime(pullRequest.updated_at)}
+                  </p>
                 </li>
               );
             })}

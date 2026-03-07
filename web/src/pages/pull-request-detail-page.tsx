@@ -1,17 +1,29 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { MarkdownBody } from "@/components/repository/markdown-body";
+import { MarkdownEditor } from "@/components/repository/markdown-editor";
+import { ReactionStrip } from "@/components/repository/reaction-strip";
+import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
+import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
+import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
+  addReaction,
+  compareRepositoryRefs,
   listLatestActionRunsBySource,
   createPullRequestReview,
   formatApiError,
   getPullRequest,
   getRepositoryDetail,
+  listRepositoryLabels,
+  listRepositoryMilestones,
+  listRepositoryParticipants,
   listPullRequestReviews,
+  removeReaction,
   updatePullRequest,
   type ActionRunRecord,
   type AuthUser,
@@ -19,7 +31,12 @@ import {
   type PullRequestReviewRecord,
   type PullRequestReviewSummary,
   type PullRequestRecord,
-  type RepositoryDetailResponse
+  type ReactionContent,
+  type RepositoryCompareResponse,
+  type RepositoryDetailResponse,
+  type RepositoryLabelRecord,
+  type RepositoryMilestoneRecord,
+  type RepositoryUserSummary
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 
@@ -31,17 +48,41 @@ function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
 }
 
-function actionStatusDotClass(status: ActionRunRecord["status"]): string {
-  if (status === "success") {
-    return "bg-emerald-500";
+function applyComparisonToPullRequest(
+  pullRequest: PullRequestRecord,
+  comparison: RepositoryCompareResponse | null
+): PullRequestRecord {
+  return {
+    ...pullRequest,
+    mergeable: comparison?.mergeable,
+    ahead_by: comparison?.aheadBy,
+    behind_by: comparison?.behindBy,
+    changed_files: comparison?.filesChanged,
+    additions: comparison?.additions,
+    deletions: comparison?.deletions
+  };
+}
+
+function mergeabilityBadgeVariant(
+  mergeable: RepositoryCompareResponse["mergeable"]
+): "default" | "destructive" | "secondary" {
+  if (mergeable === "mergeable") {
+    return "default";
   }
-  if (status === "failed" || status === "cancelled") {
-    return "bg-red-500";
+  if (mergeable === "conflicting") {
+    return "destructive";
   }
-  if (status === "running") {
-    return "bg-sky-500";
+  return "secondary";
+}
+
+function mergeabilityLabel(mergeable: RepositoryCompareResponse["mergeable"]): string {
+  if (mergeable === "mergeable") {
+    return "Mergeable";
   }
-  return "bg-slate-400";
+  if (mergeable === "conflicting") {
+    return "Conflicting";
+  }
+  return "Mergeability unknown";
 }
 
 export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
@@ -53,8 +94,17 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [reviews, setReviews] = useState<PullRequestReviewRecord[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
+  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
+  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
+  const [draft, setDraft] = useState(false);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [closingIssueNumbers, setClosingIssueNumbers] = useState<number[]>([]);
+  const [comparison, setComparison] = useState<RepositoryCompareResponse | null>(null);
   const [reviewSummary, setReviewSummary] = useState<PullRequestReviewSummary>({
     approvals: 0,
     changeRequests: 0,
@@ -63,6 +113,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [metadataSaving, setMetadataSaving] = useState(false);
+  const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [reviewDecision, setReviewDecision] = useState<PullRequestReviewDecision>("comment");
   const [reviewBody, setReviewBody] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -76,11 +128,25 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextPullRequestDetail, nextReviews] = await Promise.all([
+        const [
+          nextDetail,
+          nextPullRequestDetail,
+          nextReviews,
+          nextLabels,
+          nextMilestones,
+          nextParticipants
+        ] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getPullRequest(owner, repo, number),
-          listPullRequestReviews(owner, repo, number)
+          listPullRequestReviews(owner, repo, number),
+          listRepositoryLabels(owner, repo),
+          listRepositoryMilestones(owner, repo),
+          user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
+        const nextComparison = await compareRepositoryRefs(owner, repo, {
+          baseRef: nextPullRequestDetail.pullRequest.base_ref,
+          headRef: nextPullRequestDetail.pullRequest.head_ref
+        }).catch(() => null);
         const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
           sourceType: "pull_request",
           numbers: [number]
@@ -89,10 +155,14 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           return;
         }
         setDetail(nextDetail);
-        setPullRequest(nextPullRequestDetail.pullRequest);
+        setPullRequest(applyComparisonToPullRequest(nextPullRequestDetail.pullRequest, nextComparison));
         setClosingIssueNumbers(nextPullRequestDetail.closingIssueNumbers);
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
+        setAvailableLabels(nextLabels);
+        setAvailableMilestones(nextMilestones);
+        setParticipants(nextParticipants);
+        setComparison(nextComparison);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
       } catch (loadError) {
         if (!canceled) {
@@ -108,7 +178,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     return () => {
       canceled = true;
     };
-  }, [owner, repo, number]);
+  }, [number, owner, repo, user]);
+
+  useEffect(() => {
+    if (!pullRequest) {
+      return;
+    }
+    setSelectedLabelIds(pullRequest.labels.map((label) => label.id));
+    setSelectedAssigneeIds(pullRequest.assignees.map((assignee) => assignee.id));
+    setSelectedReviewerIds(pullRequest.requested_reviewers.map((reviewer) => reviewer.id));
+    setSelectedMilestoneId(pullRequest.milestone?.id ?? null);
+    setDraft(pullRequest.draft);
+  }, [pullRequest]);
 
   const hasPendingRun =
     latestActionRun !== null &&
@@ -158,6 +239,34 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReview = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
+  const canReact = Boolean(user);
+
+  async function saveMetadata() {
+    if (metadataSaving) {
+      return;
+    }
+    setMetadataSaving(true);
+    setError(null);
+    try {
+      const updated = await updatePullRequest(owner, repo, number, {
+        draft,
+        labelIds: selectedLabelIds,
+        assigneeUserIds: selectedAssigneeIds,
+        requestedReviewerIds: selectedReviewerIds,
+        milestoneId: selectedMilestoneId
+      });
+      const nextComparison = await compareRepositoryRefs(owner, repo, {
+        baseRef: updated.base_ref,
+        headRef: updated.head_ref
+      }).catch(() => null);
+      setPullRequest(applyComparisonToPullRequest(updated, nextComparison));
+      setComparison(nextComparison);
+    } catch (error) {
+      setError(formatApiError(error));
+    } finally {
+      setMetadataSaving(false);
+    }
+  }
 
   async function changeState(nextState: "open" | "closed" | "merged") {
     if (updating) {
@@ -169,7 +278,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       const updated = await updatePullRequest(owner, repo, number, {
         state: nextState
       });
-      setPullRequest(updated);
+      const nextComparison = await compareRepositoryRefs(owner, repo, {
+        baseRef: updated.base_ref,
+        headRef: updated.head_ref
+      }).catch(() => null);
+      setPullRequest(applyComparisonToPullRequest(updated, nextComparison));
+      setComparison(nextComparison);
       if (nextState === "merged") {
         const next = await getPullRequest(owner, repo, number);
         setClosingIssueNumbers(next.closingIssueNumbers);
@@ -203,6 +317,66 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
   }
 
+  async function togglePullRequestReaction(content: ReactionContent, viewerReacted: boolean) {
+    if (!pullRequest || !canReact) {
+      return;
+    }
+    const reactionKey = `pull:${pullRequest.id}`;
+    setReactionPendingKey(reactionKey);
+    setError(null);
+    try {
+      const reactions = viewerReacted
+        ? await removeReaction(owner, repo, {
+            subjectType: "pull_request",
+            subjectId: pullRequest.id,
+            content
+          })
+        : await addReaction(owner, repo, {
+            subjectType: "pull_request",
+            subjectId: pullRequest.id,
+            content
+          });
+      setPullRequest((previous) => (previous ? { ...previous, reactions } : previous));
+    } catch (error) {
+      setError(formatApiError(error));
+    } finally {
+      setReactionPendingKey(null);
+    }
+  }
+
+  async function toggleReviewReaction(
+    reviewId: string,
+    content: ReactionContent,
+    viewerReacted: boolean
+  ) {
+    if (!canReact) {
+      return;
+    }
+    const reactionKey = `review:${reviewId}`;
+    setReactionPendingKey(reactionKey);
+    setError(null);
+    try {
+      const reactions = viewerReacted
+        ? await removeReaction(owner, repo, {
+            subjectType: "pull_request_review",
+            subjectId: reviewId,
+            content
+          })
+        : await addReaction(owner, repo, {
+            subjectType: "pull_request_review",
+            subjectId: reviewId,
+            content
+          });
+      setReviews((previous) =>
+        previous.map((review) => (review.id === reviewId ? { ...review, reactions } : review))
+      );
+    } catch (error) {
+      setError(formatApiError(error));
+    } finally {
+      setReactionPendingKey(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {error ? (
@@ -216,9 +390,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           {pullRequest.title} <span className="text-muted-foreground">#{pullRequest.number}</span>
         </h1>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant={pullRequest.state === "open" ? "default" : "secondary"}>
-            {pullRequest.state}
-          </Badge>
+          <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />
           <span>{pullRequest.author_username}</span>
           <span>opened {formatRelativeTime(pullRequest.created_at)}</span>
           <span>updated {formatDateTime(pullRequest.updated_at)}</span>
@@ -227,12 +399,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
               to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}
             >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${actionStatusDotClass(latestActionRun.status)} ${
-                  latestActionRun.status === "running" ? "animate-pulse" : ""
-                }`}
-              />
-              action {latestActionRun.status}
+              <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
           ) : null}
         </div>
@@ -243,6 +410,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <Badge variant="outline">Approvals: {reviewSummary.approvals}</Badge>
           <Badge variant="outline">Changes requested: {reviewSummary.changeRequests}</Badge>
           <Badge variant="outline">Comments: {reviewSummary.comments}</Badge>
+          {comparison ? (
+            <>
+              <Badge variant={mergeabilityBadgeVariant(comparison.mergeable)}>
+                {mergeabilityLabel(comparison.mergeable)}
+              </Badge>
+              <Badge variant="outline">Ahead: {comparison.aheadBy}</Badge>
+              <Badge variant="outline">Behind: {comparison.behindBy}</Badge>
+              <Badge variant="outline">Files changed: {comparison.filesChanged}</Badge>
+              <Badge variant="outline">+{comparison.additions}</Badge>
+              <Badge variant="outline">-{comparison.deletions}</Badge>
+            </>
+          ) : null}
         </div>
         {closingIssueNumbers.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -286,83 +465,146 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         </div>
       </header>
 
-      <section className="rounded-md border p-4">
-        <pre className="whitespace-pre-wrap break-words text-sm leading-6">
-          {pullRequest.body.trim() ? pullRequest.body : "(no description)"}
-        </pre>
-      </section>
-
-      <section className="space-y-3 rounded-md border p-4">
-        <h2 className="text-base font-semibold">Reviews</h2>
-        {reviews.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无 review。</p>
-        ) : (
-          <ul className="space-y-3">
-            {reviews.map((review) => (
-              <li key={review.id} className="rounded-md border bg-muted/30 p-3">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <Badge
-                    variant={
-                      review.decision === "approve"
-                        ? "default"
-                        : review.decision === "request_changes"
-                          ? "destructive"
-                          : "secondary"
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          <section className="space-y-3 rounded-md border p-4">
+            <MarkdownBody content={pullRequest.body} emptyText="(no description)" />
+            <ReactionStrip
+              reactions={pullRequest.reactions}
+              disabled={reactionPendingKey === `pull:${pullRequest.id}`}
+              onToggle={
+                canReact
+                  ? (content, viewerReacted) => {
+                      void togglePullRequestReaction(content, viewerReacted);
                     }
-                  >
-                    {review.decision}
-                  </Badge>
-                  <span>{review.reviewer_username}</span>
-                  <span>reviewed {formatRelativeTime(review.created_at)}</span>
-                  <span>{formatDateTime(review.created_at)}</span>
-                </div>
-                <pre className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
-                  {review.body.trim() ? review.body : "(no comment)"}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {canReview ? (
-        <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-base font-semibold">Submit review</h2>
-          <div className="space-y-2">
-            <Label htmlFor="review-decision">Decision</Label>
-            <select
-              id="review-decision"
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-              value={reviewDecision}
-              onChange={(event) => setReviewDecision(event.target.value as PullRequestReviewDecision)}
-            >
-              <option value="comment">Comment</option>
-              <option value="approve">Approve</option>
-              <option value="request_changes">Request changes</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="review-body">Body</Label>
-            <Textarea
-              id="review-body"
-              rows={6}
-              value={reviewBody}
-              onChange={(event) => setReviewBody(event.target.value)}
-              placeholder="Leave your review comments"
+                  : undefined
+              }
             />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => {
-                void submitReview();
+          </section>
+
+          {comparison ? (
+            <section className="space-y-3 rounded-md border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-semibold">Files changed</h2>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <Badge variant="outline">{comparison.filesChanged} files</Badge>
+                  <Badge variant="outline">+{comparison.additions}</Badge>
+                  <Badge variant="outline">-{comparison.deletions}</Badge>
+                </div>
+              </div>
+              <RepositoryDiffView changes={comparison.changes} />
+            </section>
+          ) : null}
+
+          <section className="space-y-3 rounded-md border p-4">
+            <h2 className="text-base font-semibold">Reviews</h2>
+            {reviews.length === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无 review。</p>
+            ) : (
+              <ul className="space-y-3">
+                {reviews.map((review) => (
+                  <li key={review.id} className="rounded-md border bg-muted/30 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge
+                        variant={
+                          review.decision === "approve"
+                            ? "default"
+                            : review.decision === "request_changes"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {review.decision}
+                      </Badge>
+                      <span>{review.reviewer_username}</span>
+                      <span>reviewed {formatRelativeTime(review.created_at)}</span>
+                      <span>{formatDateTime(review.created_at)}</span>
+                    </div>
+                    <div className="mt-2">
+                      <MarkdownBody content={review.body} emptyText="(no comment)" />
+                    </div>
+                    <div className="mt-3">
+                      <ReactionStrip
+                        reactions={review.reactions}
+                        disabled={reactionPendingKey === `review:${review.id}`}
+                        onToggle={
+                          canReact
+                            ? (content, viewerReacted) => {
+                                void toggleReviewReaction(review.id, content, viewerReacted);
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {canReview ? (
+            <section className="space-y-3 rounded-md border p-4">
+              <h2 className="text-base font-semibold">Submit review</h2>
+              <div className="space-y-2">
+                <Label htmlFor="review-decision">Decision</Label>
+                <select
+                  id="review-decision"
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  value={reviewDecision}
+                  onChange={(event) => setReviewDecision(event.target.value as PullRequestReviewDecision)}
+                >
+                  <option value="comment">Comment</option>
+                  <option value="approve">Approve</option>
+                  <option value="request_changes">Request changes</option>
+                </select>
+              </div>
+              <MarkdownEditor
+                label="Body"
+                value={reviewBody}
+                onChange={setReviewBody}
+                rows={6}
+                placeholder="Leave your review comments"
+                previewEmptyText="Nothing to preview."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => {
+                    void submitReview();
+                  }}
+                  disabled={reviewSubmitting}
+                >
+                  {reviewSubmitting ? "Submitting..." : "Submit review"}
+                </Button>
+              </div>
+            </section>
+          ) : null}
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-md border p-4">
+            <RepositoryMetadataFields
+              canEdit={canUpdate}
+              labels={availableLabels}
+              selectedLabelIds={selectedLabelIds}
+              onSelectedLabelIdsChange={setSelectedLabelIds}
+              participants={participants}
+              assigneeIds={selectedAssigneeIds}
+              onAssigneeIdsChange={setSelectedAssigneeIds}
+              reviewerIds={selectedReviewerIds}
+              onReviewerIdsChange={setSelectedReviewerIds}
+              milestones={availableMilestones}
+              milestoneId={selectedMilestoneId}
+              onMilestoneIdChange={setSelectedMilestoneId}
+              draft={draft}
+              onDraftChange={setDraft}
+              onSave={() => {
+                void saveMetadata();
               }}
-              disabled={reviewSubmitting}
-            >
-              {reviewSubmitting ? "Submitting..." : "Submit review"}
-            </Button>
-          </div>
-        </section>
-      ) : null}
+              saving={metadataSaving}
+            />
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

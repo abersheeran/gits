@@ -1,17 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { MarkdownEditor } from "@/components/repository/markdown-editor";
+import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createIssue,
   formatApiError,
   getRepositoryDetail,
+  listRepositoryLabels,
+  listRepositoryMilestones,
+  listRepositoryParticipants,
   type AuthUser,
-  type RepositoryDetailResponse
+  type RepositoryLabelRecord,
+  type RepositoryMilestoneRecord,
+  type RepositoryDetailResponse,
+  type RepositoryUserSummary
 } from "@/lib/api";
 
 type NewIssuePageProps = {
@@ -29,6 +36,12 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
+  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
+  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -41,9 +54,17 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       setLoading(true);
       setError(null);
       try {
-        const nextDetail = await getRepositoryDetail(owner, repo);
+        const [nextDetail, nextLabels, nextMilestones, nextParticipants] = await Promise.all([
+          getRepositoryDetail(owner, repo),
+          listRepositoryLabels(owner, repo),
+          listRepositoryMilestones(owner, repo),
+          listRepositoryParticipants(owner, repo)
+        ]);
         if (!canceled) {
           setDetail(nextDetail);
+          setAvailableLabels(nextLabels);
+          setAvailableMilestones(nextMilestones);
+          setParticipants(nextParticipants);
         }
       } catch (loadError) {
         if (!canceled) {
@@ -108,7 +129,10 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
     try {
       const issue = await createIssue(owner, repo, {
         title,
-        body
+        body,
+        labelIds: selectedLabelIds,
+        assigneeUserIds: selectedAssigneeIds,
+        milestoneId: selectedMilestoneId
       });
       navigate(`/repo/${owner}/${repo}/issues/${issue.number}`, { replace: true });
     } catch (submitError) {
@@ -119,47 +143,68 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>New issue · {owner}/{repo}</CardTitle>
-        <CardDescription>创建一个新 issue 记录问题或需求。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {error ? (
-          <Alert variant="destructive" className="mb-4">
-            <AlertTitle>提交失败</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="issue-title">标题</Label>
-            <Input
-              id="issue-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="issue-body">描述</Label>
-            <Textarea
-              id="issue-body"
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card>
+        <CardHeader>
+          <CardTitle>New issue · {owner}/{repo}</CardTitle>
+          <CardDescription>创建一个新 issue 记录问题或需求。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <Alert variant="destructive" className="mb-4">
+              <AlertTitle>提交失败</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="space-y-2">
+              <Label htmlFor="issue-title">标题</Label>
+              <Input
+                id="issue-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                required
+              />
+            </div>
+            <MarkdownEditor
+              label="描述"
               value={body}
-              onChange={(event) => setBody(event.target.value)}
+              onChange={setBody}
               rows={10}
+              previewEmptyText="Nothing to preview."
             />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "提交中..." : "Create issue"}
-            </Button>
-            <Button variant="ghost" asChild>
-              <Link to={`/repo/${owner}/${repo}/issues`}>返回列表</Link>
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "提交中..." : "Create issue"}
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link to={`/repo/${owner}/${repo}/issues`}>返回列表</Link>
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Metadata</CardTitle>
+          <CardDescription>创建时直接补齐标签、负责人和里程碑。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RepositoryMetadataFields
+            canEdit
+            labels={availableLabels}
+            selectedLabelIds={selectedLabelIds}
+            onSelectedLabelIdsChange={setSelectedLabelIds}
+            participants={participants}
+            assigneeIds={selectedAssigneeIds}
+            onAssigneeIdsChange={setSelectedAssigneeIds}
+            milestones={availableMilestones}
+            milestoneId={selectedMilestoneId}
+            onMilestoneIdChange={setSelectedMilestoneId}
+          />
+        </CardContent>
+      </Card>
+    </div>
   );
 }

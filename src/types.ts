@@ -27,6 +27,8 @@ export type IssueState = "open" | "closed";
 
 export type PullRequestState = "open" | "closed" | "merged";
 
+export type MilestoneState = "open" | "closed";
+
 export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
 
 export type ActionWorkflowTrigger =
@@ -54,6 +56,55 @@ export type ActionRunQueueMessage = {
   requestOrigin: string;
 };
 
+export type ReactionSubjectType =
+  | "issue"
+  | "issue_comment"
+  | "pull_request"
+  | "pull_request_review";
+
+export type ReactionContent =
+  | "+1"
+  | "-1"
+  | "laugh"
+  | "hooray"
+  | "confused"
+  | "heart"
+  | "rocket"
+  | "eyes";
+
+export type RepositoryUserSummary = {
+  id: string;
+  username: string;
+};
+
+export type RepositoryLabelRecord = {
+  id: string;
+  repository_id: string;
+  name: string;
+  color: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type RepositoryMilestoneRecord = {
+  id: string;
+  repository_id: string;
+  title: string;
+  description: string;
+  state: MilestoneState;
+  due_at: number | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+};
+
+export type ReactionSummary = {
+  content: ReactionContent;
+  count: number;
+  viewer_reacted: boolean;
+};
+
 export type IssueRecord = {
   id: string;
   repository_id: string;
@@ -63,6 +114,11 @@ export type IssueRecord = {
   title: string;
   body: string;
   state: IssueState;
+  comment_count: number;
+  labels: RepositoryLabelRecord[];
+  assignees: RepositoryUserSummary[];
+  milestone: RepositoryMilestoneRecord | null;
+  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -76,6 +132,7 @@ export type IssueCommentRecord = {
   author_id: string;
   author_username: string;
   body: string;
+  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
 };
@@ -89,10 +146,22 @@ export type PullRequestRecord = {
   title: string;
   body: string;
   state: PullRequestState;
+  draft: boolean;
   base_ref: string;
   head_ref: string;
   base_oid: string;
   head_oid: string;
+  labels: RepositoryLabelRecord[];
+  assignees: RepositoryUserSummary[];
+  requested_reviewers: RepositoryUserSummary[];
+  milestone: RepositoryMilestoneRecord | null;
+  reactions: ReactionSummary[];
+  mergeable?: "mergeable" | "conflicting" | "unknown";
+  ahead_by?: number;
+  behind_by?: number;
+  changed_files?: number;
+  additions?: number;
+  deletions?: number;
   merge_commit_oid: string | null;
   created_at: number;
   updated_at: number;
@@ -109,6 +178,7 @@ export type PullRequestReviewRecord = {
   reviewer_username: string;
   decision: PullRequestReviewDecision;
   body: string;
+  reactions: ReactionSummary[];
   created_at: number;
 };
 

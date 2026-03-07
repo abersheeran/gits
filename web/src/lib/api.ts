@@ -31,23 +31,25 @@ export type RepositoryDetailResponse = {
 
 export type CommitHistoryResponse = {
   ref: string | null;
-  commits: Array<{
-    oid: string;
-    message: string;
-    author: {
-      name: string;
-      email: string;
-      timestamp: number;
-      timezoneOffset: number;
-    };
-    committer: {
-      name: string;
-      email: string;
-      timestamp: number;
-      timezoneOffset: number;
-    };
-    parents: string[];
-  }>;
+  commits: CommitSummary[];
+};
+
+export type CommitSummary = {
+  oid: string;
+  message: string;
+  author: {
+    name: string;
+    email: string;
+    timestamp: number;
+    timezoneOffset: number;
+  };
+  committer: {
+    name: string;
+    email: string;
+    timestamp: number;
+    timezoneOffset: number;
+  };
+  parents: string[];
 };
 
 export type RepositoryTreeEntry = {
@@ -56,6 +58,7 @@ export type RepositoryTreeEntry = {
   oid: string;
   mode: string;
   type: "tree" | "blob" | "commit";
+  latestCommit: CommitSummary | null;
 };
 
 export type RepositoryFilePreview = {
@@ -66,6 +69,7 @@ export type RepositoryFilePreview = {
   isBinary: boolean;
   truncated: boolean;
   content: string | null;
+  latestCommit: CommitSummary | null;
 };
 
 export type RepositoryContentsResponse = {
@@ -77,6 +81,52 @@ export type RepositoryContentsResponse = {
   entries: RepositoryTreeEntry[];
   file: RepositoryFilePreview | null;
   readme: { path: string; content: string } | null;
+};
+
+export type RepositoryPathHistoryResponse = {
+  ref: string | null;
+  path: string;
+  commits: CommitSummary[];
+};
+
+export type RepositoryCompareChange = {
+  path: string;
+  previousPath: string | null;
+  status: "added" | "modified" | "deleted";
+  mode: string | null;
+  previousMode: string | null;
+  oid: string | null;
+  previousOid: string | null;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  patch: string | null;
+  oldContent: string | null;
+  newContent: string | null;
+};
+
+export type RepositoryCommitDetailResponse = {
+  commit: CommitSummary;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  changes: RepositoryCompareChange[];
+};
+
+export type RepositoryCompareResponse = {
+  baseRef: string;
+  headRef: string;
+  baseOid: string;
+  headOid: string;
+  mergeBaseOid: string | null;
+  mergeable: "mergeable" | "conflicting" | "unknown";
+  aheadBy: number;
+  behindBy: number;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  commits: CommitSummary[];
+  changes: RepositoryCompareChange[];
 };
 
 export type AccessTokenMetadata = {
@@ -100,11 +150,79 @@ export type IssueState = "open" | "closed";
 
 export type PullRequestState = "open" | "closed" | "merged";
 
+export type MilestoneState = "open" | "closed";
+
 export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
 
 export type IssueListState = IssueState | "all";
 
 export type PullRequestListState = PullRequestState | "all";
+
+export type ReactionSubjectType =
+  | "issue"
+  | "issue_comment"
+  | "pull_request"
+  | "pull_request_review";
+
+export type ReactionContent =
+  | "+1"
+  | "-1"
+  | "laugh"
+  | "hooray"
+  | "confused"
+  | "heart"
+  | "rocket"
+  | "eyes";
+
+export type RepositoryUserSummary = {
+  id: string;
+  username: string;
+};
+
+export type RepositoryLabelRecord = {
+  id: string;
+  repository_id: string;
+  name: string;
+  color: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type RepositoryMilestoneRecord = {
+  id: string;
+  repository_id: string;
+  title: string;
+  description: string;
+  state: MilestoneState;
+  due_at: number | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+};
+
+export type ReactionSummary = {
+  content: ReactionContent;
+  count: number;
+  viewer_reacted: boolean;
+};
+
+export type PaginationMetadata = {
+  total: number;
+  page: number;
+  perPage: number;
+  hasNextPage: boolean;
+};
+
+export type PaginatedIssueListResponse = {
+  issues: IssueRecord[];
+  pagination: PaginationMetadata;
+};
+
+export type PaginatedPullRequestListResponse = {
+  pullRequests: PullRequestRecord[];
+  pagination: PaginationMetadata;
+};
 
 export type IssueRecord = {
   id: string;
@@ -115,6 +233,11 @@ export type IssueRecord = {
   title: string;
   body: string;
   state: IssueState;
+  comment_count: number;
+  labels: RepositoryLabelRecord[];
+  assignees: RepositoryUserSummary[];
+  milestone: RepositoryMilestoneRecord | null;
+  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -128,6 +251,7 @@ export type IssueCommentRecord = {
   author_id: string;
   author_username: string;
   body: string;
+  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
 };
@@ -141,10 +265,22 @@ export type PullRequestRecord = {
   title: string;
   body: string;
   state: PullRequestState;
+  draft: boolean;
   base_ref: string;
   head_ref: string;
   base_oid: string;
   head_oid: string;
+  labels: RepositoryLabelRecord[];
+  assignees: RepositoryUserSummary[];
+  requested_reviewers: RepositoryUserSummary[];
+  milestone: RepositoryMilestoneRecord | null;
+  reactions: ReactionSummary[];
+  mergeable?: "mergeable" | "conflicting" | "unknown";
+  ahead_by?: number;
+  behind_by?: number;
+  changed_files?: number;
+  additions?: number;
+  deletions?: number;
   merge_commit_oid: string | null;
   created_at: number;
   updated_at: number;
@@ -167,6 +303,7 @@ export type PullRequestReviewRecord = {
   reviewer_username: string;
   decision: PullRequestReviewDecision;
   body: string;
+  reactions: ReactionSummary[];
   created_at: number;
 };
 
@@ -480,11 +617,50 @@ export async function getRepositoryContents(
   return requestJson<RepositoryContentsResponse>(`/api/repos/${owner}/${repo}/contents${suffix}`);
 }
 
+export async function getRepositoryCommitDetail(
+  owner: string,
+  repo: string,
+  oid: string
+): Promise<RepositoryCommitDetailResponse> {
+  return requestJson<RepositoryCommitDetailResponse>(`/api/repos/${owner}/${repo}/commits/${oid}`);
+}
+
+export async function getRepositoryPathHistory(
+  owner: string,
+  repo: string,
+  input: { path: string; ref?: string; limit?: number }
+): Promise<RepositoryPathHistoryResponse> {
+  const query = new URLSearchParams();
+  query.set("path", input.path);
+  if (input.ref) {
+    query.set("ref", input.ref);
+  }
+  if (input.limit) {
+    query.set("limit", String(input.limit));
+  }
+  return requestJson<RepositoryPathHistoryResponse>(
+    `/api/repos/${owner}/${repo}/history?${query.toString()}`
+  );
+}
+
+export async function compareRepositoryRefs(
+  owner: string,
+  repo: string,
+  input: { baseRef: string; headRef: string }
+): Promise<RepositoryCompareResponse> {
+  const query = new URLSearchParams();
+  query.set("baseRef", input.baseRef);
+  query.set("headRef", input.headRef);
+  return requestJson<RepositoryCompareResponse>(
+    `/api/repos/${owner}/${repo}/compare?${query.toString()}`
+  );
+}
+
 export async function listIssues(
   owner: string,
   repo: string,
-  input?: { state?: IssueListState; limit?: number }
-): Promise<IssueRecord[]> {
+  input?: { state?: IssueListState; limit?: number; page?: number }
+): Promise<PaginatedIssueListResponse> {
   const query = new URLSearchParams();
   if (input?.state) {
     query.set("state", input.state);
@@ -492,11 +668,13 @@ export async function listIssues(
   if (input?.limit) {
     query.set("limit", String(input.limit));
   }
+  if (input?.page) {
+    query.set("page", String(input.page));
+  }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  const response = await requestJson<{ issues: IssueRecord[] }>(
+  return requestJson<PaginatedIssueListResponse>(
     `/api/repos/${owner}/${repo}/issues${suffix}`
   );
-  return response.issues;
 }
 
 export async function getIssue(
@@ -513,7 +691,13 @@ export async function getIssue(
 export async function createIssue(
   owner: string,
   repo: string,
-  input: { title: string; body?: string }
+  input: {
+    title: string;
+    body?: string;
+    labelIds?: string[];
+    assigneeUserIds?: string[];
+    milestoneId?: string | null;
+  }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(`/api/repos/${owner}/${repo}/issues`, {
     method: "POST",
@@ -526,7 +710,14 @@ export async function updateIssue(
   owner: string,
   repo: string,
   number: number,
-  input: { title?: string; body?: string; state?: IssueState }
+  input: {
+    title?: string;
+    body?: string;
+    state?: IssueState;
+    labelIds?: string[];
+    assigneeUserIds?: string[];
+    milestoneId?: string | null;
+  }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(
     `/api/repos/${owner}/${repo}/issues/${number}`,
@@ -568,8 +759,8 @@ export async function createIssueComment(
 export async function listPullRequests(
   owner: string,
   repo: string,
-  input?: { state?: PullRequestListState; limit?: number }
-): Promise<PullRequestRecord[]> {
+  input?: { state?: PullRequestListState; limit?: number; page?: number }
+): Promise<PaginatedPullRequestListResponse> {
   const query = new URLSearchParams();
   if (input?.state) {
     query.set("state", input.state);
@@ -577,11 +768,13 @@ export async function listPullRequests(
   if (input?.limit) {
     query.set("limit", String(input.limit));
   }
+  if (input?.page) {
+    query.set("page", String(input.page));
+  }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  const response = await requestJson<{ pullRequests: PullRequestRecord[] }>(
+  return requestJson<PaginatedPullRequestListResponse>(
     `/api/repos/${owner}/${repo}/pulls${suffix}`
   );
-  return response.pullRequests;
 }
 
 export async function getPullRequest(
@@ -603,6 +796,11 @@ export async function createPullRequest(
     baseRef: string;
     headRef: string;
     closeIssueNumbers?: number[];
+    draft?: boolean;
+    labelIds?: string[];
+    assigneeUserIds?: string[];
+    requestedReviewerIds?: string[];
+    milestoneId?: string | null;
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
@@ -624,6 +822,11 @@ export async function updatePullRequest(
     body?: string;
     state?: PullRequestState;
     closeIssueNumbers?: number[];
+    draft?: boolean;
+    labelIds?: string[];
+    assigneeUserIds?: string[];
+    requestedReviewerIds?: string[];
+    milestoneId?: string | null;
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
@@ -849,6 +1052,161 @@ export async function dispatchActionWorkflow(
     }
   );
   return response.run;
+}
+
+export async function listRepositoryParticipants(
+  owner: string,
+  repo: string
+): Promise<RepositoryUserSummary[]> {
+  const response = await requestJson<{ participants: RepositoryUserSummary[] }>(
+    `/api/repos/${owner}/${repo}/participants`
+  );
+  return response.participants;
+}
+
+export async function listRepositoryLabels(
+  owner: string,
+  repo: string
+): Promise<RepositoryLabelRecord[]> {
+  const response = await requestJson<{ labels: RepositoryLabelRecord[] }>(
+    `/api/repos/${owner}/${repo}/labels`
+  );
+  return response.labels;
+}
+
+export async function createRepositoryLabel(
+  owner: string,
+  repo: string,
+  input: { name: string; color: string; description?: string | null }
+): Promise<RepositoryLabelRecord> {
+  const response = await requestJson<{ label: RepositoryLabelRecord }>(
+    `/api/repos/${owner}/${repo}/labels`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.label;
+}
+
+export async function updateRepositoryLabel(
+  owner: string,
+  repo: string,
+  labelId: string,
+  input: { name?: string; color?: string; description?: string | null }
+): Promise<RepositoryLabelRecord> {
+  const response = await requestJson<{ label: RepositoryLabelRecord }>(
+    `/api/repos/${owner}/${repo}/labels/${labelId}`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
+  return response.label;
+}
+
+export async function deleteRepositoryLabel(
+  owner: string,
+  repo: string,
+  labelId: string
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/api/repos/${owner}/${repo}/labels/${labelId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function listRepositoryMilestones(
+  owner: string,
+  repo: string
+): Promise<RepositoryMilestoneRecord[]> {
+  const response = await requestJson<{ milestones: RepositoryMilestoneRecord[] }>(
+    `/api/repos/${owner}/${repo}/milestones`
+  );
+  return response.milestones;
+}
+
+export async function createRepositoryMilestone(
+  owner: string,
+  repo: string,
+  input: { title: string; description?: string; dueAt?: number | null }
+): Promise<RepositoryMilestoneRecord> {
+  const response = await requestJson<{ milestone: RepositoryMilestoneRecord }>(
+    `/api/repos/${owner}/${repo}/milestones`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.milestone;
+}
+
+export async function updateRepositoryMilestone(
+  owner: string,
+  repo: string,
+  milestoneId: string,
+  input: {
+    title?: string;
+    description?: string;
+    dueAt?: number | null;
+    state?: MilestoneState;
+  }
+): Promise<RepositoryMilestoneRecord> {
+  const response = await requestJson<{ milestone: RepositoryMilestoneRecord }>(
+    `/api/repos/${owner}/${repo}/milestones/${milestoneId}`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
+  return response.milestone;
+}
+
+export async function deleteRepositoryMilestone(
+  owner: string,
+  repo: string,
+  milestoneId: string
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/api/repos/${owner}/${repo}/milestones/${milestoneId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function addReaction(
+  owner: string,
+  repo: string,
+  input: {
+    subjectType: ReactionSubjectType;
+    subjectId: string;
+    content: ReactionContent;
+  }
+): Promise<ReactionSummary[]> {
+  const response = await requestJson<{ reactions: ReactionSummary[] }>(
+    `/api/repos/${owner}/${repo}/reactions`,
+    {
+      method: "PUT",
+      bodyJson: input
+    }
+  );
+  return response.reactions;
+}
+
+export async function removeReaction(
+  owner: string,
+  repo: string,
+  input: {
+    subjectType: ReactionSubjectType;
+    subjectId: string;
+    content: ReactionContent;
+  }
+): Promise<ReactionSummary[]> {
+  const response = await requestJson<{ reactions: ReactionSummary[] }>(
+    `/api/repos/${owner}/${repo}/reactions`,
+    {
+      method: "DELETE",
+      bodyJson: input
+    }
+  );
+  return response.reactions;
 }
 
 export async function listCollaborators(

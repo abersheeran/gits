@@ -1,4 +1,5 @@
 import * as git from "isomorphic-git";
+import { createTwoFilesPatch, diffLines } from "diff";
 import { loadRepositoryFromStorage } from "./git-repo-loader";
 import { StorageService } from "./storage-service";
 
@@ -7,6 +8,7 @@ const README_CANDIDATES = ["readme.md", "readme", "readme.txt", "readme.mkd"];
 const MAX_README_BYTES = 200 * 1024;
 const MAX_FILE_PREVIEW_BYTES = 512 * 1024;
 const BINARY_SAMPLE_BYTES = 8000;
+const MAX_DIFF_TEXT_BYTES = 256 * 1024;
 
 type RepositoryBranch = {
   name: string;
@@ -50,6 +52,7 @@ export type RepositoryTreeEntry = {
   oid: string;
   mode: string;
   type: RepositoryEntryType;
+  latestCommit: CommitSummary | null;
 };
 
 export type RepositoryFilePreview = {
@@ -60,6 +63,7 @@ export type RepositoryFilePreview = {
   isBinary: boolean;
   truncated: boolean;
   content: string | null;
+  latestCommit: CommitSummary | null;
 };
 
 export type RepositoryBrowseResult = {
@@ -71,6 +75,52 @@ export type RepositoryBrowseResult = {
   entries: RepositoryTreeEntry[];
   file: RepositoryFilePreview | null;
   readme: { path: string; content: string } | null;
+};
+
+export type RepositoryPathHistoryResult = {
+  ref: string | null;
+  path: string;
+  commits: CommitSummary[];
+};
+
+export type RepositoryCompareChange = {
+  path: string;
+  previousPath: string | null;
+  status: "added" | "modified" | "deleted";
+  mode: string | null;
+  previousMode: string | null;
+  oid: string | null;
+  previousOid: string | null;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  patch: string | null;
+  oldContent: string | null;
+  newContent: string | null;
+};
+
+export type RepositoryCommitDetail = {
+  commit: CommitSummary;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  changes: RepositoryCompareChange[];
+};
+
+export type RepositoryCompareResult = {
+  baseRef: string;
+  headRef: string;
+  baseOid: string;
+  headOid: string;
+  mergeBaseOid: string | null;
+  mergeable: "mergeable" | "conflicting" | "unknown";
+  aheadBy: number;
+  behindBy: number;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  commits: CommitSummary[];
+  changes: RepositoryCompareChange[];
 };
 
 export class RepositoryBrowsePathNotFoundError extends Error {
@@ -154,8 +204,79 @@ function sortTreeEntries(entries: RepositoryTreeEntry[]): RepositoryTreeEntry[] 
   });
 }
 
+function toCommitSummary(commit: {
+  oid: string;
+  commit: {
+    message: string;
+    parent: string[];
+    author: {
+      name: string;
+      email: string;
+      timestamp: number;
+      timezoneOffset: number;
+    };
+    committer: {
+      name: string;
+      email: string;
+      timestamp: number;
+      timezoneOffset: number;
+    };
+  };
+}): CommitSummary {
+  return {
+    oid: commit.oid,
+    message: commit.commit.message,
+    author: commit.commit.author,
+    committer: commit.commit.committer,
+    parents: commit.commit.parent
+  };
+}
+
+type LoadedRepositoryContext = Awaited<ReturnType<typeof loadRepositoryFromStorage>> & {
+  branches: RepositoryBranch[];
+  branchNames: Set<string>;
+  defaultBranch: string | null;
+};
+
+type FlatTreeEntry = {
+  path: string;
+  oid: string;
+  mode: string;
+  type: RepositoryEntryType;
+};
+
+type TextBlobInfo = {
+  content: string | null;
+  isBinary: boolean;
+  size: number;
+};
+
+function buildSyntheticGitIdentity() {
+  const timestamp = Math.floor(Date.now() / 1000);
+  return {
+    name: "gits",
+    email: "noreply@gits.local",
+    timestamp,
+    timezoneOffset: 0
+  };
+}
+
 export class RepositoryBrowserService {
   constructor(private readonly storage: StorageService) {}
+
+  private async loadContext(owner: string, repo: string): Promise<LoadedRepositoryContext> {
+    const loaded = await loadRepositoryFromStorage(this.storage, owner, repo);
+    const branches = loaded.headRefs.map((item) => ({
+      name: stripHeadsPrefix(item.name),
+      oid: item.oid
+    }));
+    return {
+      ...loaded,
+      branches,
+      branchNames: new Set(branches.map((item) => item.name)),
+      defaultBranch: branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null
+    };
+  }
 
   private async tryResolveCommitOid(args: {
     fs: unknown;
@@ -180,6 +301,315 @@ export class RepositoryBrowserService {
     } catch {
       return null;
     }
+  }
+
+  private selectRef(ref: string | undefined, context: LoadedRepositoryContext): string | null {
+    return (
+      (ref && resolveRefInput(ref, context.branchNames)) ||
+      (context.defaultBranch ? `refs/heads/${context.defaultBranch}` : null)
+    );
+  }
+
+  private async latestCommitForPath(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    ref: string | null;
+    path: string;
+  }): Promise<CommitSummary | null> {
+    if (!args.ref) {
+      return null;
+    }
+    try {
+      const commits = await git.log({
+        fs: args.fs as never,
+        dir: args.dir,
+        gitdir: args.gitdir,
+        ref: args.ref,
+        filepath: args.path,
+        depth: 1
+      });
+      const latest = commits[0];
+      return latest ? toCommitSummary(latest) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async enrichEntriesWithLatestCommits(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    ref: string | null;
+    entries: RepositoryTreeEntry[];
+  }): Promise<RepositoryTreeEntry[]> {
+    const latestCommits = await Promise.all(
+      args.entries.map((entry) =>
+        this.latestCommitForPath({
+          fs: args.fs,
+          dir: args.dir,
+          gitdir: args.gitdir,
+          ref: args.ref,
+          path: entry.path
+        })
+      )
+    );
+    return args.entries.map((entry, index) => ({
+      ...entry,
+      latestCommit: latestCommits[index] ?? null
+    }));
+  }
+
+  private async flattenTree(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    oid: string;
+    basePath?: string;
+    output?: Map<string, FlatTreeEntry>;
+  }): Promise<Map<string, FlatTreeEntry>> {
+    const output = args.output ?? new Map<string, FlatTreeEntry>();
+    const tree = await git.readTree({
+      fs: args.fs as never,
+      dir: args.dir,
+      gitdir: args.gitdir,
+      oid: args.oid
+    });
+    for (const entry of tree.tree) {
+      const path = args.basePath ? `${args.basePath}/${entry.path}` : entry.path;
+      if (entry.type === "tree") {
+        await this.flattenTree({
+          fs: args.fs,
+          dir: args.dir,
+          gitdir: args.gitdir,
+          oid: entry.oid,
+          basePath: path,
+          output
+        });
+        continue;
+      }
+      output.set(path, {
+        path,
+        oid: entry.oid,
+        mode: entry.mode,
+        type: entry.type
+      });
+    }
+    return output;
+  }
+
+  private async readTextBlob(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    oid: string | null;
+  }): Promise<TextBlobInfo> {
+    if (!args.oid) {
+      return {
+        content: "",
+        isBinary: false,
+        size: 0
+      };
+    }
+    const blob = await git.readBlob({
+      fs: args.fs as never,
+      dir: args.dir,
+      gitdir: args.gitdir,
+      oid: args.oid
+    });
+    if (looksBinary(blob.blob)) {
+      return {
+        content: null,
+        isBinary: true,
+        size: blob.blob.byteLength
+      };
+    }
+    const limited = blob.blob.byteLength > MAX_DIFF_TEXT_BYTES ? blob.blob.slice(0, MAX_DIFF_TEXT_BYTES) : blob.blob;
+    return {
+      content: new TextDecoder().decode(limited),
+      isBinary: false,
+      size: blob.blob.byteLength
+    };
+  }
+
+  private buildDiffChange(args: {
+    path: string;
+    previousEntry: FlatTreeEntry | null;
+    nextEntry: FlatTreeEntry | null;
+    previousText: TextBlobInfo;
+    nextText: TextBlobInfo;
+  }): RepositoryCompareChange {
+    const status =
+      args.previousEntry && args.nextEntry
+        ? "modified"
+        : args.nextEntry
+          ? "added"
+          : "deleted";
+    const isBinary = args.previousText.isBinary || args.nextText.isBinary;
+    if (isBinary) {
+      return {
+        path: args.path,
+        previousPath: null,
+        status,
+        mode: args.nextEntry?.mode ?? null,
+        previousMode: args.previousEntry?.mode ?? null,
+        oid: args.nextEntry?.oid ?? null,
+        previousOid: args.previousEntry?.oid ?? null,
+        additions: 0,
+        deletions: 0,
+        isBinary: true,
+        patch: null,
+        oldContent: null,
+        newContent: null
+      };
+    }
+
+    const oldContent = args.previousText.content ?? "";
+    const newContent = args.nextText.content ?? "";
+    const changes = diffLines(oldContent, newContent);
+    let additions = 0;
+    let deletions = 0;
+    for (const change of changes) {
+      const lineCount = change.count ?? change.value.split("\n").length - 1;
+      if (change.added) {
+        additions += lineCount;
+      } else if (change.removed) {
+        deletions += lineCount;
+      }
+    }
+
+    return {
+      path: args.path,
+      previousPath: null,
+      status,
+      mode: args.nextEntry?.mode ?? null,
+      previousMode: args.previousEntry?.mode ?? null,
+      oid: args.nextEntry?.oid ?? null,
+      previousOid: args.previousEntry?.oid ?? null,
+      additions,
+      deletions,
+      isBinary: false,
+      patch: createTwoFilesPatch(
+        args.path,
+        args.path,
+        oldContent,
+        newContent,
+        args.previousEntry?.oid ?? "",
+        args.nextEntry?.oid ?? ""
+      ),
+      oldContent,
+      newContent
+    };
+  }
+
+  private async compareTrees(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    previousOid: string | null;
+    nextOid: string | null;
+  }): Promise<{
+    filesChanged: number;
+    additions: number;
+    deletions: number;
+    changes: RepositoryCompareChange[];
+  }> {
+    const previousEntries = args.previousOid
+      ? await this.flattenTree({
+          fs: args.fs,
+          dir: args.dir,
+          gitdir: args.gitdir,
+          oid: args.previousOid
+        })
+      : new Map<string, FlatTreeEntry>();
+    const nextEntries = args.nextOid
+      ? await this.flattenTree({
+          fs: args.fs,
+          dir: args.dir,
+          gitdir: args.gitdir,
+          oid: args.nextOid
+        })
+      : new Map<string, FlatTreeEntry>();
+    const paths = Array.from(new Set([...previousEntries.keys(), ...nextEntries.keys()])).sort((left, right) =>
+      left.localeCompare(right)
+    );
+
+    const changes: RepositoryCompareChange[] = [];
+    let additions = 0;
+    let deletions = 0;
+
+    for (const path of paths) {
+      const previousEntry = previousEntries.get(path) ?? null;
+      const nextEntry = nextEntries.get(path) ?? null;
+      if (
+        previousEntry &&
+        nextEntry &&
+        previousEntry.oid === nextEntry.oid &&
+        previousEntry.mode === nextEntry.mode &&
+        previousEntry.type === nextEntry.type
+      ) {
+        continue;
+      }
+      const [previousText, nextText] = await Promise.all([
+        previousEntry?.type === "blob"
+          ? this.readTextBlob({
+              fs: args.fs,
+              dir: args.dir,
+              gitdir: args.gitdir,
+              oid: previousEntry.oid
+            })
+          : Promise.resolve({ content: null, isBinary: true, size: 0 }),
+        nextEntry?.type === "blob"
+          ? this.readTextBlob({
+              fs: args.fs,
+              dir: args.dir,
+              gitdir: args.gitdir,
+              oid: nextEntry.oid
+            })
+          : Promise.resolve({ content: null, isBinary: true, size: 0 })
+      ]);
+      const change = this.buildDiffChange({
+        path,
+        previousEntry,
+        nextEntry,
+        previousText,
+        nextText
+      });
+      additions += change.additions;
+      deletions += change.deletions;
+      changes.push(change);
+    }
+
+    return {
+      filesChanged: changes.length,
+      additions,
+      deletions,
+      changes
+    };
+  }
+
+  private async listCommitsUntilAncestor(args: {
+    fs: unknown;
+    dir: string;
+    gitdir: string;
+    ref: string;
+    stopOid: string | null;
+  }): Promise<CommitSummary[]> {
+    const commits = await git.log({
+      fs: args.fs as never,
+      dir: args.dir,
+      gitdir: args.gitdir,
+      ref: args.ref,
+      depth: 250
+    });
+    const items: CommitSummary[] = [];
+    for (const commit of commits) {
+      if (args.stopOid && commit.oid === args.stopOid) {
+        break;
+      }
+      items.push(toCommitSummary(commit));
+    }
+    return items;
   }
 
   private async tryReadReadme(args: {
@@ -232,7 +662,8 @@ export class RepositoryBrowserService {
         path: basePath ? `${basePath}/${item.path}` : item.path,
         oid: item.oid,
         mode: item.mode,
-        type: item.type
+        type: item.type,
+        latestCommit: null
       }))
     );
   }
@@ -354,7 +785,8 @@ export class RepositoryBrowserService {
       size,
       isBinary,
       truncated,
-      content
+      content,
+      latestCommit: null
     };
   }
 
@@ -363,17 +795,8 @@ export class RepositoryBrowserService {
     repo: string;
     ref?: string;
   }): Promise<RepositoryDetail> {
-    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
-    const branches = loaded.headRefs.map((item) => ({
-      name: stripHeadsPrefix(item.name),
-      oid: item.oid
-    }));
-    const branchNames = new Set(branches.map((item) => item.name));
-
-    const defaultBranch = branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null;
-    const selectedRef =
-      (input.ref && resolveRefInput(input.ref, branchNames)) ||
-      (defaultBranch ? `refs/heads/${defaultBranch}` : null);
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const selectedRef = this.selectRef(input.ref, loaded);
 
     const headOid = await this.tryResolveCommitOid({
       fs: loaded.fs,
@@ -393,10 +816,10 @@ export class RepositoryBrowserService {
       : null;
 
     return {
-      defaultBranch,
+      defaultBranch: loaded.defaultBranch,
       selectedRef,
       headOid,
-      branches,
+      branches: loaded.branches,
       readme
     };
   }
@@ -407,16 +830,8 @@ export class RepositoryBrowserService {
     ref?: string;
     path?: string;
   }): Promise<RepositoryBrowseResult> {
-    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
-    const branches = loaded.headRefs.map((item) => ({
-      name: stripHeadsPrefix(item.name),
-      oid: item.oid
-    }));
-    const branchNames = new Set(branches.map((item) => item.name));
-    const defaultBranch = branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null;
-    const selectedRef =
-      (input.ref && resolveRefInput(input.ref, branchNames)) ||
-      (defaultBranch ? `refs/heads/${defaultBranch}` : null);
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const selectedRef = this.selectRef(input.ref, loaded);
     const headOid = await this.tryResolveCommitOid({
       fs: loaded.fs,
       dir: loaded.dir,
@@ -427,7 +842,7 @@ export class RepositoryBrowserService {
     const normalizedPath = normalizeRepositoryPath(input.path);
     if (!headOid) {
       return {
-        defaultBranch,
+        defaultBranch: loaded.defaultBranch,
         selectedRef,
         headOid: null,
         path: normalizedPath,
@@ -447,6 +862,13 @@ export class RepositoryBrowserService {
     });
 
     if (target.kind === "tree") {
+      const entries = await this.enrichEntriesWithLatestCommits({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: selectedRef,
+        entries: target.entries
+      });
       const readme = await this.tryReadReadme({
         fs: loaded.fs,
         dir: loaded.dir,
@@ -455,12 +877,12 @@ export class RepositoryBrowserService {
         directoryPath: target.path
       });
       return {
-        defaultBranch,
+        defaultBranch: loaded.defaultBranch,
         selectedRef,
         headOid,
         path: target.path,
         kind: "tree",
-        entries: target.entries,
+        entries,
         file: null,
         readme
       };
@@ -474,8 +896,15 @@ export class RepositoryBrowserService {
       mode: target.entry.mode,
       path: target.path
     });
+    file.latestCommit = await this.latestCommitForPath({
+      fs: loaded.fs,
+      dir: loaded.dir,
+      gitdir: loaded.gitdir,
+      ref: selectedRef,
+      path: target.path
+    });
     return {
-      defaultBranch,
+      defaultBranch: loaded.defaultBranch,
       selectedRef,
       headOid,
       path: target.path,
@@ -492,13 +921,8 @@ export class RepositoryBrowserService {
     ref?: string;
     limit?: number;
   }): Promise<{ ref: string | null; commits: CommitSummary[] }> {
-    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
-    const branches = loaded.headRefs.map((item) => stripHeadsPrefix(item.name));
-    const branchNames = new Set(branches);
-    const defaultBranch = branchNameFromHead(loaded.head) ?? branches[0] ?? null;
-    const selectedRef =
-      (input.ref && resolveRefInput(input.ref, branchNames)) ||
-      (defaultBranch ? `refs/heads/${defaultBranch}` : null);
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const selectedRef = this.selectRef(input.ref, loaded);
     if (!selectedRef) {
       return {
         ref: null,
@@ -544,13 +968,183 @@ export class RepositoryBrowserService {
 
     return {
       ref: selectedRef,
-      commits: commitsRaw.map((item) => ({
-        oid: item.oid,
-        message: item.commit.message,
-        author: item.commit.author,
-        committer: item.commit.committer,
-        parents: item.commit.parent
-      }))
+      commits: commitsRaw.map((item) => toCommitSummary(item))
+    };
+  }
+
+  async listPathHistory(input: {
+    owner: string;
+    repo: string;
+    ref?: string;
+    path: string;
+    limit?: number;
+  }): Promise<RepositoryPathHistoryResult> {
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const selectedRef = this.selectRef(input.ref, loaded);
+    const normalizedPath = normalizeRepositoryPath(input.path);
+    if (!selectedRef || !normalizedPath) {
+      return {
+        ref: selectedRef,
+        path: normalizedPath,
+        commits: []
+      };
+    }
+    try {
+      const commits = await git.log({
+        fs: loaded.fs as never,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: selectedRef,
+        filepath: normalizedPath,
+        depth: Math.min(Math.max(input.limit ?? 20, 1), 100)
+      });
+      return {
+        ref: selectedRef,
+        path: normalizedPath,
+        commits: commits.map((item) => toCommitSummary(item))
+      };
+    } catch {
+      return {
+        ref: selectedRef,
+        path: normalizedPath,
+        commits: []
+      };
+    }
+  }
+
+  async getCommitDetail(input: {
+    owner: string;
+    repo: string;
+    oid: string;
+  }): Promise<RepositoryCommitDetail> {
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const commitData = await git.readCommit({
+      fs: loaded.fs as never,
+      dir: loaded.dir,
+      gitdir: loaded.gitdir,
+      oid: input.oid
+    });
+    const previousOid = commitData.commit.parent[0] ?? null;
+    const comparison = await this.compareTrees({
+      fs: loaded.fs,
+      dir: loaded.dir,
+      gitdir: loaded.gitdir,
+      previousOid,
+      nextOid: input.oid
+    });
+    return {
+      commit: toCommitSummary(commitData),
+      filesChanged: comparison.filesChanged,
+      additions: comparison.additions,
+      deletions: comparison.deletions,
+      changes: comparison.changes
+    };
+  }
+
+  async compareRefs(input: {
+    owner: string;
+    repo: string;
+    baseRef: string;
+    headRef: string;
+  }): Promise<RepositoryCompareResult> {
+    const loaded = await this.loadContext(input.owner, input.repo);
+    const baseRef = resolveRefInput(input.baseRef, loaded.branchNames);
+    const headRef = resolveRefInput(input.headRef, loaded.branchNames);
+    const [baseOid, headOid] = await Promise.all([
+      this.tryResolveCommitOid({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: baseRef
+      }),
+      this.tryResolveCommitOid({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: headRef
+      })
+    ]);
+
+    if (!baseOid || !headOid) {
+      throw new RepositoryBrowsePathNotFoundError("compare");
+    }
+
+    const mergeBases = await git.findMergeBase({
+      fs: loaded.fs as never,
+      dir: loaded.dir,
+      gitdir: loaded.gitdir,
+      oids: [baseOid, headOid]
+    });
+    const mergeBaseOid = mergeBases[0] ?? null;
+    const mergeable =
+      OID_REGEX.test(baseRef) || OID_REGEX.test(headRef)
+        ? "unknown"
+        : await (async (): Promise<"mergeable" | "conflicting" | "unknown"> => {
+            const identity = buildSyntheticGitIdentity();
+            try {
+              await git.merge({
+                fs: loaded.fs as never,
+                dir: loaded.dir,
+                gitdir: loaded.gitdir,
+                ours: baseRef,
+                theirs: headRef,
+                fastForward: false,
+                dryRun: true,
+                noUpdateBranch: true,
+                abortOnConflict: true,
+                author: identity,
+                committer: identity
+              });
+              return "mergeable";
+            } catch (error) {
+              if (error instanceof git.Errors.MergeConflictError) {
+                return "conflicting";
+              }
+              if (error instanceof git.Errors.MergeNotSupportedError) {
+                return "unknown";
+              }
+              throw error;
+            }
+          })();
+
+    const [aheadCommits, behindCommits, comparison] = await Promise.all([
+      this.listCommitsUntilAncestor({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: headRef,
+        stopOid: mergeBaseOid
+      }),
+      this.listCommitsUntilAncestor({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        ref: baseRef,
+        stopOid: mergeBaseOid
+      }),
+      this.compareTrees({
+        fs: loaded.fs,
+        dir: loaded.dir,
+        gitdir: loaded.gitdir,
+        previousOid: mergeBaseOid ?? baseOid,
+        nextOid: headOid
+      })
+    ]);
+
+    return {
+      baseRef,
+      headRef,
+      baseOid,
+      headOid,
+      mergeBaseOid,
+      mergeable,
+      aheadBy: aheadCommits.length,
+      behindBy: behindCommits.length,
+      filesChanged: comparison.filesChanged,
+      additions: comparison.additions,
+      deletions: comparison.deletions,
+      commits: aheadCommits,
+      changes: comparison.changes
     };
   }
 }

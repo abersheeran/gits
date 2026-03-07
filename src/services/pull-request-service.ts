@@ -1,3 +1,4 @@
+import { RepositoryMetadataService } from "./repository-metadata-service";
 import type {
   PullRequestRecord,
   PullRequestReviewDecision,
@@ -7,6 +8,48 @@ import type {
 
 export type PullRequestListState = PullRequestState | "all";
 
+type BasePullRequestRow = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  body: string;
+  state: PullRequestState;
+  base_ref: string;
+  head_ref: string;
+  base_oid: string;
+  head_oid: string;
+  draft: number;
+  milestone_id: string | null;
+  merge_commit_oid: string | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  merged_at: number | null;
+};
+
+type BasePullRequestReviewRow = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  reviewer_id: string;
+  reviewer_username: string;
+  decision: PullRequestReviewDecision;
+  body: string;
+  created_at: number;
+};
+
+export type PaginatedPullRequestResult = {
+  items: PullRequestRecord[];
+  total: number;
+  page: number;
+  per_page: number;
+  has_next_page: boolean;
+};
+
 export class DuplicateOpenPullRequestError extends Error {
   constructor() {
     super("An open pull request already exists for this head/base pair");
@@ -15,10 +58,93 @@ export class DuplicateOpenPullRequestError extends Error {
 }
 
 export class PullRequestService {
-  constructor(private readonly db: D1Database) {}
+  private readonly metadataService: RepositoryMetadataService;
+
+  constructor(private readonly db: D1Database) {
+    this.metadataService = new RepositoryMetadataService(db);
+  }
 
   private normalizeIssueNumbers(numbers: number[]): number[] {
     return Array.from(new Set(numbers)).sort((a, b) => a - b);
+  }
+
+  private normalizeListInput(
+    input?: number | { limit?: number; page?: number; viewerId?: string }
+  ): { limit: number; page: number; offset: number; viewerId?: string } {
+    const resolved =
+      typeof input === "number"
+        ? { limit: input }
+        : (input ?? {});
+    const limit = Math.min(Math.max(resolved.limit ?? 50, 1), 100);
+    const page = Math.max(resolved.page ?? 1, 1);
+    return {
+      limit,
+      page,
+      offset: (page - 1) * limit,
+      ...(resolved.viewerId ? { viewerId: resolved.viewerId } : {})
+    };
+  }
+
+  private async hydratePullRequests(
+    repositoryId: string,
+    rows: BasePullRequestRow[],
+    viewerId?: string
+  ): Promise<PullRequestRecord[]> {
+    const metadata = await this.metadataService.listPullRequestMetadata({
+      repositoryId,
+      pullRequestIds: rows.map((row) => row.id),
+      ...(viewerId ? { viewerId } : {})
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      repository_id: row.repository_id,
+      number: row.number,
+      author_id: row.author_id,
+      author_username: row.author_username,
+      title: row.title,
+      body: row.body,
+      state: row.state,
+      draft: row.draft === 1,
+      base_ref: row.base_ref,
+      head_ref: row.head_ref,
+      base_oid: row.base_oid,
+      head_oid: row.head_oid,
+      labels: metadata.labelsByPullRequestId[row.id] ?? [],
+      assignees: metadata.assigneesByPullRequestId[row.id] ?? [],
+      requested_reviewers: metadata.requestedReviewersByPullRequestId[row.id] ?? [],
+      milestone: metadata.milestoneByPullRequestId[row.id] ?? null,
+      reactions: metadata.reactionsByPullRequestId[row.id] ?? [],
+      merge_commit_oid: row.merge_commit_oid,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      closed_at: row.closed_at,
+      merged_at: row.merged_at
+    }));
+  }
+
+  private async hydratePullRequestReviews(
+    repositoryId: string,
+    rows: BasePullRequestReviewRow[],
+    viewerId?: string
+  ): Promise<PullRequestReviewRecord[]> {
+    const reactionsByReviewId = await this.metadataService.listPullRequestReviewReactions(
+      repositoryId,
+      rows.map((row) => row.id),
+      viewerId
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      repository_id: row.repository_id,
+      pull_request_id: row.pull_request_id,
+      pull_request_number: row.pull_request_number,
+      reviewer_id: row.reviewer_id,
+      reviewer_username: row.reviewer_username,
+      decision: row.decision,
+      body: row.body,
+      reactions: reactionsByReviewId[row.id] ?? [],
+      created_at: row.created_at
+    }));
   }
 
   private async nextPullRequestNumber(repositoryId: string): Promise<number> {
@@ -42,75 +168,107 @@ export class PullRequestService {
   async listPullRequests(
     repositoryId: string,
     state: PullRequestListState,
-    limit = 50
-  ): Promise<PullRequestRecord[]> {
-    const normalizedLimit = Math.min(Math.max(limit, 1), 100);
-    if (state === "all") {
-      const rows = await this.db
-        .prepare(
-          `SELECT
-            pr.id,
-            pr.repository_id,
-            pr.number,
-            pr.author_id,
-            u.username AS author_username,
-            pr.title,
-            pr.body,
-            pr.state,
-            pr.base_ref,
-            pr.head_ref,
-            pr.base_oid,
-            pr.head_oid,
-            pr.merge_commit_oid,
-            pr.created_at,
-            pr.updated_at,
-            pr.closed_at,
-            pr.merged_at
-           FROM pull_requests pr
-           JOIN users u ON u.id = pr.author_id
-           WHERE pr.repository_id = ?
-           ORDER BY pr.number DESC
-           LIMIT ?`
-        )
-        .bind(repositoryId, normalizedLimit)
-        .all<PullRequestRecord>();
-      return rows.results;
-    }
+    input?: number | { limit?: number; page?: number; viewerId?: string }
+  ): Promise<PaginatedPullRequestResult> {
+    const { limit, page, offset, viewerId } = this.normalizeListInput(input);
 
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          pr.id,
-          pr.repository_id,
-          pr.number,
-          pr.author_id,
-          u.username AS author_username,
-          pr.title,
-          pr.body,
-          pr.state,
-          pr.base_ref,
-          pr.head_ref,
-          pr.base_oid,
-          pr.head_oid,
-          pr.merge_commit_oid,
-          pr.created_at,
-          pr.updated_at,
-          pr.closed_at,
-          pr.merged_at
-         FROM pull_requests pr
-         JOIN users u ON u.id = pr.author_id
-         WHERE pr.repository_id = ? AND pr.state = ?
-         ORDER BY pr.number DESC
-         LIMIT ?`
-      )
-      .bind(repositoryId, state, normalizedLimit)
-      .all<PullRequestRecord>();
-    return rows.results;
+    const countRow =
+      state === "all"
+        ? await this.db
+            .prepare(
+              `SELECT COUNT(*) AS count
+               FROM pull_requests
+               WHERE repository_id = ?`
+            )
+            .bind(repositoryId)
+            .first<{ count: number }>()
+        : await this.db
+            .prepare(
+              `SELECT COUNT(*) AS count
+               FROM pull_requests
+               WHERE repository_id = ? AND state = ?`
+            )
+            .bind(repositoryId, state)
+            .first<{ count: number }>();
+
+    const rows =
+      state === "all"
+        ? await this.db
+            .prepare(
+              `SELECT
+                pr.id,
+                pr.repository_id,
+                pr.number,
+                pr.author_id,
+                u.username AS author_username,
+                pr.title,
+                pr.body,
+                pr.state,
+                pr.base_ref,
+                pr.head_ref,
+                pr.base_oid,
+                pr.head_oid,
+                pr.draft,
+                pr.milestone_id,
+                pr.merge_commit_oid,
+                pr.created_at,
+                pr.updated_at,
+                pr.closed_at,
+                pr.merged_at
+               FROM pull_requests pr
+               JOIN users u ON u.id = pr.author_id
+               WHERE pr.repository_id = ?
+               ORDER BY pr.number DESC
+               LIMIT ? OFFSET ?`
+            )
+            .bind(repositoryId, limit, offset)
+            .all<BasePullRequestRow>()
+        : await this.db
+            .prepare(
+              `SELECT
+                pr.id,
+                pr.repository_id,
+                pr.number,
+                pr.author_id,
+                u.username AS author_username,
+                pr.title,
+                pr.body,
+                pr.state,
+                pr.base_ref,
+                pr.head_ref,
+                pr.base_oid,
+                pr.head_oid,
+                pr.draft,
+                pr.milestone_id,
+                pr.merge_commit_oid,
+                pr.created_at,
+                pr.updated_at,
+                pr.closed_at,
+                pr.merged_at
+               FROM pull_requests pr
+               JOIN users u ON u.id = pr.author_id
+               WHERE pr.repository_id = ? AND pr.state = ?
+               ORDER BY pr.number DESC
+               LIMIT ? OFFSET ?`
+            )
+            .bind(repositoryId, state, limit, offset)
+            .all<BasePullRequestRow>();
+
+    const items = await this.hydratePullRequests(repositoryId, rows.results, viewerId);
+    const total = Number(countRow?.count ?? 0);
+    return {
+      items,
+      total,
+      page,
+      per_page: limit,
+      has_next_page: offset + items.length < total
+    };
   }
 
   async findPullRequestByNumber(
     repositoryId: string,
-    number: number
+    number: number,
+    viewerId?: string
   ): Promise<PullRequestRecord | null> {
     const row = await this.db
       .prepare(
@@ -127,6 +285,8 @@ export class PullRequestService {
           pr.head_ref,
           pr.base_oid,
           pr.head_oid,
+          pr.draft,
+          pr.milestone_id,
           pr.merge_commit_oid,
           pr.created_at,
           pr.updated_at,
@@ -138,8 +298,12 @@ export class PullRequestService {
          LIMIT 1`
       )
       .bind(repositoryId, number)
-      .first<PullRequestRecord>();
-    return row ?? null;
+      .first<BasePullRequestRow>();
+    if (!row) {
+      return null;
+    }
+    const [pullRequest] = await this.hydratePullRequests(repositoryId, [row], viewerId);
+    return pullRequest ?? null;
   }
 
   async createPullRequest(input: {
@@ -151,6 +315,8 @@ export class PullRequestService {
     headRef: string;
     baseOid: string;
     headOid: string;
+    draft?: boolean;
+    milestoneId?: string | null;
   }): Promise<PullRequestRecord> {
     const duplicate = await this.db
       .prepare(
@@ -181,12 +347,14 @@ export class PullRequestService {
           head_ref,
           base_oid,
           head_oid,
+          draft,
+          milestone_id,
           merge_commit_oid,
           created_at,
           updated_at,
           closed_at,
           merged_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         crypto.randomUUID(),
@@ -200,6 +368,8 @@ export class PullRequestService {
         input.headRef,
         input.baseOid,
         input.headOid,
+        input.draft ? 1 : 0,
+        input.milestoneId ?? null,
         null,
         now,
         now,
@@ -225,6 +395,8 @@ export class PullRequestService {
       mergeCommitOid?: string | null;
       baseOid?: string;
       headOid?: string;
+      milestoneId?: string | null;
+      draft?: boolean;
     }
   ): Promise<PullRequestRecord | null> {
     const updates: string[] = [];
@@ -244,6 +416,14 @@ export class PullRequestService {
     if (patch.headOid !== undefined) {
       updates.push("head_oid = ?");
       params.push(patch.headOid);
+    }
+    if (patch.draft !== undefined) {
+      updates.push("draft = ?");
+      params.push(patch.draft ? 1 : 0);
+    }
+    if (patch.milestoneId !== undefined) {
+      updates.push("milestone_id = ?");
+      params.push(patch.milestoneId);
     }
     if (patch.state !== undefined) {
       updates.push("state = ?");
@@ -302,7 +482,8 @@ export class PullRequestService {
 
   async listPullRequestReviews(
     repositoryId: string,
-    pullRequestNumber: number
+    pullRequestNumber: number,
+    viewerId?: string
   ): Promise<PullRequestReviewRecord[]> {
     const rows = await this.db
       .prepare(
@@ -322,9 +503,9 @@ export class PullRequestService {
          ORDER BY r.created_at ASC`
       )
       .bind(repositoryId, pullRequestNumber)
-      .all<PullRequestReviewRecord>();
+      .all<BasePullRequestReviewRow>();
 
-    return rows.results;
+    return this.hydratePullRequestReviews(repositoryId, rows.results, viewerId);
   }
 
   async summarizePullRequestReviews(repositoryId: string, pullRequestNumber: number): Promise<{
@@ -386,7 +567,7 @@ export class PullRequestService {
       )
       .run();
 
-    const created = await this.db
+    const row = await this.db
       .prepare(
         `SELECT
           r.id,
@@ -404,8 +585,12 @@ export class PullRequestService {
          LIMIT 1`
       )
       .bind(id)
-      .first<PullRequestReviewRecord>();
+      .first<BasePullRequestReviewRow>();
 
+    if (!row) {
+      throw new Error("Created pull request review not found");
+    }
+    const [created] = await this.hydratePullRequestReviews(input.repositoryId, [row]);
     if (!created) {
       throw new Error("Created pull request review not found");
     }

@@ -60,11 +60,13 @@ CREATE TABLE IF NOT EXISTS issues (
   title TEXT NOT NULL,
   body TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL CHECK (state IN ("open", "closed")),
+  milestone_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   closed_at INTEGER,
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
   FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (milestone_id) REFERENCES repository_milestones(id) ON DELETE SET NULL,
   UNIQUE(repository_id, number)
 );
 
@@ -95,6 +97,8 @@ CREATE TABLE IF NOT EXISTS pull_requests (
   head_ref TEXT NOT NULL,
   base_oid TEXT NOT NULL,
   head_oid TEXT NOT NULL,
+  draft INTEGER NOT NULL DEFAULT 0,
+  milestone_id TEXT,
   merge_commit_oid TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -102,6 +106,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
   merged_at INTEGER,
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
   FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (milestone_id) REFERENCES repository_milestones(id) ON DELETE SET NULL,
   UNIQUE(repository_id, number)
 );
 
@@ -145,6 +150,90 @@ CREATE TABLE IF NOT EXISTS repository_actions_configs (
   claude_code_config_file_content TEXT,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS repository_labels (
+  id TEXT PRIMARY KEY,
+  repository_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL,
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  UNIQUE(repository_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS repository_milestones (
+  id TEXT PRIMARY KEY,
+  repository_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (state IN ('open', 'closed')),
+  due_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  closed_at INTEGER,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  UNIQUE(repository_id, title)
+);
+
+CREATE TABLE IF NOT EXISTS issue_labels (
+  issue_id TEXT NOT NULL,
+  label_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (issue_id, label_id),
+  FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
+  FOREIGN KEY (label_id) REFERENCES repository_labels(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pull_request_labels (
+  pull_request_id TEXT NOT NULL,
+  label_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (pull_request_id, label_id),
+  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (label_id) REFERENCES repository_labels(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS issue_assignees (
+  issue_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (issue_id, user_id),
+  FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pull_request_assignees (
+  pull_request_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (pull_request_id, user_id),
+  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pull_request_review_requests (
+  pull_request_id TEXT NOT NULL,
+  reviewer_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (pull_request_id, reviewer_id),
+  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS reactions (
+  id TEXT PRIMARY KEY,
+  repository_id TEXT NOT NULL,
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('issue', 'issue_comment', 'pull_request', 'pull_request_review')),
+  subject_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  content TEXT NOT NULL CHECK (content IN ('+1', '-1', 'laugh', 'hooray', 'confused', 'heart', 'rocket', 'eyes')),
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(subject_type, subject_id, user_id, content)
 );
 
 CREATE TABLE IF NOT EXISTS action_workflows (
@@ -215,6 +304,20 @@ CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_lookup
   ON pull_request_reviews(repository_id, pull_request_number, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_reviewer
   ON pull_request_reviews(repository_id, reviewer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_repository_labels_lookup
+  ON repository_labels(repository_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_repository_milestones_lookup
+  ON repository_milestones(repository_id, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issue_labels_lookup
+  ON issue_labels(issue_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_labels_lookup
+  ON pull_request_labels(pull_request_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_issue_assignees_lookup
+  ON issue_assignees(issue_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_assignees_lookup
+  ON pull_request_assignees(pull_request_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_review_requests_lookup
+  ON pull_request_review_requests(pull_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_pull_request_closing_issues_lookup
   ON pull_request_closing_issues(repository_id, pull_request_number, issue_number ASC);
 CREATE INDEX IF NOT EXISTS idx_action_workflows_lookup
@@ -227,3 +330,7 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_source_lookup
   ON action_runs(repository_id, trigger_source_type, trigger_source_number, run_number DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_source_comment_lookup
   ON action_runs(repository_id, trigger_source_comment_id, run_number DESC);
+CREATE INDEX IF NOT EXISTS idx_reactions_subject_lookup
+  ON reactions(repository_id, subject_type, subject_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_reactions_user_lookup
+  ON reactions(repository_id, user_id, created_at DESC);

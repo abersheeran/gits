@@ -19,6 +19,7 @@ import {
 } from "../services/action-container-instance-types";
 import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
+import { RepositoryMetadataService } from "../services/repository-metadata-service";
 import {
   RepositoryBrowserService,
   RepositoryBrowseInvalidPathError,
@@ -47,8 +48,11 @@ import type {
   AppEnv,
   IssueCommentRecord,
   IssueState,
+  MilestoneState,
   PullRequestReviewDecision,
   PullRequestState,
+  ReactionContent,
+  ReactionSubjectType,
   RepositoryRecord
 } from "../types";
 
@@ -77,12 +81,18 @@ type CreateTokenInput = {
 type CreateIssueInput = {
   title: string;
   body?: string;
+  labelIds?: string[];
+  assigneeUserIds?: string[];
+  milestoneId?: string | null;
 };
 
 type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: IssueState;
+  labelIds?: string[];
+  assigneeUserIds?: string[];
+  milestoneId?: string | null;
 };
 
 type CreateIssueCommentInput = {
@@ -95,6 +105,11 @@ type CreatePullRequestInput = {
   baseRef: string;
   headRef: string;
   closeIssueNumbers?: number[];
+  draft?: boolean;
+  labelIds?: string[];
+  assigneeUserIds?: string[];
+  requestedReviewerIds?: string[];
+  milestoneId?: string | null;
 };
 
 type UpdatePullRequestInput = {
@@ -102,6 +117,11 @@ type UpdatePullRequestInput = {
   body?: string;
   state?: PullRequestState;
   closeIssueNumbers?: number[];
+  draft?: boolean;
+  labelIds?: string[];
+  assigneeUserIds?: string[];
+  requestedReviewerIds?: string[];
+  milestoneId?: string | null;
 };
 
 type CreatePullRequestReviewInput = {
@@ -143,6 +163,31 @@ type UpdateRepositoryActionsConfigInput = {
   instanceType?: ActionContainerInstanceType | null;
   codexConfigFileContent?: string | null;
   claudeCodeConfigFileContent?: string | null;
+};
+
+type CreateRepositoryLabelInput = {
+  name: string;
+  color: string;
+  description?: string | null;
+};
+
+type UpdateRepositoryLabelInput = {
+  name?: string;
+  color?: string;
+  description?: string | null;
+};
+
+type CreateRepositoryMilestoneInput = {
+  title: string;
+  description?: string;
+  dueAt?: number | null;
+};
+
+type UpdateRepositoryMilestoneInput = {
+  title?: string;
+  description?: string;
+  dueAt?: number | null;
+  state?: MilestoneState;
 };
 
 const USERNAME_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?$/;
@@ -201,6 +246,102 @@ function assertOptionalString(value: unknown, field: string): string | undefined
   return value.trim();
 }
 
+function assertOptionalStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new HTTPException(400, { message: `Field '${field}' must be an array` });
+  }
+  const values: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      throw new HTTPException(400, {
+        message: `Field '${field}' must contain non-empty strings`
+      });
+    }
+    values.push(item.trim());
+  }
+  return Array.from(new Set(values));
+}
+
+function assertOptionalNullablePositiveInteger(
+  value: unknown,
+  field: string
+): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isInteger(value) || Number(value) <= 0) {
+    throw new HTTPException(400, {
+      message: `Field '${field}' must be a positive integer or null`
+    });
+  }
+  return Number(value);
+}
+
+function assertOptionalHexColor(value: unknown, field: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !/^#?[0-9a-fA-F]{6}$/.test(value.trim())) {
+    throw new HTTPException(400, {
+      message: `Field '${field}' must be a 6-digit hex color`
+    });
+  }
+  const normalized = value.trim();
+  return normalized.startsWith("#") ? normalized.toLowerCase() : `#${normalized.toLowerCase()}`;
+}
+
+function assertMilestoneState(value: unknown): MilestoneState {
+  const state = assertString(value, "state");
+  if (state !== "open" && state !== "closed") {
+    throw new HTTPException(400, {
+      message: "Field 'state' must be one of: open, closed"
+    });
+  }
+  return state;
+}
+
+function assertReactionContent(value: unknown): ReactionContent {
+  const content = assertString(value, "content");
+  if (
+    content !== "+1" &&
+    content !== "-1" &&
+    content !== "laugh" &&
+    content !== "hooray" &&
+    content !== "confused" &&
+    content !== "heart" &&
+    content !== "rocket" &&
+    content !== "eyes"
+  ) {
+    throw new HTTPException(400, {
+      message:
+        "Field 'content' must be one of: +1, -1, laugh, hooray, confused, heart, rocket, eyes"
+    });
+  }
+  return content;
+}
+
+function assertReactionSubjectType(value: unknown): ReactionSubjectType {
+  const subjectType = assertString(value, "subjectType");
+  if (
+    subjectType !== "issue" &&
+    subjectType !== "issue_comment" &&
+    subjectType !== "pull_request" &&
+    subjectType !== "pull_request_review"
+  ) {
+    throw new HTTPException(400, {
+      message:
+        "Field 'subjectType' must be one of: issue, issue_comment, pull_request, pull_request_review"
+    });
+  }
+  return subjectType;
+}
+
 function assertUsername(value: string): void {
   if (!USERNAME_REGEX.test(value)) {
     throw new HTTPException(400, {
@@ -238,6 +379,17 @@ function parseLimit(value: string | undefined, defaultValue: number): number {
     return defaultValue;
   }
   return Math.min(Math.max(parsed, 1), 100);
+}
+
+function parsePage(value: string | undefined): number {
+  if (!value) {
+    return 1;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.max(parsed, 1);
 }
 
 function assertCollaboratorPermission(value: unknown): "read" | "write" | "admin" {
@@ -664,6 +816,119 @@ async function findReadableRepositoryOr404(args: {
     throw new HTTPException(404, { message: "Repository not found" });
   }
   return repository;
+}
+
+async function listRepositoryParticipants(
+  repositoryService: RepositoryService,
+  repository: RepositoryRecord
+): Promise<Array<{ id: string; username: string }>> {
+  const collaborators = await repositoryService.listCollaborators(repository.id);
+  const participants = [
+    { id: repository.owner_id, username: repository.owner_username },
+    ...collaborators.map((collaborator) => ({
+      id: collaborator.user_id,
+      username: collaborator.username
+    }))
+  ];
+  const unique = new Map<string, { id: string; username: string }>();
+  for (const participant of participants) {
+    unique.set(participant.id, participant);
+  }
+  return Array.from(unique.values()).sort((left, right) =>
+    left.username.localeCompare(right.username)
+  );
+}
+
+async function assertAssignableUserIds(args: {
+  repositoryService: RepositoryService;
+  repository: RepositoryRecord;
+  userIds: string[] | undefined;
+  field: string;
+}): Promise<string[] | undefined> {
+  if (!args.userIds) {
+    return undefined;
+  }
+  const participants = await listRepositoryParticipants(args.repositoryService, args.repository);
+  const allowedIds = new Set(participants.map((participant) => participant.id));
+  for (const userId of args.userIds) {
+    if (!allowedIds.has(userId)) {
+      throw new HTTPException(400, {
+        message: `Field '${args.field}' contains a user that cannot be assigned in this repository`
+      });
+    }
+  }
+  return args.userIds;
+}
+
+async function assertRepositoryLabelIds(args: {
+  metadataService: RepositoryMetadataService;
+  repositoryId: string;
+  labelIds: string[] | undefined;
+  field: string;
+}): Promise<string[] | undefined> {
+  if (!args.labelIds) {
+    return undefined;
+  }
+  for (const labelId of args.labelIds) {
+    const label = await args.metadataService.findLabelById(args.repositoryId, labelId);
+    if (!label) {
+      throw new HTTPException(400, {
+        message: `Field '${args.field}' contains an unknown label`
+      });
+    }
+  }
+  return args.labelIds;
+}
+
+async function assertRepositoryMilestoneId(args: {
+  metadataService: RepositoryMetadataService;
+  repositoryId: string;
+  milestoneId: string | null | undefined;
+  field: string;
+}): Promise<string | null | undefined> {
+  if (args.milestoneId === undefined || args.milestoneId === null) {
+    return args.milestoneId;
+  }
+  const milestone = await args.metadataService.findMilestoneById(
+    args.repositoryId,
+    args.milestoneId
+  );
+  if (!milestone) {
+    throw new HTTPException(400, {
+      message: `Field '${args.field}' references an unknown milestone`
+    });
+  }
+  return args.milestoneId;
+}
+
+async function assertReactionSubjectExists(args: {
+  db: D1Database;
+  repositoryId: string;
+  subjectType: ReactionSubjectType;
+  subjectId: string;
+}): Promise<void> {
+  let tableName: "issues" | "issue_comments" | "pull_requests" | "pull_request_reviews";
+  switch (args.subjectType) {
+    case "issue":
+      tableName = "issues";
+      break;
+    case "issue_comment":
+      tableName = "issue_comments";
+      break;
+    case "pull_request":
+      tableName = "pull_requests";
+      break;
+    case "pull_request_review":
+      tableName = "pull_request_reviews";
+      break;
+  }
+  const row = await args.db
+    .prepare(`SELECT id FROM ${tableName} WHERE repository_id = ? AND id = ? LIMIT 1`)
+    .bind(args.repositoryId, args.subjectId)
+    .first<{ id: string }>();
+  if (!row) {
+    throw new HTTPException(404, { message: "Reaction subject not found" });
+  }
 }
 
 type ActionsContainerStatePayload = {
@@ -1343,6 +1608,97 @@ router.get("/repos/:owner/:repo/commits", optionalSession, async (c) => {
   return c.json(history);
 });
 
+router.get("/repos/:owner/:repo/commits/:oid", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const oid = assertString(c.req.param("oid"), "oid");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await repositoryService.findRepository(owner, repo);
+  if (!repository) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const sessionUser = c.get("sessionUser");
+  const canRead = await repositoryService.canReadRepository(repository, sessionUser?.id);
+  if (!canRead) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  try {
+    const commit = await browserService.getCommitDetail({ owner, repo, oid });
+    return c.json(commit);
+  } catch {
+    throw new HTTPException(404, { message: "Commit not found" });
+  }
+});
+
+router.get("/repos/:owner/:repo/history", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const path = assertString(c.req.query("path"), "path");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await repositoryService.findRepository(owner, repo);
+  if (!repository) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const sessionUser = c.get("sessionUser");
+  const canRead = await repositoryService.canReadRepository(repository, sessionUser?.id);
+  if (!canRead) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  try {
+    const historyRef = c.req.query("ref");
+    const history = await browserService.listPathHistory({
+      owner,
+      repo,
+      path,
+      ...(historyRef ? { ref: historyRef } : {}),
+      limit: parseLimit(c.req.query("limit"), 20)
+    });
+    return c.json(history);
+  } catch (error) {
+    if (error instanceof RepositoryBrowseInvalidPathError) {
+      throw new HTTPException(400, { message: "Invalid path" });
+    }
+    throw error;
+  }
+});
+
+router.get("/repos/:owner/:repo/compare", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const baseRef = assertString(c.req.query("baseRef"), "baseRef");
+  const headRef = assertString(c.req.query("headRef"), "headRef");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await repositoryService.findRepository(owner, repo);
+  if (!repository) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const sessionUser = c.get("sessionUser");
+  const canRead = await repositoryService.canReadRepository(repository, sessionUser?.id);
+  if (!canRead) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  try {
+    const comparison = await browserService.compareRefs({
+      owner,
+      repo,
+      baseRef,
+      headRef
+    });
+    return c.json(comparison);
+  } catch {
+    throw new HTTPException(404, { message: "Unable to compare refs" });
+  }
+});
+
 router.get("/repos/:owner/:repo/contents", optionalSession, async (c) => {
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
@@ -1399,12 +1755,25 @@ router.get("/repos/:owner/:repo/issues", optionalSession, async (c) => {
   });
 
   const issueService = new IssueService(c.env.DB);
-  const issues = await issueService.listIssues(
+  const page = parsePage(c.req.query("page"));
+  const issuePage = await issueService.listIssues(
     repository.id,
     parseIssueListState(c.req.query("state")),
-    parseLimit(c.req.query("limit"), 50)
+    {
+      limit: parseLimit(c.req.query("limit"), 50),
+      page,
+      ...(sessionUser ? { viewerId: sessionUser.id } : {})
+    }
   );
-  return c.json({ issues });
+  return c.json({
+    issues: issuePage.items,
+    pagination: {
+      total: issuePage.total,
+      page: issuePage.page,
+      perPage: issuePage.per_page,
+      hasNextPage: issuePage.has_next_page
+    }
+  });
 });
 
 router.get("/repos/:owner/:repo/issues/:number", optionalSession, async (c) => {
@@ -1421,7 +1790,7 @@ router.get("/repos/:owner/:repo/issues/:number", optionalSession, async (c) => {
   });
 
   const issueService = new IssueService(c.env.DB);
-  const issue = await issueService.findIssueByNumber(repository.id, number);
+  const issue = await issueService.findIssueByNumber(repository.id, number, sessionUser?.id);
   if (!issue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
@@ -1442,11 +1811,11 @@ router.get("/repos/:owner/:repo/issues/:number/comments", optionalSession, async
   });
 
   const issueService = new IssueService(c.env.DB);
-  const issue = await issueService.findIssueByNumber(repository.id, number);
+  const issue = await issueService.findIssueByNumber(repository.id, number, sessionUser?.id);
   if (!issue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
-  const comments = await issueService.listIssueComments(repository.id, number);
+  const comments = await issueService.listIssueComments(repository.id, number, sessionUser?.id);
   return c.json({ comments });
 });
 
@@ -1459,6 +1828,24 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
   };
   if (payload.body !== undefined) {
     input.body = assertOptionalString(payload.body, "body") ?? "";
+  }
+  if (payload.labelIds !== undefined) {
+    const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
+    if (labelIds !== undefined) {
+      input.labelIds = labelIds;
+    }
+  }
+  if (payload.assigneeUserIds !== undefined) {
+    const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
+    if (assigneeUserIds !== undefined) {
+      input.assigneeUserIds = assigneeUserIds;
+    }
+  }
+  if (payload.milestoneId !== undefined) {
+    const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
+    if (milestoneId !== undefined) {
+      input.milestoneId = milestoneId;
+    }
   }
 
   const repositoryService = new RepositoryService(c.env.DB);
@@ -1477,13 +1864,45 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
     throw new HTTPException(403, { message: "Forbidden" });
   }
 
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await Promise.all([
+    assertRepositoryLabelIds({
+      metadataService,
+      repositoryId: repository.id,
+      labelIds: input.labelIds,
+      field: "labelIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: input.assigneeUserIds,
+      field: "assigneeUserIds"
+    }),
+    assertRepositoryMilestoneId({
+      metadataService,
+      repositoryId: repository.id,
+      milestoneId: input.milestoneId,
+      field: "milestoneId"
+    })
+  ]);
+
   const issueService = new IssueService(c.env.DB);
-  const issue = await issueService.createIssue({
+  const createdIssue = await issueService.createIssue({
     repositoryId: repository.id,
     authorId: sessionUser.id,
     title: input.title,
-    ...(input.body !== undefined ? { body: input.body } : {})
+    ...(input.body !== undefined ? { body: input.body } : {}),
+    ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {})
   });
+  if (input.labelIds !== undefined) {
+    await metadataService.replaceIssueLabels(createdIssue.id, input.labelIds);
+  }
+  if (input.assigneeUserIds !== undefined) {
+    await metadataService.replaceIssueAssignees(createdIssue.id, input.assigneeUserIds);
+  }
+  const issue =
+    (await issueService.findIssueByNumber(repository.id, createdIssue.number, sessionUser.id)) ??
+    createdIssue;
   const issueConversationHistory = buildIssueConversationHistory({
     issueAuthorUsername: issue.author_username,
     issueBody: issue.body,
@@ -1552,7 +1971,32 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
   if (payload.state !== undefined) {
     patch.state = assertIssueState(payload.state);
   }
-  if (patch.title === undefined && patch.body === undefined && patch.state === undefined) {
+  if (payload.labelIds !== undefined) {
+    const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
+    if (labelIds !== undefined) {
+      patch.labelIds = labelIds;
+    }
+  }
+  if (payload.assigneeUserIds !== undefined) {
+    const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
+    if (assigneeUserIds !== undefined) {
+      patch.assigneeUserIds = assigneeUserIds;
+    }
+  }
+  if (payload.milestoneId !== undefined) {
+    const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
+    if (milestoneId !== undefined) {
+      patch.milestoneId = milestoneId;
+    }
+  }
+  if (
+    patch.title === undefined &&
+    patch.body === undefined &&
+    patch.state === undefined &&
+    patch.labelIds === undefined &&
+    patch.assigneeUserIds === undefined &&
+    patch.milestoneId === undefined
+  ) {
     throw new HTTPException(400, { message: "No updatable fields provided" });
   }
 
@@ -1572,8 +2016,30 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
     throw new HTTPException(403, { message: "Forbidden" });
   }
 
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await Promise.all([
+    assertRepositoryLabelIds({
+      metadataService,
+      repositoryId: repository.id,
+      labelIds: patch.labelIds,
+      field: "labelIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: patch.assigneeUserIds,
+      field: "assigneeUserIds"
+    }),
+    assertRepositoryMilestoneId({
+      metadataService,
+      repositoryId: repository.id,
+      milestoneId: patch.milestoneId,
+      field: "milestoneId"
+    })
+  ]);
+
   const issueService = new IssueService(c.env.DB);
-  const existingIssue = await issueService.findIssueByNumber(repository.id, number);
+  const existingIssue = await issueService.findIssueByNumber(repository.id, number, sessionUser.id);
   if (!existingIssue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
@@ -1582,10 +2048,23 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
     body: existingIssue.body
   });
 
-  const issue = await issueService.updateIssue(repository.id, number, patch);
-  if (!issue) {
+  const updatedIssue = await issueService.updateIssue(repository.id, number, {
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.body !== undefined ? { body: patch.body } : {}),
+    ...(patch.state !== undefined ? { state: patch.state } : {}),
+    ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {})
+  });
+  if (!updatedIssue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
+  if (patch.labelIds !== undefined) {
+    await metadataService.replaceIssueLabels(existingIssue.id, patch.labelIds);
+  }
+  if (patch.assigneeUserIds !== undefined) {
+    await metadataService.replaceIssueAssignees(existingIssue.id, patch.assigneeUserIds);
+  }
+  const issue =
+    (await issueService.findIssueByNumber(repository.id, number, sessionUser.id)) ?? updatedIssue;
   const hasActionsMention = containsActionsMention({ title: issue.title, body: issue.body });
   if (!hadActionsMention && hasActionsMention) {
     const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -1732,12 +2211,25 @@ router.get("/repos/:owner/:repo/pulls", optionalSession, async (c) => {
   });
 
   const pullRequestService = new PullRequestService(c.env.DB);
-  const pullRequests = await pullRequestService.listPullRequests(
+  const page = parsePage(c.req.query("page"));
+  const pullRequestPage = await pullRequestService.listPullRequests(
     repository.id,
     parsePullRequestListState(c.req.query("state")),
-    parseLimit(c.req.query("limit"), 50)
+    {
+      limit: parseLimit(c.req.query("limit"), 50),
+      page,
+      ...(sessionUser ? { viewerId: sessionUser.id } : {})
+    }
   );
-  return c.json({ pullRequests });
+  return c.json({
+    pullRequests: pullRequestPage.items,
+    pagination: {
+      total: pullRequestPage.total,
+      page: pullRequestPage.page,
+      perPage: pullRequestPage.per_page,
+      hasNextPage: pullRequestPage.has_next_page
+    }
+  });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
@@ -1754,7 +2246,11 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
   });
 
   const pullRequestService = new PullRequestService(c.env.DB);
-  const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(
+    repository.id,
+    number,
+    sessionUser?.id
+  );
   if (!pullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
@@ -1779,13 +2275,17 @@ router.get("/repos/:owner/:repo/pulls/:number/reviews", optionalSession, async (
   });
 
   const pullRequestService = new PullRequestService(c.env.DB);
-  const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(
+    repository.id,
+    number,
+    sessionUser?.id
+  );
   if (!pullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
 
   const [reviews, reviewSummary] = await Promise.all([
-    pullRequestService.listPullRequestReviews(repository.id, number),
+    pullRequestService.listPullRequestReviews(repository.id, number, sessionUser?.id),
     pullRequestService.summarizePullRequestReviews(repository.id, number)
   ]);
   return c.json({ reviews, reviewSummary });
@@ -1853,6 +2353,40 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
   if (closeIssueNumbers !== undefined) {
     input.closeIssueNumbers = closeIssueNumbers;
   }
+  if (payload.draft !== undefined) {
+    const draft = assertOptionalBoolean(payload.draft, "draft");
+    if (draft === undefined) {
+      throw new HTTPException(400, { message: "Field 'draft' is required" });
+    }
+    input.draft = draft;
+  }
+  if (payload.labelIds !== undefined) {
+    const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
+    if (labelIds !== undefined) {
+      input.labelIds = labelIds;
+    }
+  }
+  if (payload.assigneeUserIds !== undefined) {
+    const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
+    if (assigneeUserIds !== undefined) {
+      input.assigneeUserIds = assigneeUserIds;
+    }
+  }
+  if (payload.requestedReviewerIds !== undefined) {
+    const requestedReviewerIds = assertOptionalStringArray(
+      payload.requestedReviewerIds,
+      "requestedReviewerIds"
+    );
+    if (requestedReviewerIds !== undefined) {
+      input.requestedReviewerIds = requestedReviewerIds;
+    }
+  }
+  if (payload.milestoneId !== undefined) {
+    const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
+    if (milestoneId !== undefined) {
+      input.milestoneId = milestoneId;
+    }
+  }
   if (input.baseRef === input.headRef) {
     throw new HTTPException(400, { message: "Field 'headRef' must differ from 'baseRef'" });
   }
@@ -1886,6 +2420,33 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
 
   const pullRequestService = new PullRequestService(c.env.DB);
   const issueService = new IssueService(c.env.DB);
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await Promise.all([
+    assertRepositoryLabelIds({
+      metadataService,
+      repositoryId: repository.id,
+      labelIds: input.labelIds,
+      field: "labelIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: input.assigneeUserIds,
+      field: "assigneeUserIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: input.requestedReviewerIds,
+      field: "requestedReviewerIds"
+    }),
+    assertRepositoryMilestoneId({
+      metadataService,
+      repositoryId: repository.id,
+      milestoneId: input.milestoneId,
+      field: "milestoneId"
+    })
+  ]);
   if (input.closeIssueNumbers && input.closeIssueNumbers.length > 0) {
     const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, input.closeIssueNumbers);
     if (existingIssueNumbers.length !== input.closeIssueNumbers.length) {
@@ -1897,7 +2458,7 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
     }
   }
   try {
-    const pullRequest = await pullRequestService.createPullRequest({
+    const createdPullRequest = await pullRequestService.createPullRequest({
       repositoryId: repository.id,
       authorId: sessionUser.id,
       title: input.title,
@@ -1905,14 +2466,34 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
       baseRef: baseRef.name,
       headRef: headRef.name,
       baseOid: baseRef.oid,
-      headOid: headRef.oid
+      headOid: headRef.oid,
+      ...(input.draft !== undefined ? { draft: input.draft } : {}),
+      ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {})
     });
     const closingIssueNumbers = await pullRequestService.replacePullRequestClosingIssueNumbers({
       repositoryId: repository.id,
-      pullRequestId: pullRequest.id,
-      pullRequestNumber: pullRequest.number,
+      pullRequestId: createdPullRequest.id,
+      pullRequestNumber: createdPullRequest.number,
       issueNumbers: input.closeIssueNumbers ?? []
     });
+    if (input.labelIds !== undefined) {
+      await metadataService.replacePullRequestLabels(createdPullRequest.id, input.labelIds);
+    }
+    if (input.assigneeUserIds !== undefined) {
+      await metadataService.replacePullRequestAssignees(createdPullRequest.id, input.assigneeUserIds);
+    }
+    if (input.requestedReviewerIds !== undefined) {
+      await metadataService.replacePullRequestReviewRequests(
+        createdPullRequest.id,
+        input.requestedReviewerIds
+      );
+    }
+    const pullRequest =
+      (await pullRequestService.findPullRequestByNumber(
+        repository.id,
+        createdPullRequest.number,
+        sessionUser.id
+      )) ?? createdPullRequest;
 
     const actionRuns = await triggerActionWorkflows({
       env: c.env,
@@ -1969,6 +2550,40 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
   if (closeIssueNumbers !== undefined) {
     patch.closeIssueNumbers = closeIssueNumbers;
   }
+  if (payload.draft !== undefined) {
+    const draft = assertOptionalBoolean(payload.draft, "draft");
+    if (draft === undefined) {
+      throw new HTTPException(400, { message: "Field 'draft' is required" });
+    }
+    patch.draft = draft;
+  }
+  if (payload.labelIds !== undefined) {
+    const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
+    if (labelIds !== undefined) {
+      patch.labelIds = labelIds;
+    }
+  }
+  if (payload.assigneeUserIds !== undefined) {
+    const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
+    if (assigneeUserIds !== undefined) {
+      patch.assigneeUserIds = assigneeUserIds;
+    }
+  }
+  if (payload.requestedReviewerIds !== undefined) {
+    const requestedReviewerIds = assertOptionalStringArray(
+      payload.requestedReviewerIds,
+      "requestedReviewerIds"
+    );
+    if (requestedReviewerIds !== undefined) {
+      patch.requestedReviewerIds = requestedReviewerIds;
+    }
+  }
+  if (payload.milestoneId !== undefined) {
+    const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
+    if (milestoneId !== undefined) {
+      patch.milestoneId = milestoneId;
+    }
+  }
   if (payload.state !== undefined) {
     const nextState = assertPullRequestState(payload.state);
     patch.state = nextState;
@@ -1977,7 +2592,12 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     patch.title === undefined &&
     patch.body === undefined &&
     patch.state === undefined &&
-    patch.closeIssueNumbers === undefined
+    patch.closeIssueNumbers === undefined &&
+    patch.draft === undefined &&
+    patch.labelIds === undefined &&
+    patch.assigneeUserIds === undefined &&
+    patch.requestedReviewerIds === undefined &&
+    patch.milestoneId === undefined
   ) {
     throw new HTTPException(400, { message: "No updatable fields provided" });
   }
@@ -2000,7 +2620,38 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
 
   const pullRequestService = new PullRequestService(c.env.DB);
   const issueService = new IssueService(c.env.DB);
-  const existingPullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await Promise.all([
+    assertRepositoryLabelIds({
+      metadataService,
+      repositoryId: repository.id,
+      labelIds: patch.labelIds,
+      field: "labelIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: patch.assigneeUserIds,
+      field: "assigneeUserIds"
+    }),
+    assertAssignableUserIds({
+      repositoryService,
+      repository,
+      userIds: patch.requestedReviewerIds,
+      field: "requestedReviewerIds"
+    }),
+    assertRepositoryMilestoneId({
+      metadataService,
+      repositoryId: repository.id,
+      milestoneId: patch.milestoneId,
+      field: "milestoneId"
+    })
+  ]);
+  const existingPullRequest = await pullRequestService.findPullRequestByNumber(
+    repository.id,
+    number,
+    sessionUser.id
+  );
   if (!existingPullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
@@ -2061,8 +2712,12 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     });
   }
 
-  const pullRequest = await pullRequestService.updatePullRequest(repository.id, number, {
-    ...patch,
+  const updatedPullRequest = await pullRequestService.updatePullRequest(repository.id, number, {
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.body !== undefined ? { body: patch.body } : {}),
+    ...(patch.state !== undefined ? { state: patch.state } : {}),
+    ...(patch.draft !== undefined ? { draft: patch.draft } : {}),
+    ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {}),
     ...(mergeResult
       ? {
           mergeCommitOid: mergeResult.mergeCommitOid,
@@ -2071,10 +2726,25 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
         }
       : {})
   });
-  if (!pullRequest) {
+  if (!updatedPullRequest) {
     throw new HTTPException(404, { message: "Pull request not found" });
   }
+  if (patch.labelIds !== undefined) {
+    await metadataService.replacePullRequestLabels(existingPullRequest.id, patch.labelIds);
+  }
+  if (patch.assigneeUserIds !== undefined) {
+    await metadataService.replacePullRequestAssignees(existingPullRequest.id, patch.assigneeUserIds);
+  }
+  if (patch.requestedReviewerIds !== undefined) {
+    await metadataService.replacePullRequestReviewRequests(
+      existingPullRequest.id,
+      patch.requestedReviewerIds
+    );
+  }
   const closingIssueNumbers = await pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number);
+  const pullRequest =
+    (await pullRequestService.findPullRequestByNumber(repository.id, number, sessionUser.id)) ??
+    updatedPullRequest;
   if (patch.state === "merged" && closingIssueNumbers.length > 0) {
     await issueService.closeIssuesByNumbers(repository.id, closingIssueNumbers);
   }
@@ -2107,6 +2777,368 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
   }
 
   return c.json({ pullRequest, closingIssueNumbers });
+});
+
+router.get("/repos/:owner/:repo/participants", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const participants = await listRepositoryParticipants(repositoryService, repository);
+  return c.json({ participants });
+});
+
+router.get("/repos/:owner/:repo/labels", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const labels = await metadataService.listLabels(repository.id);
+  return c.json({ labels });
+});
+
+router.post("/repos/:owner/:repo/labels", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: CreateRepositoryLabelInput = {
+    name: assertString(payload.name, "name"),
+    color: assertOptionalHexColor(payload.color, "color") ?? ""
+  };
+  if (!input.color) {
+    throw new HTTPException(400, { message: "Field 'color' is required" });
+  }
+  if (payload.description !== undefined) {
+    input.description = assertOptionalNullableString(payload.description, "description") ?? null;
+  }
+
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  try {
+    const label = await metadataService.createLabel({
+      repositoryId: repository.id,
+      name: input.name,
+      color: input.color,
+      description: input.description ?? null
+    });
+    return c.json({ label }, 201);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new HTTPException(409, { message: "Label with same name already exists" });
+    }
+    throw error;
+  }
+});
+
+router.patch("/repos/:owner/:repo/labels/:labelId", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const labelId = assertString(c.req.param("labelId"), "labelId");
+  const payload = await parseJsonObject(c.req.raw);
+  const patch: UpdateRepositoryLabelInput = {};
+  if (payload.name !== undefined) {
+    patch.name = assertString(payload.name, "name");
+  }
+  if (payload.color !== undefined) {
+    const color = assertOptionalHexColor(payload.color, "color");
+    if (!color) {
+      throw new HTTPException(400, { message: "Field 'color' is required" });
+    }
+    patch.color = color;
+  }
+  if (payload.description !== undefined) {
+    patch.description = assertOptionalNullableString(payload.description, "description") ?? null;
+  }
+  if (patch.name === undefined && patch.color === undefined && patch.description === undefined) {
+    throw new HTTPException(400, { message: "No updatable fields provided" });
+  }
+
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  try {
+    const label = await metadataService.updateLabel(repository.id, labelId, patch);
+    if (!label) {
+      throw new HTTPException(404, { message: "Label not found" });
+    }
+    return c.json({ label });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new HTTPException(409, { message: "Label with same name already exists" });
+    }
+    throw error;
+  }
+});
+
+router.delete("/repos/:owner/:repo/labels/:labelId", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const labelId = assertString(c.req.param("labelId"), "labelId");
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const label = await metadataService.findLabelById(repository.id, labelId);
+  if (!label) {
+    throw new HTTPException(404, { message: "Label not found" });
+  }
+  await metadataService.deleteLabel(repository.id, labelId);
+  return c.json({ ok: true });
+});
+
+router.get("/repos/:owner/:repo/milestones", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const milestones = await metadataService.listMilestones(repository.id);
+  return c.json({ milestones });
+});
+
+router.post("/repos/:owner/:repo/milestones", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: CreateRepositoryMilestoneInput = {
+    title: assertString(payload.title, "title")
+  };
+  if (payload.description !== undefined) {
+    input.description = assertOptionalNullableString(payload.description, "description") ?? "";
+  }
+  if (payload.dueAt !== undefined) {
+    const dueAt = assertOptionalNullablePositiveInteger(payload.dueAt, "dueAt");
+    if (dueAt !== undefined) {
+      input.dueAt = dueAt;
+    }
+  }
+
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const milestone = await metadataService.createMilestone({
+    repositoryId: repository.id,
+    title: input.title,
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {})
+  });
+  return c.json({ milestone }, 201);
+});
+
+router.patch("/repos/:owner/:repo/milestones/:milestoneId", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const milestoneId = assertString(c.req.param("milestoneId"), "milestoneId");
+  const payload = await parseJsonObject(c.req.raw);
+  const patch: UpdateRepositoryMilestoneInput = {};
+  if (payload.title !== undefined) {
+    patch.title = assertString(payload.title, "title");
+  }
+  if (payload.description !== undefined) {
+    patch.description = assertOptionalNullableString(payload.description, "description") ?? "";
+  }
+  if (payload.dueAt !== undefined) {
+    const dueAt = assertOptionalNullablePositiveInteger(payload.dueAt, "dueAt");
+    if (dueAt !== undefined) {
+      patch.dueAt = dueAt;
+    }
+  }
+  if (payload.state !== undefined) {
+    patch.state = assertMilestoneState(payload.state);
+  }
+  if (
+    patch.title === undefined &&
+    patch.description === undefined &&
+    patch.dueAt === undefined &&
+    patch.state === undefined
+  ) {
+    throw new HTTPException(400, { message: "No updatable fields provided" });
+  }
+
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const milestone = await metadataService.updateMilestone(repository.id, milestoneId, patch);
+  if (!milestone) {
+    throw new HTTPException(404, { message: "Milestone not found" });
+  }
+  return c.json({ milestone });
+});
+
+router.delete("/repos/:owner/:repo/milestones/:milestoneId", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const milestoneId = assertString(c.req.param("milestoneId"), "milestoneId");
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canWrite = await repositoryService.canWriteRepository(repository, sessionUser.id);
+  if (!canWrite) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  const milestone = await metadataService.findMilestoneById(repository.id, milestoneId);
+  if (!milestone) {
+    throw new HTTPException(404, { message: "Milestone not found" });
+  }
+  await metadataService.deleteMilestone(repository.id, milestoneId);
+  return c.json({ ok: true });
+});
+
+router.put("/repos/:owner/:repo/reactions", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const payload = await parseJsonObject(c.req.raw);
+  const subjectType = assertReactionSubjectType(payload.subjectType);
+  const subjectId = assertString(payload.subjectId, "subjectId");
+  const content = assertReactionContent(payload.content);
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  await assertReactionSubjectExists({
+    db: c.env.DB,
+    repositoryId: repository.id,
+    subjectType,
+    subjectId
+  });
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await metadataService.addReaction({
+    repositoryId: repository.id,
+    subjectType,
+    subjectId,
+    userId: sessionUser.id,
+    content
+  });
+  const reactions = await metadataService.summarizeReactions(
+    repository.id,
+    subjectType,
+    [subjectId],
+    sessionUser.id
+  );
+  return c.json({ reactions: reactions[subjectId] ?? [] });
+});
+
+router.delete("/repos/:owner/:repo/reactions", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const payload = await parseJsonObject(c.req.raw);
+  const subjectType = assertReactionSubjectType(payload.subjectType);
+  const subjectId = assertString(payload.subjectId, "subjectId");
+  const content = assertReactionContent(payload.content);
+  const sessionUser = mustSessionUser(c);
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  await assertReactionSubjectExists({
+    db: c.env.DB,
+    repositoryId: repository.id,
+    subjectType,
+    subjectId
+  });
+  const metadataService = new RepositoryMetadataService(c.env.DB);
+  await metadataService.removeReaction({
+    repositoryId: repository.id,
+    subjectType,
+    subjectId,
+    userId: sessionUser.id,
+    content
+  });
+  const reactions = await metadataService.summarizeReactions(
+    repository.id,
+    subjectType,
+    [subjectId],
+    sessionUser.id
+  );
+  return c.json({ reactions: reactions[subjectId] ?? [] });
 });
 
 router.get("/repos/:owner/:repo/actions/workflows", optionalSession, async (c) => {

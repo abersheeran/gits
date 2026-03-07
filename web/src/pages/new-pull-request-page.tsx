@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { MarkdownEditor } from "@/components/repository/markdown-editor";
+import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,13 +14,18 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createPullRequest,
   formatApiError,
   getRepositoryDetail,
+  listRepositoryLabels,
+  listRepositoryMilestones,
+  listRepositoryParticipants,
   type AuthUser,
-  type RepositoryDetailResponse
+  type RepositoryLabelRecord,
+  type RepositoryMilestoneRecord,
+  type RepositoryDetailResponse,
+  type RepositoryUserSummary
 } from "@/lib/api";
 
 type NewPullRequestPageProps = {
@@ -39,6 +46,14 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   const [baseRef, setBaseRef] = useState("");
   const [headRef, setHeadRef] = useState("");
   const [closeIssuesInput, setCloseIssuesInput] = useState("");
+  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
+  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
+  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
+  const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -51,11 +66,19 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const nextDetail = await getRepositoryDetail(owner, repo);
+        const [nextDetail, nextLabels, nextMilestones, nextParticipants] = await Promise.all([
+          getRepositoryDetail(owner, repo),
+          listRepositoryLabels(owner, repo),
+          listRepositoryMilestones(owner, repo),
+          listRepositoryParticipants(owner, repo)
+        ]);
         if (canceled) {
           return;
         }
         setDetail(nextDetail);
+        setAvailableLabels(nextLabels);
+        setAvailableMilestones(nextMilestones);
+        setParticipants(nextParticipants);
         const defaultBase =
           nextDetail.defaultBranch && nextDetail.branches.some((item) => item.name === nextDetail.defaultBranch)
             ? nextDetail.defaultBranch
@@ -154,7 +177,12 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         body,
         baseRef,
         headRef,
-        ...(closeIssueNumbers.length > 0 ? { closeIssueNumbers } : {})
+        ...(closeIssueNumbers.length > 0 ? { closeIssueNumbers } : {}),
+        draft,
+        labelIds: selectedLabelIds,
+        assigneeUserIds: selectedAssigneeIds,
+        requestedReviewerIds: selectedReviewerIds,
+        milestoneId: selectedMilestoneId
       });
       navigate(`/repo/${owner}/${repo}/pulls/${pullRequest.number}`, { replace: true });
     } catch (submitError) {
@@ -165,86 +193,111 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>New pull request · {owner}/{repo}</CardTitle>
-        <CardDescription>选择分支并创建 PR。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {error ? (
-          <Alert variant="destructive" className="mb-4">
-            <AlertTitle>提交失败</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="pr-base-ref">Base branch</Label>
-              <Select value={baseRef} onValueChange={setBaseRef}>
-                <SelectTrigger id="pr-base-ref">
-                  <SelectValue placeholder="选择 base 分支" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branchNames.map((branchName) => (
-                    <SelectItem key={`base-${branchName}`} value={branchName}>
-                      {branchName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card>
+        <CardHeader>
+          <CardTitle>New pull request · {owner}/{repo}</CardTitle>
+          <CardDescription>选择分支并创建 PR。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <Alert variant="destructive" className="mb-4">
+              <AlertTitle>提交失败</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="pr-base-ref">Base branch</Label>
+                <Select value={baseRef} onValueChange={setBaseRef}>
+                  <SelectTrigger id="pr-base-ref">
+                    <SelectValue placeholder="选择 base 分支" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branchNames.map((branchName) => (
+                      <SelectItem key={`base-${branchName}`} value={branchName}>
+                        {branchName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pr-head-ref">Head branch</Label>
+                <Select value={headRef} onValueChange={setHeadRef}>
+                  <SelectTrigger id="pr-head-ref">
+                    <SelectValue placeholder="选择 head 分支" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branchNames.map((branchName) => (
+                      <SelectItem key={`head-${branchName}`} value={branchName}>
+                        {branchName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pr-head-ref">Head branch</Label>
-              <Select value={headRef} onValueChange={setHeadRef}>
-                <SelectTrigger id="pr-head-ref">
-                  <SelectValue placeholder="选择 head 分支" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branchNames.map((branchName) => (
-                    <SelectItem key={`head-${branchName}`} value={branchName}>
-                      {branchName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="pr-title">标题</Label>
+              <Input id="pr-title" value={title} onChange={(event) => setTitle(event.target.value)} required />
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pr-title">标题</Label>
-            <Input id="pr-title" value={title} onChange={(event) => setTitle(event.target.value)} required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pr-body">描述</Label>
-            <Textarea
-              id="pr-body"
+            <MarkdownEditor
+              label="描述"
               value={body}
-              onChange={(event) => setBody(event.target.value)}
+              onChange={setBody}
               rows={10}
+              previewEmptyText="Nothing to preview."
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pr-close-issues">合并后自动关闭的 issues</Label>
-            <Input
-              id="pr-close-issues"
-              value={closeIssuesInput}
-              onChange={(event) => setCloseIssuesInput(event.target.value)}
-              placeholder="#1, #2"
-            />
-            <p className="text-xs text-muted-foreground">
-              支持多个，例如 <code>#12,#34</code>。PR merged 时会自动关闭这些 issue。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "提交中..." : "Create pull request"}
-            </Button>
-            <Button variant="ghost" asChild>
-              <Link to={`/repo/${owner}/${repo}/pulls`}>返回列表</Link>
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+            <div className="space-y-2">
+              <Label htmlFor="pr-close-issues">合并后自动关闭的 issues</Label>
+              <Input
+                id="pr-close-issues"
+                value={closeIssuesInput}
+                onChange={(event) => setCloseIssuesInput(event.target.value)}
+                placeholder="#1, #2"
+              />
+              <p className="text-xs text-muted-foreground">
+                支持多个，例如 <code>#12,#34</code>。PR merged 时会自动关闭这些 issue。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "提交中..." : "Create pull request"}
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link to={`/repo/${owner}/${repo}/pulls`}>返回列表</Link>
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Metadata</CardTitle>
+          <CardDescription>提交前直接设置 draft、reviewers、assignees、labels 和 milestone。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RepositoryMetadataFields
+            canEdit
+            labels={availableLabels}
+            selectedLabelIds={selectedLabelIds}
+            onSelectedLabelIdsChange={setSelectedLabelIds}
+            participants={participants}
+            assigneeIds={selectedAssigneeIds}
+            onAssigneeIdsChange={setSelectedAssigneeIds}
+            reviewerIds={selectedReviewerIds}
+            onReviewerIdsChange={setSelectedReviewerIds}
+            milestones={availableMilestones}
+            milestoneId={selectedMilestoneId}
+            onMilestoneIdChange={setSelectedMilestoneId}
+            draft={draft}
+            onDraftChange={setDraft}
+          />
+        </CardContent>
+      </Card>
+    </div>
   );
 }

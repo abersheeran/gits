@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -50,21 +52,29 @@ const ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS: Array<{
   { value: "standard-4", label: "standard-4", spec: "4 vCPU · 12 GiB · 20 GB" }
 ];
 
-function statusBadgeVariant(status: ActionRunRecord["status"]): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "success") {
-    return "default";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "destructive";
-  }
-  if (status === "running") {
-    return "secondary";
-  }
-  return "outline";
-}
-
 function isPendingRun(run: ActionRunRecord): boolean {
   return run.status === "queued" || run.status === "running";
+}
+
+function formatDuration(startedAt: number | null, completedAt: number | null): string {
+  if (!startedAt) {
+    return "-";
+  }
+  const end = completedAt ?? Date.now();
+  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function runSourceLabel(run: ActionRunRecord): string {
+  if (run.trigger_source_type && run.trigger_source_number) {
+    return `${run.trigger_source_type} #${run.trigger_source_number}`;
+  }
+  return run.trigger_event;
 }
 
 function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
@@ -281,6 +291,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [eventFilter, setEventFilter] = useState<string>("all");
+  const [refFilter, setRefFilter] = useState<string>("all");
+  const [actorFilter, setActorFilter] = useState("");
   const [runnerConfig, setRunnerConfig] = useState<RepositoryActionsConfig | null>(null);
   const [loadingRunnerConfig, setLoadingRunnerConfig] = useState(false);
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
@@ -426,6 +440,68 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     () =>
       runs.some((run) => isPendingRun(run) && !liveExpandedRunIds.includes(run.id)),
     [liveExpandedRunIds, runs]
+  );
+  const statusOptions = useMemo(
+    () => ["all", ...Array.from(new Set(runs.map((run) => run.status))).sort()],
+    [runs]
+  );
+  const eventOptions = useMemo(
+    () => ["all", ...Array.from(new Set(runs.map((run) => run.trigger_event))).sort()],
+    [runs]
+  );
+  const refOptions = useMemo(
+    () =>
+      [
+        "all",
+        ...Array.from(
+          new Set(runs.map((run) => run.trigger_ref).filter((value): value is string => Boolean(value)))
+        ).sort()
+      ],
+    [runs]
+  );
+  const filteredRuns = useMemo(
+    () =>
+      runs.filter((run) => {
+        if (statusFilter !== "all" && run.status !== statusFilter) {
+          return false;
+        }
+        if (eventFilter !== "all" && run.trigger_event !== eventFilter) {
+          return false;
+        }
+        if (refFilter !== "all" && run.trigger_ref !== refFilter) {
+          return false;
+        }
+        if (
+          actorFilter.trim() &&
+          !(run.triggered_by_username ?? "").toLowerCase().includes(actorFilter.trim().toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [actorFilter, eventFilter, refFilter, runs, statusFilter]
+  );
+  const groupedRuns = useMemo(() => {
+    const groups = new Map<string, ActionRunRecord[]>();
+    for (const run of filteredRuns) {
+      const current = groups.get(run.workflow_name) ?? [];
+      current.push(run);
+      groups.set(run.workflow_name, current);
+    }
+    return Array.from(groups.entries()).sort((left, right) => {
+      const latestLeft = left[1][0]?.run_number ?? 0;
+      const latestRight = right[1][0]?.run_number ?? 0;
+      return latestRight - latestLeft;
+    });
+  }, [filteredRuns]);
+  const runSummary = useMemo(
+    () => ({
+      total: filteredRuns.length,
+      running: filteredRuns.filter((run) => run.status === "running" || run.status === "queued").length,
+      success: filteredRuns.filter((run) => run.status === "success").length,
+      failed: filteredRuns.filter((run) => run.status === "failed").length
+    }),
+    [filteredRuns]
   );
 
   useEffect(() => {
@@ -664,48 +740,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </Alert>
       ) : null}
 
-      <header className="space-y-3 rounded-md border bg-card p-4 shadow-sm">
-        <h1 className="text-xl font-semibold">
-          <Link className="gh-link" to={`/repo/${owner}/${repo}`}>
-            {owner}/{repo}
-          </Link>{" "}
-          <span className="text-muted-foreground">/ Actions</span>
-        </h1>
-        <nav className="flex flex-wrap items-end gap-1 border-b border-border px-1" aria-label="Repository sections">
-          <Link
-            to={`/repo/${owner}/${repo}`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <Code2 className="h-4 w-4" />
-            Code
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/issues`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <MessageSquareText className="h-4 w-4" />
-            Issues
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">{detail.openIssueCount}</span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/pulls`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:border-border hover:text-foreground"
-          >
-            <GitPullRequest className="h-4 w-4" />
-            Pull requests
-            <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">
-              {detail.openPullRequestCount}
-            </span>
-          </Link>
-          <Link
-            to={`/repo/${owner}/${repo}/actions`}
-            className="inline-flex items-center gap-1.5 rounded-t-md border-b-2 border-[#fd8c73] px-3 py-2 text-sm font-medium text-foreground"
-          >
-            <Workflow className="h-4 w-4" />
-            Actions
-          </Link>
-        </nav>
-      </header>
+      <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
 
 
       {canManageActions ? (
@@ -901,61 +936,187 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             <CardTitle className="text-base">运行日志</CardTitle>
           </CardHeader>
           <CardContent>
-            {runs.length === 0 ? (
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Visible runs</p>
+                <p className="text-2xl font-semibold">{runSummary.total}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Running</p>
+                <p className="text-2xl font-semibold">{runSummary.running}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Succeeded</p>
+                <p className="text-2xl font-semibold">{runSummary.success}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Failed</p>
+                <p className="text-2xl font-semibold">{runSummary.failed}</p>
+              </div>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Event</Label>
+                <Select value={eventFilter} onValueChange={setEventFilter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eventOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Ref</Label>
+                <Select value={refFilter} onValueChange={setRefFilter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {refOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="actions-actor-filter">Actor</Label>
+                <Input
+                  id="actions-actor-filter"
+                  value={actorFilter}
+                  onChange={(event) => setActorFilter(event.target.value)}
+                  placeholder="username"
+                />
+              </div>
+            </div>
+
+            {filteredRuns.length === 0 ? (
               <p className="text-sm text-muted-foreground">No runs yet.</p>
             ) : (
-              <ul className="space-y-2">
-                {runs.map((run) => {
-                  const expanded = expandedRunIds.includes(run.id);
-                  return (
-                    <li
-                      id={`action-run-${run.id}`}
-                      key={run.id}
-                      className={`space-y-2 rounded-md border p-3 ${
-                        selectedRunId === run.id ? "border-[#fd8c73] bg-muted/20" : ""
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            #{run.run_number} {run.workflow_name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {run.trigger_event}
-                            {run.trigger_ref ? ` · ${run.trigger_ref}` : ""} · {formatDateTime(run.created_at)}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={statusBadgeVariant(run.status)}>{run.status}</Badge>
-                          <Badge variant="outline">{run.agent_type}</Badge>
-                          <Badge variant="outline">{run.instance_type}</Badge>
-                          <Badge variant="outline">
-                            exit: {run.exit_code === null ? "-" : String(run.exit_code)}
-                          </Badge>
-                          {canManageActions ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={rerunningRunId !== null}
-                              onClick={() => {
-                                void handleRerunRun(run);
-                              }}
-                            >
-                              {rerunningRunId === run.id ? "Rerunning..." : "Rerun"}
-                            </Button>
-                          ) : null}
-                          <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
-                            {expanded ? "Hide logs" : "View logs"}
-                          </Button>
-                        </div>
-                      </div>
-                      {expanded ? (
-                        <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-2 text-xs">{run.logs || "(empty logs)"}</pre>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="space-y-4">
+                {groupedRuns.map(([workflowName, workflowRuns]) => (
+                  <section key={workflowName} className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">{workflowName}</h3>
+                      <Badge variant="outline">{workflowRuns.length} runs</Badge>
+                    </div>
+                    <ul className="space-y-2">
+                      {workflowRuns.map((run) => {
+                        const expanded = expandedRunIds.includes(run.id);
+                        return (
+                          <li
+                            id={`action-run-${run.id}`}
+                            key={run.id}
+                            className={`space-y-3 rounded-md border p-3 ${
+                              selectedRunId === run.id ? "border-[#fd8c73] bg-muted/20" : ""
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-medium">
+                                    #{run.run_number} {run.workflow_name}
+                                  </p>
+                                  <ActionStatusBadge status={run.status} />
+                                  <Badge variant="outline">{run.agent_type}</Badge>
+                                  <Badge variant="outline">{run.instance_type}</Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {runSourceLabel(run)}
+                                  {run.trigger_ref ? ` · ${run.trigger_ref}` : ""} ·{" "}
+                                  {formatDateTime(run.created_at)}
+                                </p>
+                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="outline">
+                                    exit: {run.exit_code === null ? "-" : String(run.exit_code)}
+                                  </Badge>
+                                  <Badge variant="outline">
+                                    duration: {formatDuration(run.started_at, run.completed_at)}
+                                  </Badge>
+                                  {run.triggered_by_username ? (
+                                    <Badge variant="outline">actor: {run.triggered_by_username}</Badge>
+                                  ) : null}
+                                  {run.trigger_sha ? (
+                                    <Badge variant="outline">sha: {run.trigger_sha.slice(0, 7)}</Badge>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {canManageActions ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={rerunningRunId !== null}
+                                    onClick={() => {
+                                      void handleRerunRun(run);
+                                    }}
+                                  >
+                                    {rerunningRunId === run.id ? "Rerunning..." : "Rerun"}
+                                  </Button>
+                                ) : null}
+                                <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
+                                  {expanded ? "Hide details" : "View details"}
+                                </Button>
+                              </div>
+                            </div>
+                            {expanded ? (
+                              <div className="space-y-3">
+                                <div className="grid gap-3 md:grid-cols-2">
+                                  <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                                    <p>Source: {runSourceLabel(run)}</p>
+                                    <p>Created: {formatDateTime(run.created_at)}</p>
+                                    <p>Claimed: {formatDateTime(run.claimed_at)}</p>
+                                    <p>Started: {formatDateTime(run.started_at)}</p>
+                                    <p>Completed: {formatDateTime(run.completed_at)}</p>
+                                  </div>
+                                  <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                                    <p>Container: {run.container_instance ?? "-"}</p>
+                                    <p>Actor: {run.triggered_by_username ?? "-"}</p>
+                                    <p>Ref: {run.trigger_ref ?? "-"}</p>
+                                    <p>SHA: {run.trigger_sha ?? "-"}</p>
+                                    <p>Event: {run.trigger_event}</p>
+                                  </div>
+                                </div>
+                                <div className="rounded-md border bg-muted/20 p-3">
+                                  <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
+                                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
+                                    {run.prompt || "(empty prompt)"}
+                                  </pre>
+                                </div>
+                                <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-2 text-xs">
+                                  {run.logs || "(empty logs)"}
+                                </pre>
+                              </div>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
