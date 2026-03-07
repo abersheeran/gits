@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   createIssue,
   formatApiError,
@@ -106,7 +108,12 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   }
 
   if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载仓库信息...</p>;
+    return (
+      <PageLoadingState
+        title="Loading repository"
+        description={`Preparing issue form for ${owner}/${repo}.`}
+      />
+    );
   }
 
   if (!detail.permissions.canCreateIssueOrPullRequest) {
@@ -174,9 +181,9 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
               previewEmptyText="Nothing to preview."
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "提交中..." : "Create issue"}
-              </Button>
+              <PendingButton type="submit" pending={submitting} pendingText="Creating issue...">
+                Create issue
+              </PendingButton>
               <Button variant="ghost" asChild>
                 <Link to={`/repo/${owner}/${repo}/issues`}>返回列表</Link>
               </Button>

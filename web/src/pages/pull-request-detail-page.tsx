@@ -11,6 +11,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   addReaction,
   compareRepositoryRefs,
@@ -113,6 +115,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [updateIntent, setUpdateIntent] = useState<"open" | "closed" | "merged" | null>(null);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [reviewDecision, setReviewDecision] = useState<PullRequestReviewDecision>("comment");
@@ -234,7 +237,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   }
 
   if (loading || !detail || !pullRequest) {
-    return <p className="text-sm text-muted-foreground">正在加载 pull request...</p>;
+    return (
+      <PageLoadingState
+        title="Loading pull request"
+        description={`Fetching pull request #${number}, reviews, checks, and diff data.`}
+      />
+    );
   }
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
@@ -273,6 +281,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       return;
     }
     setUpdating(true);
+    setUpdateIntent(nextState);
     setError(null);
     try {
       const updated = await updatePullRequest(owner, repo, number, {
@@ -292,6 +301,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setError(formatApiError(updateError));
     } finally {
       setUpdating(false);
+      setUpdateIntent(null);
     }
   }
 
@@ -442,25 +452,31 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             <Link to={`/repo/${owner}/${repo}/pulls`}>返回 Pull requests</Link>
           </Button>
           {canUpdate ? (
-            <Button
+            <PendingButton
               variant={pullRequest.state === "open" ? "secondary" : "default"}
-              disabled={updating}
+              pending={updateIntent === "closed" || updateIntent === "open"}
+              disabled={updating && updateIntent === "merged"}
+              pendingText={
+                updateIntent === "closed" ? "Closing pull request..." : "Reopening pull request..."
+              }
               onClick={() => {
                 void changeState(pullRequest.state === "open" ? "closed" : "open");
               }}
             >
               {pullRequest.state === "open" ? "Close pull request" : "Reopen pull request"}
-            </Button>
+            </PendingButton>
           ) : null}
           {canUpdate && pullRequest.state === "open" ? (
-            <Button
-              disabled={updating}
+            <PendingButton
+              pending={updateIntent === "merged"}
+              disabled={updating && updateIntent !== "merged"}
+              pendingText="Merging pull request..."
               onClick={() => {
                 void changeState("merged");
               }}
             >
               Squash and merge
-            </Button>
+            </PendingButton>
           ) : null}
         </div>
       </header>
@@ -567,14 +583,15 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 previewEmptyText="Nothing to preview."
               />
               <div className="flex flex-wrap gap-2">
-                <Button
+                <PendingButton
                   onClick={() => {
                     void submitReview();
                   }}
-                  disabled={reviewSubmitting}
+                  pending={reviewSubmitting}
+                  pendingText="Submitting review..."
                 >
-                  {reviewSubmitting ? "Submitting..." : "Submit review"}
-                </Button>
+                  Submit review
+                </PendingButton>
               </div>
             </section>
           ) : null}

@@ -8,6 +8,8 @@ import { RepositoryMetadataFields } from "@/components/repository/repository-met
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   addReaction,
   listLatestActionRunsByCommentIds,
@@ -225,7 +227,12 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   }
 
   if (loading || !detail || !issue) {
-    return <p className="text-sm text-muted-foreground">正在加载 issue...</p>;
+    return (
+      <PageLoadingState
+        title="Loading issue"
+        description={`Fetching issue #${number} and its conversation history.`}
+      />
+    );
   }
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
@@ -395,15 +402,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             <Link to={`/repo/${owner}/${repo}/issues`}>返回 Issues</Link>
           </Button>
           {canUpdate ? (
-            <Button
+            <PendingButton
               variant={issue.state === "open" ? "secondary" : "default"}
-              disabled={updating}
+              pending={updating}
+              pendingText={issue.state === "open" ? "Closing issue..." : "Reopening issue..."}
               onClick={() => {
                 void changeState(issue.state === "open" ? "closed" : "open");
               }}
             >
               {issue.state === "open" ? "Close issue" : "Reopen issue"}
-            </Button>
+            </PendingButton>
           ) : null}
         </div>
       </header>
@@ -484,14 +492,15 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 previewEmptyText="Nothing to preview."
               />
               <div className="flex flex-wrap gap-2">
-                <Button
+                <PendingButton
                   onClick={() => {
                     void submitComment();
                   }}
-                  disabled={commentSubmitting}
+                  pending={commentSubmitting}
+                  pendingText="Posting comment..."
                 >
-                  {commentSubmitting ? "Submitting..." : "Comment"}
-                </Button>
+                  Comment
+                </PendingButton>
               </div>
             </section>
           ) : (

@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   Card,
   CardContent,
@@ -86,9 +87,9 @@ export function LoginPage({ user, onAuthChanged }: LoginPageProps) {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-            <Button className="w-full" type="submit" disabled={submitting}>
-              {submitting ? "登录中..." : "登录"}
-            </Button>
+            <PendingButton className="w-full" type="submit" pending={submitting} pendingText="登录中...">
+              登录
+            </PendingButton>
           </form>
         </CardContent>
         <CardFooter className="justify-between">

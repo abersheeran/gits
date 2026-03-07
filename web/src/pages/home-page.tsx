@@ -8,6 +8,7 @@ import {
   CardContent,
   CardDescription
 } from "@/components/ui/card";
+import { InlineLoadingState } from "@/components/ui/loading-state";
 import { formatApiError, listPublicRepositories, type AuthUser, type RepositoryRecord } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
@@ -82,7 +83,13 @@ export function HomePage({ user }: HomePageProps) {
 
       {loading ? (
         <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">正在加载仓库列表...</CardContent>
+          <CardContent className="pt-6">
+            <InlineLoadingState
+              title="Loading repositories"
+              description="Fetching the latest public repositories."
+              lines={3}
+            />
+          </CardContent>
         </Card>
       ) : (
         <div className="space-y-3">

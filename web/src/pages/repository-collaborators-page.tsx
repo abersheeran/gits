@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   Select,
   SelectContent,
@@ -100,8 +102,13 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
     );
   }
 
-  if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载协作者...</p>;
+  if (!detail) {
+    return (
+      <PageLoadingState
+        title="Loading collaborators"
+        description={`Fetching collaborator access for ${owner}/${repo}.`}
+      />
+    );
   }
 
   async function handleUpsertCollaborator(event: FormEvent<HTMLFormElement>) {
@@ -136,6 +143,13 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
 
   return (
     <div className="space-y-6">
+      {loading ? (
+        <InlineLoadingState
+          title="Refreshing collaborators"
+          description="Updating repository access and collaborator roles."
+        />
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>
@@ -176,9 +190,9 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? "提交中..." : "添加或更新"}
-              </Button>
+              <PendingButton type="submit" pending={saving} pendingText="Applying access...">
+                添加或更新
+              </PendingButton>
               <Button variant="ghost" asChild>
                 <Link to={`/repo/${owner}/${repo}/settings`}>返回设置</Link>
               </Button>

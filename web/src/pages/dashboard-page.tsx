@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { InlineLoadingState } from "@/components/ui/loading-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatApiError, listMyRepositories, type AuthUser, type RepositoryRecord } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -80,7 +81,10 @@ export function DashboardPage({ user }: DashboardPageProps) {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : loading ? (
-            <p className="text-sm text-muted-foreground">正在加载...</p>
+            <InlineLoadingState
+              title="Loading repositories"
+              description="Refreshing your repositories and collaborator access."
+            />
           ) : repositories.length === 0 ? (
             <p className="text-sm text-muted-foreground">还没有仓库，先创建一个。</p>
           ) : (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, matchPath, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
+import { PageLoadingState } from "@/components/ui/loading-state";
 import { getCurrentUser, type AuthUser } from "@/lib/api";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { HomePage } from "@/pages/home-page";
@@ -144,7 +145,14 @@ function App() {
   }, [location.pathname]);
 
   if (authLoading) {
-    return <div className="mx-auto w-[min(1080px,92vw)] py-10 text-sm text-muted-foreground">正在初始化...</div>;
+    return (
+      <div className="mx-auto w-[min(1080px,92vw)] py-10">
+        <PageLoadingState
+          title="Initializing session"
+          description="Checking the current account and loading the application shell."
+        />
+      </div>
+    );
   }
 
   return (

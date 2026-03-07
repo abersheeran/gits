@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   Select,
   SelectContent,
@@ -298,6 +300,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [runnerConfig, setRunnerConfig] = useState<RepositoryActionsConfig | null>(null);
   const [loadingRunnerConfig, setLoadingRunnerConfig] = useState(false);
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
+  const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
   const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
 
   const [runnerInstanceType, setRunnerInstanceType] = useState<ActionContainerInstanceType>("lite");
@@ -636,6 +639,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
 
     setSavingRunnerConfig(true);
+    setRunnerConfigAction("save");
     setError(null);
     setRunnerConfigSuccess(null);
     try {
@@ -659,6 +663,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     } finally {
       if (mountedRef.current) {
         setSavingRunnerConfig(false);
+        setRunnerConfigAction(null);
       }
     }
   }
@@ -669,6 +674,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
 
     setSavingRunnerConfig(true);
+    setRunnerConfigAction("reset");
     setError(null);
     setRunnerConfigSuccess(null);
     try {
@@ -692,6 +698,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     } finally {
       if (mountedRef.current) {
         setSavingRunnerConfig(false);
+        setRunnerConfigAction(null);
       }
     }
   }
@@ -720,8 +727,13 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     );
   }
 
-  if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载 Actions...</p>;
+  if (!detail) {
+    return (
+      <PageLoadingState
+        title="Loading actions"
+        description={`Fetching workflows, runs, and config for ${owner}/${repo}.`}
+      />
+    );
   }
 
   return (
@@ -741,6 +753,13 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       ) : null}
 
       <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
+
+      {loading ? (
+        <InlineLoadingState
+          title="Refreshing actions"
+          description="Updating workflow runs and repository-level action config."
+        />
+      ) : null}
 
 
       {canManageActions ? (
@@ -789,7 +808,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               </CardHeader>
               <CardContent>
                 {loadingRunnerConfig || !runnerConfig ? (
-                  <p className="text-sm text-muted-foreground">正在加载容器配置...</p>
+                  <InlineLoadingState
+                    title="Loading repository config"
+                    description="Fetching the inherited and overridden container settings."
+                  />
                 ) : (
                   <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
                     <section className="space-y-4 rounded-md border p-4">
@@ -905,19 +927,26 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                     </section>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <Button type="submit" disabled={savingRunnerConfig}>
-                        {savingRunnerConfig ? "保存中..." : "保存容器配置"}
-                      </Button>
-                      <Button
+                      <PendingButton
+                        type="submit"
+                        pending={runnerConfigAction === "save"}
+                        disabled={savingRunnerConfig && runnerConfigAction !== "save"}
+                        pendingText="Saving config..."
+                      >
+                        保存容器配置
+                      </PendingButton>
+                      <PendingButton
                         type="button"
                         variant="outline"
-                        disabled={savingRunnerConfig}
+                        pending={runnerConfigAction === "reset"}
+                        disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
+                        pendingText="Resetting..."
                         onClick={() => {
                           void handleResetRunnerConfig();
                         }}
                       >
                         恢复全局默认
-                      </Button>
+                      </PendingButton>
                       <p className="text-xs text-muted-foreground">
                         updated: {formatDateTime(runnerConfig.updated_at)}
                       </p>
@@ -1065,16 +1094,18 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
                                 {canManageActions ? (
-                                  <Button
+                                  <PendingButton
                                     size="sm"
                                     variant="outline"
-                                    disabled={rerunningRunId !== null}
+                                    pending={rerunningRunId === run.id}
+                                    disabled={rerunningRunId !== null && rerunningRunId !== run.id}
+                                    pendingText="Rerunning..."
                                     onClick={() => {
                                       void handleRerunRun(run);
                                     }}
                                   >
-                                    {rerunningRunId === run.id ? "Rerunning..." : "Rerun"}
-                                  </Button>
+                                    Rerun
+                                  </PendingButton>
                                 ) : null}
                                 <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
                                   {expanded ? "Hide details" : "View details"}

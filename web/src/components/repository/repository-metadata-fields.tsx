@@ -1,5 +1,5 @@
 import { Checkbox } from "@/components/ui/checkbox";
-import { Button } from "@/components/ui/button";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   Select,
   SelectContent,
@@ -208,9 +208,15 @@ export function RepositoryMetadataFields({
       ) : null}
 
       {canEdit && onSave ? (
-        <Button type="button" className="w-full" onClick={onSave} disabled={saving}>
-          {saving ? "Saving..." : "Save metadata"}
-        </Button>
+        <PendingButton
+          type="button"
+          className="w-full"
+          onClick={onSave}
+          pending={saving}
+          pendingText="Saving metadata..."
+        >
+          Save metadata
+        </PendingButton>
       ) : null}
     </div>
   );

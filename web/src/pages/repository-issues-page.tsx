@@ -9,6 +9,7 @@ import { RepositoryStateBadge } from "@/components/repository/repository-state-b
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
   listLatestActionRunsBySource,
   formatApiError,
@@ -143,8 +144,13 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     );
   }
 
-  if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载 Issues...</p>;
+  if (!detail) {
+    return (
+      <PageLoadingState
+        title="Loading issues"
+        description={`Fetching issue activity for ${owner}/${repo}.`}
+      />
+    );
   }
 
   const canCreate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
@@ -152,6 +158,13 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
   return (
     <div className="space-y-4">
       <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="issues" />
+
+      {loading ? (
+        <InlineLoadingState
+          title="Refreshing issues"
+          description={`Applying the ${state} filter and updating checks.`}
+        />
+      ) : null}
 
       <section className="overflow-hidden rounded-md border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2">

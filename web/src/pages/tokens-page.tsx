@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InlineLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   createAccessToken,
@@ -164,9 +166,9 @@ export function TokensPage({ user }: TokensPageProps) {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={creating}>
-                {creating ? "创建中..." : "创建 Token"}
-              </Button>
+              <PendingButton type="submit" pending={creating} pendingText="Creating token...">
+                创建 Token
+              </PendingButton>
               <Button variant="ghost" asChild>
                 <Link to="/dashboard">返回 Dashboard</Link>
               </Button>
@@ -184,7 +186,10 @@ export function TokensPage({ user }: TokensPageProps) {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">正在加载 token 列表...</p>
+            <InlineLoadingState
+              title="Loading tokens"
+              description="Fetching active and historical access tokens."
+            />
           ) : tokens.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无 token。</p>
           ) : (

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import {
   Select,
   SelectContent,
@@ -131,7 +133,12 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   }
 
   if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载仓库信息...</p>;
+    return (
+      <PageLoadingState
+        title="Loading repository"
+        description={`Preparing pull request form for ${owner}/${repo}.`}
+      />
+    );
   }
 
   if (!detail.permissions.canCreateIssueOrPullRequest) {
@@ -263,9 +270,13 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "提交中..." : "Create pull request"}
-              </Button>
+              <PendingButton
+                type="submit"
+                pending={submitting}
+                pendingText="Creating pull request..."
+              >
+                Create pull request
+              </PendingButton>
               <Button variant="ghost" asChild>
                 <Link to={`/repo/${owner}/${repo}/pulls`}>返回列表</Link>
               </Button>

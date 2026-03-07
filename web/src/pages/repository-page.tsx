@@ -15,6 +15,7 @@ import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
   Select,
   SelectContent,
@@ -522,8 +523,13 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
     );
   }
 
-  if (loading || !detail || !history || !contents) {
-    return <p className="text-sm text-muted-foreground">正在加载仓库...</p>;
+  if (!detail || !history || !contents) {
+    return (
+      <PageLoadingState
+        title="Loading repository"
+        description={`Preparing code, history, and README for ${owner}/${repo}.`}
+      />
+    );
   }
 
   const latestCommit = history.commits[0] ?? null;
@@ -544,6 +550,13 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
         commitCount={history.commits.length}
         selectedBranchLabel={selectedBranchLabel}
       />
+
+      {loading ? (
+        <InlineLoadingState
+          title="Refreshing code view"
+          description="Updating the selected ref, path history, and file preview."
+        />
+      ) : null}
 
       <section className="rounded-md border">
         <div className="flex flex-col gap-3 border-b bg-[#f6f8fa] px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">

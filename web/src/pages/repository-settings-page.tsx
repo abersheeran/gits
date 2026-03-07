@@ -16,6 +16,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createRepositoryLabel,
@@ -155,7 +157,12 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   }
 
   if (loading || !detail) {
-    return <p className="text-sm text-muted-foreground">正在加载设置...</p>;
+    return (
+      <PageLoadingState
+        title="Loading repository settings"
+        description={`Fetching repository settings, labels, and milestones for ${owner}/${repo}.`}
+      />
+    );
   }
 
   if (detail.repository.owner_username !== user.username) {
@@ -398,9 +405,9 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
             ) : null}
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={savePending}>
-                {savePending ? "保存中..." : "保存设置"}
-              </Button>
+              <PendingButton type="submit" pending={savePending} pendingText="Saving settings...">
+                保存设置
+              </PendingButton>
               <Button variant="outline" asChild>
                 <Link to={`/repo/${owner}/${repo}/collaborators`}>管理协作者</Link>
               </Button>
@@ -427,27 +434,29 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <RepositoryLabelChip label={label} />
                     <div className="flex flex-wrap gap-2">
-                      <Button
+                      <PendingButton
                         type="button"
                         size="sm"
-                        disabled={labelSavingId === label.id}
+                        pending={labelSavingId === label.id}
+                        pendingText="保存中..."
                         onClick={() => {
                           void handleLabelSave(label);
                         }}
                       >
-                        {labelSavingId === label.id ? "保存中..." : "保存"}
-                      </Button>
-                      <Button
+                        保存
+                      </PendingButton>
+                      <PendingButton
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={labelDeletingId === label.id}
+                        pending={labelDeletingId === label.id}
+                        pendingText="删除中..."
                         onClick={() => {
                           void handleLabelDelete(label.id);
                         }}
                       >
-                        {labelDeletingId === label.id ? "删除中..." : "删除"}
-                      </Button>
+                        删除
+                      </PendingButton>
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-[1fr_160px]">
@@ -552,9 +561,9 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                 onChange={(event) => setNewLabelDescription(event.target.value)}
               />
             </div>
-            <Button type="submit" disabled={creatingLabel}>
-              {creatingLabel ? "创建中..." : "创建标签"}
-            </Button>
+            <PendingButton type="submit" pending={creatingLabel} pendingText="创建中...">
+              创建标签
+            </PendingButton>
           </form>
         </CardContent>
       </Card>
@@ -582,27 +591,29 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button
+                      <PendingButton
                         type="button"
                         size="sm"
-                        disabled={milestoneSavingId === milestone.id}
+                        pending={milestoneSavingId === milestone.id}
+                        pendingText="保存中..."
                         onClick={() => {
                           void handleMilestoneSave(milestone);
                         }}
                       >
-                        {milestoneSavingId === milestone.id ? "保存中..." : "保存"}
-                      </Button>
-                      <Button
+                        保存
+                      </PendingButton>
+                      <PendingButton
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={milestoneDeletingId === milestone.id}
+                        pending={milestoneDeletingId === milestone.id}
+                        pendingText="删除中..."
                         onClick={() => {
                           void handleMilestoneDelete(milestone.id);
                         }}
                       >
-                        {milestoneDeletingId === milestone.id ? "删除中..." : "删除"}
-                      </Button>
+                        删除
+                      </PendingButton>
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -705,9 +716,9 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                 onChange={(event) => setNewMilestoneDueAt(event.target.value)}
               />
             </div>
-            <Button type="submit" disabled={creatingMilestone}>
-              {creatingMilestone ? "创建中..." : "创建里程碑"}
-            </Button>
+            <PendingButton type="submit" pending={creatingMilestone} pendingText="创建中...">
+              创建里程碑
+            </PendingButton>
           </form>
         </CardContent>
       </Card>
@@ -729,9 +740,14 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                 required
               />
             </div>
-            <Button type="submit" variant="destructive" disabled={deletePending}>
-              {deletePending ? "删除中..." : "删除仓库"}
-            </Button>
+            <PendingButton
+              type="submit"
+              variant="destructive"
+              pending={deletePending}
+              pendingText="删除中..."
+            >
+              删除仓库
+            </PendingButton>
           </form>
         </CardContent>
       </Card>

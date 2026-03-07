@@ -5,6 +5,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { PageLoadingState } from "@/components/ui/loading-state";
+import { PendingButton } from "@/components/ui/pending-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   formatApiError,
@@ -96,8 +98,22 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
     return <Navigate to="/login" replace />;
   }
 
+  if (error && !config) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>加载失败</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
   if (loading || !config) {
-    return <p className="text-sm text-muted-foreground">正在加载 Actions 全局配置...</p>;
+    return (
+      <PageLoadingState
+        title="Loading actions config"
+        description="Fetching the current global defaults for Codex and Claude Code."
+      />
+    );
   }
 
   const configEditorStyle = {
@@ -181,9 +197,9 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
             </section>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? "保存中..." : "保存配置"}
-              </Button>
+              <PendingButton type="submit" pending={saving} pendingText="Saving config...">
+                保存配置
+              </PendingButton>
               <Button variant="outline" asChild>
                 <Link to="/dashboard">返回 Dashboard</Link>
               </Button>
