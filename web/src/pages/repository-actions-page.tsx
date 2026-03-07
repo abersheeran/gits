@@ -259,6 +259,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
 
   const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
   const [runnerConfig, setRunnerConfig] = useState<RepositoryActionsConfig | null>(null);
   const [loadingRunnerConfig, setLoadingRunnerConfig] = useState(false);
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
@@ -680,160 +681,202 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
 
 
       {canManageActions ? (
-        <Card>
+        <div className="space-y-4">
+          <div
+            className="inline-flex items-center rounded-lg border bg-muted/30 p-1"
+            role="tablist"
+            aria-label="Actions 内容切换"
+          >
+            <button
+              id="actions-logs-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "logs"}
+              aria-controls="actions-logs-panel"
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                activeTab === "logs"
+                  ? "bg-background font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setActiveTab("logs")}
+            >
+              运行日志
+            </button>
+            <button
+              id="actions-config-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "config"}
+              aria-controls="actions-config-panel"
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                activeTab === "config"
+                  ? "bg-background font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setActiveTab("config")}
+            >
+              配置
+            </button>
+          </div>
+
+          {activeTab === "config" ? (
+            <Card id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
+              <CardHeader>
+                <CardTitle className="text-base">Cloudflare container config</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingRunnerConfig || !runnerConfig ? (
+                  <p className="text-sm text-muted-foreground">正在加载容器配置...</p>
+                ) : (
+                  <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
+                    <section className="space-y-4 rounded-md border p-4">
+                      <div className="space-y-1">
+                        <h2 className="text-sm font-semibold">Codex</h2>
+                        <p className="text-xs text-muted-foreground">
+                          {runnerConfig.inheritsGlobalCodexConfig
+                            ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                            : "当前使用当前仓库保存的覆盖配置。"}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="repository-codex-config-file-content">
+                          配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
+                        </Label>
+                        <Textarea
+                          id="repository-codex-config-file-content"
+                          value={codexConfigFileContent}
+                          onChange={(event) => setCodexConfigFileContent(event.target.value)}
+                          rows={10}
+                          wrap="off"
+                          spellCheck={false}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          autoComplete="off"
+                          className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                          style={configEditorStyle}
+                        />
+                      </div>
+                    </section>
+
+                    <section className="space-y-4 rounded-md border p-4">
+                      <div className="space-y-1">
+                        <h2 className="text-sm font-semibold">Claude Code</h2>
+                        <p className="text-xs text-muted-foreground">
+                          {runnerConfig.inheritsGlobalClaudeCodeConfig
+                            ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                            : "当前使用当前仓库保存的覆盖配置。"}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="repository-claude-code-config-file-content">
+                          配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
+                        </Label>
+                        <Textarea
+                          id="repository-claude-code-config-file-content"
+                          value={claudeCodeConfigFileContent}
+                          onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
+                          rows={10}
+                          wrap="off"
+                          spellCheck={false}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          autoComplete="off"
+                          className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                          style={configEditorStyle}
+                        />
+                      </div>
+                    </section>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="submit" disabled={savingRunnerConfig}>
+                        {savingRunnerConfig ? "保存中..." : "保存容器配置"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={savingRunnerConfig}
+                        onClick={() => {
+                          void handleResetRunnerConfig();
+                        }}
+                      >
+                        恢复全局默认
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        updated: {formatDateTime(runnerConfig.updated_at)}
+                      </p>
+                    </div>
+                  </form>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!canManageActions || activeTab === "logs" ? (
+        <Card id="actions-logs-panel" role="tabpanel" aria-labelledby="actions-logs-tab">
           <CardHeader>
-            <CardTitle className="text-base">Cloudflare container config</CardTitle>
+            <CardTitle className="text-base">运行日志</CardTitle>
           </CardHeader>
           <CardContent>
-            {loadingRunnerConfig || !runnerConfig ? (
-              <p className="text-sm text-muted-foreground">正在加载容器配置...</p>
+            {runs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No runs yet.</p>
             ) : (
-              <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                <section className="space-y-4 rounded-md border p-4">
-                  <div className="space-y-1">
-                    <h2 className="text-sm font-semibold">Codex</h2>
-                    <p className="text-xs text-muted-foreground">
-                      {runnerConfig.inheritsGlobalCodexConfig
-                        ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                        : "当前使用当前仓库保存的覆盖配置。"}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="repository-codex-config-file-content">
-                      配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
-                    </Label>
-                    <Textarea
-                      id="repository-codex-config-file-content"
-                      value={codexConfigFileContent}
-                      onChange={(event) => setCodexConfigFileContent(event.target.value)}
-                      rows={10}
-                      wrap="off"
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      autoComplete="off"
-                      className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                      style={configEditorStyle}
-                    />
-                  </div>
-                </section>
-
-                <section className="space-y-4 rounded-md border p-4">
-                  <div className="space-y-1">
-                    <h2 className="text-sm font-semibold">Claude Code</h2>
-                    <p className="text-xs text-muted-foreground">
-                      {runnerConfig.inheritsGlobalClaudeCodeConfig
-                        ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                        : "当前使用当前仓库保存的覆盖配置。"}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="repository-claude-code-config-file-content">
-                      配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
-                    </Label>
-                    <Textarea
-                      id="repository-claude-code-config-file-content"
-                      value={claudeCodeConfigFileContent}
-                      onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
-                      rows={10}
-                      wrap="off"
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      autoComplete="off"
-                      className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                      style={configEditorStyle}
-                    />
-                  </div>
-                </section>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={savingRunnerConfig}>
-                    {savingRunnerConfig ? "保存中..." : "保存容器配置"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={savingRunnerConfig}
-                    onClick={() => {
-                      void handleResetRunnerConfig();
-                    }}
-                  >
-                    恢复全局默认
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    updated: {formatDateTime(runnerConfig.updated_at)}
-                  </p>
-                </div>
-              </form>
+              <ul className="space-y-2">
+                {runs.map((run) => {
+                  const expanded = expandedRunIds.includes(run.id);
+                  return (
+                    <li
+                      id={`action-run-${run.id}`}
+                      key={run.id}
+                      className={`space-y-2 rounded-md border p-3 ${
+                        selectedRunId === run.id ? "border-[#fd8c73] bg-muted/20" : ""
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            #{run.run_number} {run.workflow_name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {run.trigger_event}
+                            {run.trigger_ref ? ` · ${run.trigger_ref}` : ""} · {formatDateTime(run.created_at)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={statusBadgeVariant(run.status)}>{run.status}</Badge>
+                          <Badge variant="outline">{run.agent_type}</Badge>
+                          <Badge variant="outline">
+                            exit: {run.exit_code === null ? "-" : String(run.exit_code)}
+                          </Badge>
+                          {canManageActions ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={rerunningRunId !== null}
+                              onClick={() => {
+                                void handleRerunRun(run);
+                              }}
+                            >
+                              {rerunningRunId === run.id ? "Rerunning..." : "Rerun"}
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
+                            {expanded ? "Hide logs" : "View logs"}
+                          </Button>
+                        </div>
+                      </div>
+                      {expanded ? (
+                        <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-2 text-xs">{run.logs || "(empty logs)"}</pre>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </CardContent>
         </Card>
       ) : null}
-
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent runs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {runs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No runs yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {runs.map((run) => {
-                const expanded = expandedRunIds.includes(run.id);
-                return (
-                  <li
-                    id={`action-run-${run.id}`}
-                    key={run.id}
-                    className={`space-y-2 rounded-md border p-3 ${
-                      selectedRunId === run.id ? "border-[#fd8c73] bg-muted/20" : ""
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          #{run.run_number} {run.workflow_name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {run.trigger_event}
-                          {run.trigger_ref ? ` · ${run.trigger_ref}` : ""} · {formatDateTime(run.created_at)}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={statusBadgeVariant(run.status)}>{run.status}</Badge>
-                        <Badge variant="outline">{run.agent_type}</Badge>
-                        <Badge variant="outline">
-                          exit: {run.exit_code === null ? "-" : String(run.exit_code)}
-                        </Badge>
-                        {canManageActions ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={rerunningRunId !== null}
-                            onClick={() => {
-                              void handleRerunRun(run);
-                            }}
-                          >
-                            {rerunningRunId === run.id ? "Rerunning..." : "Rerun"}
-                          </Button>
-                        ) : null}
-                        <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
-                          {expanded ? "Hide logs" : "View logs"}
-                        </Button>
-                      </div>
-                    </div>
-                    {expanded ? (
-                      <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-2 text-xs">{run.logs || "(empty logs)"}</pre>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
