@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -20,17 +20,21 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  cancelRepositoryAgentSession,
   getActionRunLogStreamPath,
   formatApiError,
   getActionRun,
+  getRepositoryAgentSession,
   getRepositoryActionsConfig,
   getRepositoryDetail,
   listActionRuns,
+  listRepositoryAgentSessions,
   rerunActionRun,
   updateRepositoryActionsConfig,
   type ActionContainerInstanceType,
   type ActionRunLogStreamEvent,
   type ActionRunRecord,
+  type AgentSessionRecord,
   type AuthUser,
   type RepositoryActionsConfig,
   type RepositoryDetailResponse
@@ -58,6 +62,10 @@ function isPendingRun(run: ActionRunRecord): boolean {
   return run.status === "queued" || run.status === "running";
 }
 
+function isPendingAgentSession(session: AgentSessionRecord): boolean {
+  return session.status === "queued" || session.status === "running";
+}
+
 function formatDuration(startedAt: number | null, completedAt: number | null): string {
   if (!startedAt) {
     return "-";
@@ -79,6 +87,17 @@ function runSourceLabel(run: ActionRunRecord): string {
   return run.trigger_event;
 }
 
+function sessionSourceLabel(session: AgentSessionRecord): string {
+  if (session.source_number !== null) {
+    return `${session.source_type} #${session.source_number}`;
+  }
+  return session.source_type;
+}
+
+function canCancelAgentSession(session: AgentSessionRecord): boolean {
+  return session.status === "queued";
+}
+
 function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
   return (
     value === "queued" ||
@@ -96,6 +115,18 @@ function insertOrReplaceRun(currentRuns: ActionRunRecord[], nextRun: ActionRunRe
   }
 
   return currentRuns.map((run) => (run.id === nextRun.id ? nextRun : run));
+}
+
+function insertOrReplaceSession(
+  currentSessions: AgentSessionRecord[],
+  nextSession: AgentSessionRecord
+): AgentSessionRecord[] {
+  const existingIndex = currentSessions.findIndex((session) => session.id === nextSession.id);
+  if (existingIndex === -1) {
+    return [...currentSessions, nextSession].sort((left, right) => right.created_at - left.created_at);
+  }
+
+  return currentSessions.map((session) => (session.id === nextSession.id ? nextSession : session));
 }
 
 function shouldPreferCurrentRun(currentRun: ActionRunRecord, nextRun: ActionRunRecord): boolean {
@@ -284,13 +315,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const owner = params.owner ?? "";
   const repo = params.repo ?? "";
   const selectedRunId = searchParams.get("runId")?.trim() || null;
+  const selectedSessionId = searchParams.get("sessionId")?.trim() || null;
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [runs, setRuns] = useState<ActionRunRecord[]>([]);
+  const [agentSessions, setAgentSessions] = useState<AgentSessionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
+  const [pendingSessionAction, setPendingSessionAction] = useState<{
+    sessionId: string;
+    action: "cancel";
+  } | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -302,7 +339,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
   const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
   const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
-
   const [runnerInstanceType, setRunnerInstanceType] = useState<ActionContainerInstanceType>("lite");
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
   const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
@@ -311,7 +347,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const loadDataRef = useRef<((options?: { background?: boolean }) => Promise<void>) | null>(null);
   const runsRef = useRef<ActionRunRecord[]>([]);
 
-  const canManageActions = Boolean(user) && Boolean(detail?.permissions.canCreateIssueOrPullRequest);
+  const canManageActions = Boolean(user) && Boolean(detail?.permissions.canManageActions);
   const configEditorStyle = {
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
@@ -328,11 +364,13 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       }
       setError(null);
       try {
-        const [nextDetail, nextRuns] = await Promise.all([
+        const [nextDetail, nextRuns, nextAgentSessions] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listActionRuns(owner, repo, { limit: 50 })
+          listActionRuns(owner, repo, { limit: 50 }),
+          listRepositoryAgentSessions(owner, repo, { limit: 30 })
         ]);
         let mergedRuns = nextRuns;
+        let mergedSessions = nextAgentSessions;
         if (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId)) {
           try {
             const selectedRun = await getActionRun(owner, repo, selectedRunId);
@@ -345,11 +383,25 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             // Ignore missing run and keep default list.
           }
         }
+        if (selectedSessionId && !nextAgentSessions.some((session) => session.id === selectedSessionId)) {
+          try {
+            const selectedSession = await getRepositoryAgentSession(owner, repo, selectedSessionId);
+            mergedSessions = [selectedSession, ...nextAgentSessions]
+              .filter(
+                (session, index, array) =>
+                  array.findIndex((item) => item.id === session.id) === index
+              )
+              .sort((left, right) => right.created_at - left.created_at);
+          } catch {
+            // Ignore missing session and keep default list.
+          }
+        }
         if (!mountedRef.current) {
           return;
         }
         setDetail(nextDetail);
         setRuns((currentRuns) => mergeRuns(currentRuns, mergedRuns));
+        setAgentSessions(mergedSessions);
       } catch (loadError) {
         if (mountedRef.current) {
           setError(formatApiError(loadError));
@@ -360,7 +412,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         }
       }
     },
-    [owner, repo, selectedRunId]
+    [owner, repo, selectedRunId, selectedSessionId]
   );
 
   const refreshDataInBackground = useCallback(() => {
@@ -506,9 +558,35 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }),
     [filteredRuns]
   );
+  const sessionSummary = useMemo(
+    () => ({
+      total: agentSessions.length,
+      running: agentSessions.filter((session) => isPendingAgentSession(session)).length,
+      success: agentSessions.filter((session) => session.status === "success").length,
+      failed: agentSessions.filter((session) => session.status === "failed").length
+    }),
+    [agentSessions]
+  );
+  const hasPendingAgentSessions = useMemo(
+    () => agentSessions.some((session) => isPendingAgentSession(session)),
+    [agentSessions]
+  );
+  const selectedAgentSession = useMemo(
+    () => agentSessions.find((session) => session.id === selectedSessionId) ?? null,
+    [agentSessions, selectedSessionId]
+  );
+  const visibleAgentSessions = useMemo(() => {
+    if (!selectedAgentSession) {
+      return agentSessions.slice(0, 12);
+    }
+    return [
+      selectedAgentSession,
+      ...agentSessions.filter((session) => session.id !== selectedAgentSession.id)
+    ].slice(0, 12);
+  }, [agentSessions, selectedAgentSession]);
 
   useEffect(() => {
-    if (!hasPendingRunsWithoutLiveStream) {
+    if (!hasPendingRunsWithoutLiveStream && !hasPendingAgentSessions) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -517,7 +595,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
+  }, [hasPendingAgentSessions, hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -534,6 +612,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       window.clearTimeout(timer);
     };
   }, [selectedRunId, runs.length]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const element = document.getElementById(`agent-session-${selectedSessionId}`);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [selectedSessionId, agentSessions.length]);
 
   useEffect(() => {
     if (!owner || !repo || liveExpandedRunIds.length === 0) {
@@ -629,6 +720,37 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setError(formatApiError(rerunError));
     } finally {
       setRerunningRunId(null);
+    }
+  }
+
+  async function handleAgentSessionAction(session: AgentSessionRecord) {
+    if (!canManageActions || pendingSessionAction) {
+      return;
+    }
+
+    setPendingSessionAction({ sessionId: session.id, action: "cancel" });
+    setError(null);
+    try {
+      const response = await cancelRepositoryAgentSession(owner, repo, session.id);
+      if (!mountedRef.current) {
+        return;
+      }
+      const nextRun = response.run;
+      setAgentSessions((currentSessions) =>
+        insertOrReplaceSession(currentSessions, response.session)
+      );
+      if (nextRun) {
+        setRuns((currentRuns) => insertOrReplaceRun(currentRuns, nextRun));
+      }
+      await loadData();
+    } catch (sessionActionError) {
+      if (mountedRef.current) {
+        setError(formatApiError(sessionActionError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setPendingSessionAction(null);
+      }
     }
   }
 
@@ -802,159 +924,164 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           </div>
 
           {activeTab === "config" ? (
-            <Card id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
-              <CardHeader>
-                <CardTitle className="text-base">Cloudflare container config</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {loadingRunnerConfig || !runnerConfig ? (
-                  <InlineLoadingState
-                    title="Loading repository config"
-                    description="Fetching the inherited and overridden container settings."
-                  />
-                ) : (
-                  <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                    <section className="space-y-4 rounded-md border p-4">
-                      <div className="space-y-1">
-                        <h2 className="text-sm font-semibold">Instance Type</h2>
-                        <p className="text-xs text-muted-foreground">
-                          这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
-                        </p>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
-                        <div className="space-y-2">
-                          <Label htmlFor="repository-runner-instance-type">实例规格</Label>
-                          <Select
-                            value={runnerInstanceType}
-                            onValueChange={(value) =>
-                              setRunnerInstanceType(value as ActionContainerInstanceType)
-                            }
-                          >
-                            <SelectTrigger id="repository-runner-instance-type">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+            <div className="space-y-4">
+              <Card id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
+                <CardHeader>
+                  <CardTitle className="text-base">Cloudflare container config</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {loadingRunnerConfig || !runnerConfig ? (
+                    <InlineLoadingState
+                      title="Loading repository config"
+                      description="Fetching the inherited and overridden container settings."
+                    />
+                  ) : (
+                    <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
+                      <section className="space-y-4 rounded-md border p-4">
+                        <div className="space-y-1">
+                          <h2 className="text-sm font-semibold">Instance Type</h2>
+                          <p className="text-xs text-muted-foreground">
+                            这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
+                          </p>
                         </div>
-                        <div className="overflow-x-auto rounded-md border">
-                          <table className="min-w-full text-left text-xs">
-                            <thead className="bg-muted/40 text-muted-foreground">
-                              <tr>
-                                <th className="px-3 py-2 font-medium">Instance Type</th>
-                                <th className="px-3 py-2 font-medium">规格</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                <tr
-                                  key={option.value}
-                                  className={
-                                    option.value === runnerInstanceType ? "bg-muted/30" : ""
-                                  }
-                                >
-                                  <td className="px-3 py-2 font-mono">{option.label}</td>
-                                  <td className="px-3 py-2 text-muted-foreground">{option.spec}</td>
+                        <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
+                          <div className="space-y-2">
+                            <Label htmlFor="repository-runner-instance-type">实例规格</Label>
+                            <Select
+                              value={runnerInstanceType}
+                              onValueChange={(value) =>
+                                setRunnerInstanceType(value as ActionContainerInstanceType)
+                              }
+                            >
+                              <SelectTrigger id="repository-runner-instance-type">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="overflow-x-auto rounded-md border">
+                            <table className="min-w-full text-left text-xs">
+                              <thead className="bg-muted/40 text-muted-foreground">
+                                <tr>
+                                  <th className="px-3 py-2 font-medium">Instance Type</th>
+                                  <th className="px-3 py-2 font-medium">规格</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                  <tr
+                                    key={option.value}
+                                    className={
+                                      option.value === runnerInstanceType ? "bg-muted/30" : ""
+                                    }
+                                  >
+                                    <td className="px-3 py-2 font-mono">{option.label}</td>
+                                    <td className="px-3 py-2 text-muted-foreground">
+                                      {option.spec}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                      </div>
-                    </section>
+                      </section>
 
-                    <section className="space-y-4 rounded-md border p-4">
-                      <div className="space-y-1">
-                        <h2 className="text-sm font-semibold">Codex</h2>
+                      <section className="space-y-4 rounded-md border p-4">
+                        <div className="space-y-1">
+                          <h2 className="text-sm font-semibold">Codex</h2>
+                          <p className="text-xs text-muted-foreground">
+                            {runnerConfig.inheritsGlobalCodexConfig
+                              ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                              : "当前使用当前仓库保存的覆盖配置。"}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="repository-codex-config-file-content">
+                            配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
+                          </Label>
+                          <Textarea
+                            id="repository-codex-config-file-content"
+                            value={codexConfigFileContent}
+                            onChange={(event) => setCodexConfigFileContent(event.target.value)}
+                            rows={10}
+                            wrap="off"
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoCorrect="off"
+                            autoComplete="off"
+                            className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                            style={configEditorStyle}
+                          />
+                        </div>
+                      </section>
+
+                      <section className="space-y-4 rounded-md border p-4">
+                        <div className="space-y-1">
+                          <h2 className="text-sm font-semibold">Claude Code</h2>
+                          <p className="text-xs text-muted-foreground">
+                            {runnerConfig.inheritsGlobalClaudeCodeConfig
+                              ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                              : "当前使用当前仓库保存的覆盖配置。"}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="repository-claude-code-config-file-content">
+                            配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
+                          </Label>
+                          <Textarea
+                            id="repository-claude-code-config-file-content"
+                            value={claudeCodeConfigFileContent}
+                            onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
+                            rows={10}
+                            wrap="off"
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoCorrect="off"
+                            autoComplete="off"
+                            className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                            style={configEditorStyle}
+                          />
+                        </div>
+                      </section>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <PendingButton
+                          type="submit"
+                          pending={runnerConfigAction === "save"}
+                          disabled={savingRunnerConfig && runnerConfigAction !== "save"}
+                          pendingText="Saving config..."
+                        >
+                          保存容器配置
+                        </PendingButton>
+                        <PendingButton
+                          type="button"
+                          variant="outline"
+                          pending={runnerConfigAction === "reset"}
+                          disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
+                          pendingText="Resetting..."
+                          onClick={() => {
+                            void handleResetRunnerConfig();
+                          }}
+                        >
+                          恢复全局默认
+                        </PendingButton>
                         <p className="text-xs text-muted-foreground">
-                          {runnerConfig.inheritsGlobalCodexConfig
-                            ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                            : "当前使用当前仓库保存的覆盖配置。"}
+                          updated: {formatDateTime(runnerConfig.updated_at)}
                         </p>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="repository-codex-config-file-content">
-                          配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
-                        </Label>
-                        <Textarea
-                          id="repository-codex-config-file-content"
-                          value={codexConfigFileContent}
-                          onChange={(event) => setCodexConfigFileContent(event.target.value)}
-                          rows={10}
-                          wrap="off"
-                          spellCheck={false}
-                          autoCapitalize="off"
-                          autoCorrect="off"
-                          autoComplete="off"
-                          className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                          style={configEditorStyle}
-                        />
-                      </div>
-                    </section>
+                    </form>
+                  )}
+                </CardContent>
+              </Card>
 
-                    <section className="space-y-4 rounded-md border p-4">
-                      <div className="space-y-1">
-                        <h2 className="text-sm font-semibold">Claude Code</h2>
-                        <p className="text-xs text-muted-foreground">
-                          {runnerConfig.inheritsGlobalClaudeCodeConfig
-                            ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                            : "当前使用当前仓库保存的覆盖配置。"}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="repository-claude-code-config-file-content">
-                          配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
-                        </Label>
-                        <Textarea
-                          id="repository-claude-code-config-file-content"
-                          value={claudeCodeConfigFileContent}
-                          onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
-                          rows={10}
-                          wrap="off"
-                          spellCheck={false}
-                          autoCapitalize="off"
-                          autoCorrect="off"
-                          autoComplete="off"
-                          className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                          style={configEditorStyle}
-                        />
-                      </div>
-                    </section>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <PendingButton
-                        type="submit"
-                        pending={runnerConfigAction === "save"}
-                        disabled={savingRunnerConfig && runnerConfigAction !== "save"}
-                        pendingText="Saving config..."
-                      >
-                        保存容器配置
-                      </PendingButton>
-                      <PendingButton
-                        type="button"
-                        variant="outline"
-                        pending={runnerConfigAction === "reset"}
-                        disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
-                        pendingText="Resetting..."
-                        onClick={() => {
-                          void handleResetRunnerConfig();
-                        }}
-                      >
-                        恢复全局默认
-                      </PendingButton>
-                      <p className="text-xs text-muted-foreground">
-                        updated: {formatDateTime(runnerConfig.updated_at)}
-                      </p>
-                    </div>
-                  </form>
-                )}
-              </CardContent>
-            </Card>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -965,6 +1092,147 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             <CardTitle className="text-base">运行日志</CardTitle>
           </CardHeader>
           <CardContent>
+            <section className="mb-6 space-y-4 rounded-md border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <h2 className="text-sm font-semibold">Agent sessions</h2>
+                  <p className="text-xs text-muted-foreground">
+                    最近的任务级 session，会映射到具体 run、来源对象和目标分支。
+                  </p>
+                </div>
+                <Badge variant="outline">{sessionSummary.total} sessions</Badge>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Visible sessions</p>
+                  <p className="text-2xl font-semibold">{sessionSummary.total}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Running</p>
+                  <p className="text-2xl font-semibold">{sessionSummary.running}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Succeeded</p>
+                  <p className="text-2xl font-semibold">{sessionSummary.success}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Failed</p>
+                  <p className="text-2xl font-semibold">{sessionSummary.failed}</p>
+                </div>
+              </div>
+
+              {agentSessions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No agent sessions yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {selectedAgentSession ? (
+                    <div className="rounded-md border bg-muted/20 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <ActionStatusBadge status={selectedAgentSession.status} />
+                            <Badge variant="outline">{selectedAgentSession.agent_type}</Badge>
+                            <Badge variant="outline">{selectedAgentSession.origin}</Badge>
+                            <Badge variant="outline">{sessionSourceLabel(selectedAgentSession)}</Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>session: {selectedAgentSession.id}</span>
+                            <span>branch: {selectedAgentSession.branch_ref ?? "-"}</span>
+                            <span>actor: {selectedAgentSession.created_by_username ?? "system"}</span>
+                            <span>updated: {formatDateTime(selectedAgentSession.updated_at)}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedAgentSession.linked_run_id ? (
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={`?runId=${selectedAgentSession.linked_run_id}`}>
+                                View run
+                              </Link>
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="outline" asChild>
+                            <Link to={`/repo/${owner}/${repo}/agent-sessions/${selectedAgentSession.id}`}>
+                              Session detail
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-3 rounded-md border bg-background/60 p-3">
+                        <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
+                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
+                          {selectedAgentSession.prompt || "(empty prompt)"}
+                        </pre>
+                      </div>
+                      {canManageActions ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {canCancelAgentSession(selectedAgentSession) ? (
+                            <PendingButton
+                              size="sm"
+                              variant="outline"
+                              pending={
+                                pendingSessionAction?.sessionId === selectedAgentSession.id &&
+                                pendingSessionAction.action === "cancel"
+                              }
+                              disabled={pendingSessionAction !== null}
+                              pendingText="Cancelling..."
+                              onClick={() => {
+                                void handleAgentSessionAction(selectedAgentSession);
+                              }}
+                            >
+                              Cancel
+                            </PendingButton>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <ul className="space-y-2">
+                    {visibleAgentSessions.map((session) => (
+                      <li
+                        id={`agent-session-${session.id}`}
+                        key={session.id}
+                        className={`rounded-md border bg-muted/20 p-3 ${
+                          selectedSessionId === session.id ? "border-[#fd8c73]" : ""
+                        }`}
+                      >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <ActionStatusBadge status={session.status} />
+                            <Badge variant="outline">{session.agent_type}</Badge>
+                            <Badge variant="outline">{session.origin}</Badge>
+                            <Badge variant="outline">{sessionSourceLabel(session)}</Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>session: {session.id}</span>
+                            <span>branch: {session.branch_ref ?? "-"}</span>
+                            <span>actor: {session.created_by_username ?? "system"}</span>
+                            <span>updated: {formatDateTime(session.updated_at)}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" asChild>
+                            <Link to={`/repo/${owner}/${repo}/agent-sessions/${session.id}`}>
+                              View session
+                            </Link>
+                          </Button>
+                          {session.linked_run_id ? (
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={`?runId=${session.linked_run_id}`}>
+                                View run
+                              </Link>
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
+
             <div className="mb-4 grid gap-3 md:grid-cols-4">
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Visible runs</p>

@@ -21,6 +21,8 @@ export type RepositoryDetailResponse = {
   openPullRequestCount: number;
   permissions: {
     canCreateIssueOrPullRequest: boolean;
+    canRunAgents: boolean;
+    canManageActions: boolean;
   };
   defaultBranch: string | null;
   selectedRef: string | null;
@@ -321,6 +323,18 @@ export type ActionWorkflowTrigger =
 
 export type ActionAgentType = "codex" | "claude_code";
 
+export type AgentSessionSourceType = "issue" | "pull_request" | "manual";
+
+export type AgentSessionOrigin =
+  | "workflow"
+  | "mention"
+  | "manual"
+  | "rerun"
+  | "dispatch"
+  | "issue_assign"
+  | "issue_resume"
+  | "pull_request_resume";
+
 export type ActionContainerInstanceType =
   | "lite"
   | "basic"
@@ -331,6 +345,7 @@ export type ActionContainerInstanceType =
 
 export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type ActionRunSourceType = "issue" | "pull_request";
+export type AgentSessionStatus = ActionRunStatus;
 
 export type ActionWorkflowRecord = {
   id: string;
@@ -439,6 +454,83 @@ export type RepositoryActionsConfig = {
   inheritsGlobalCodexConfig: boolean;
   inheritsGlobalClaudeCodeConfig: boolean;
   updated_at: number | null;
+};
+
+export type AgentSessionRecord = {
+  id: string;
+  repository_id: string;
+  source_type: AgentSessionSourceType;
+  source_number: number | null;
+  source_comment_id: string | null;
+  origin: AgentSessionOrigin;
+  status: AgentSessionStatus;
+  agent_type: ActionAgentType;
+  prompt: string;
+  branch_ref: string | null;
+  trigger_ref: string | null;
+  trigger_sha: string | null;
+  workflow_id: string | null;
+  workflow_name: string | null;
+  linked_run_id: string | null;
+  created_by: string | null;
+  created_by_username: string | null;
+  delegated_from_user_id: string | null;
+  delegated_from_username: string | null;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
+};
+
+export type AgentSessionSourceContext = {
+  type: AgentSessionSourceType;
+  number: number | null;
+  title: string | null;
+  url: string | null;
+  commentId: string | null;
+};
+
+export type AgentSessionDetail = {
+  session: AgentSessionRecord;
+  linkedRun: ActionRunRecord | null;
+  sourceContext: AgentSessionSourceContext;
+};
+
+export type AgentSessionTimelineEvent = {
+  id: string;
+  type:
+    | "session_created"
+    | "run_queued"
+    | "run_claimed"
+    | "session_started"
+    | "log"
+    | "session_completed"
+    | "session_cancelled";
+  title: string;
+  detail: string | null;
+  timestamp: number | null;
+  level: "info" | "success" | "warning" | "error";
+  stream: "system" | "stdout" | "stderr" | "error" | null;
+};
+
+export type AgentSessionLatestBySourceItem = {
+  sourceNumber: number;
+  session: AgentSessionRecord | null;
+};
+
+export type TriggerRepositoryAgentInput = {
+  agentType?: ActionAgentType;
+  prompt?: string;
+};
+
+export type TriggerRepositoryAgentResponse = {
+  run: ActionRunRecord;
+  session: AgentSessionRecord;
+};
+
+export type AgentSessionLifecycleResponse = {
+  session: AgentSessionRecord;
+  run: ActionRunRecord | null;
 };
 
 type ApiRequestInit = RequestInit & {
@@ -1052,6 +1144,132 @@ export async function dispatchActionWorkflow(
     }
   );
   return response.run;
+}
+
+export async function listRepositoryAgentSessions(
+  owner: string,
+  repo: string,
+  input?: { limit?: number; sourceType?: AgentSessionSourceType; sourceNumber?: number }
+): Promise<AgentSessionRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.limit) {
+    query.set("limit", String(input.limit));
+  }
+  if (input?.sourceType) {
+    query.set("sourceType", input.sourceType);
+  }
+  if (input?.sourceNumber) {
+    query.set("sourceNumber", String(input.sourceNumber));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await requestJson<{ sessions: AgentSessionRecord[] }>(
+    `/api/repos/${owner}/${repo}/agent-sessions${suffix}`
+  );
+  return response.sessions;
+}
+
+export async function listLatestAgentSessionsBySource(
+  owner: string,
+  repo: string,
+  input: { sourceType: Exclude<AgentSessionSourceType, "manual">; numbers: number[] }
+): Promise<AgentSessionLatestBySourceItem[]> {
+  const query = new URLSearchParams();
+  query.set("sourceType", input.sourceType);
+  query.set("numbers", input.numbers.join(","));
+  const response = await requestJson<{ items: AgentSessionLatestBySourceItem[] }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/latest?${query.toString()}`
+  );
+  return response.items;
+}
+
+export async function getRepositoryAgentSession(
+  owner: string,
+  repo: string,
+  sessionId: string
+): Promise<AgentSessionRecord> {
+  const response = await requestJson<{ session: AgentSessionRecord }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`
+  );
+  return response.session;
+}
+
+export async function getRepositoryAgentSessionDetail(
+  owner: string,
+  repo: string,
+  sessionId: string
+): Promise<AgentSessionDetail> {
+  return requestJson<AgentSessionDetail>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`
+  );
+}
+
+export async function getRepositoryAgentSessionTimeline(
+  owner: string,
+  repo: string,
+  sessionId: string
+): Promise<AgentSessionTimelineEvent[]> {
+  const response = await requestJson<{ events: AgentSessionTimelineEvent[] }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/timeline`
+  );
+  return response.events;
+}
+
+export async function cancelRepositoryAgentSession(
+  owner: string,
+  repo: string,
+  sessionId: string
+): Promise<AgentSessionLifecycleResponse> {
+  return requestJson<AgentSessionLifecycleResponse>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/cancel`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function assignIssueAgent(
+  owner: string,
+  repo: string,
+  number: number,
+  input?: TriggerRepositoryAgentInput
+): Promise<TriggerRepositoryAgentResponse> {
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/issues/${number}/assign-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
+  );
+}
+
+export async function resumeIssueAgent(
+  owner: string,
+  repo: string,
+  number: number,
+  input?: TriggerRepositoryAgentInput
+): Promise<TriggerRepositoryAgentResponse> {
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/issues/${number}/resume-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
+  );
+}
+
+export async function resumePullRequestAgent(
+  owner: string,
+  repo: string,
+  number: number,
+  input?: TriggerRepositoryAgentInput
+): Promise<TriggerRepositoryAgentResponse> {
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/resume-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
+  );
 }
 
 export async function listRepositoryParticipants(

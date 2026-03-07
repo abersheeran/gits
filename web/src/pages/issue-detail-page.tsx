@@ -8,10 +8,14 @@ import { RepositoryMetadataFields } from "@/components/repository/repository-met
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   addReaction,
+  assignIssueAgent,
+  listLatestAgentSessionsBySource,
   listLatestActionRunsByCommentIds,
   listLatestActionRunsBySource,
   createIssueComment,
@@ -23,8 +27,11 @@ import {
   listRepositoryParticipants,
   listIssueComments,
   removeReaction,
+  resumeIssueAgent,
   updateIssue,
+  type ActionAgentType,
   type ActionRunRecord,
+  type AgentSessionRecord,
   type AuthUser,
   type IssueCommentRecord,
   type IssueRecord,
@@ -39,6 +46,12 @@ import { formatDateTime, formatRelativeTime } from "@/lib/format";
 type IssueDetailPageProps = {
   user: AuthUser | null;
 };
+
+const FALLBACK_AGENT_TYPES: ActionAgentType[] = ["codex", "claude_code"];
+
+function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
+  return session?.status === "queued" || session?.status === "running";
+}
 
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
@@ -56,6 +69,10 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
+  const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
+  const [agentInstruction, setAgentInstruction] = useState("");
+  const [agentSubmitAction, setAgentSubmitAction] = useState<"assign" | "resume" | null>(null);
   const [latestRunByCommentId, setLatestRunByCommentId] = useState<Record<string, ActionRunRecord>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -75,6 +92,17 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       numbers: [number]
     });
     setLatestActionRun(latestRunItems[0]?.run ?? null);
+  }
+
+  async function refreshLatestAgentSessionStatus(): Promise<void> {
+    if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
+      return;
+    }
+    const latestSessionItems = await listLatestAgentSessionsBySource(owner, repo, {
+      sourceType: "issue",
+      numbers: [number]
+    });
+    setLatestAgentSession(latestSessionItems[0]?.session ?? null);
   }
 
   async function refreshCommentRunStatuses(
@@ -113,6 +141,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           nextIssue,
           nextComments,
           latestRunItems,
+          latestSessionItems,
           nextLabels,
           nextMilestones,
           nextParticipants
@@ -121,6 +150,10 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           getIssue(owner, repo, number),
           listIssueComments(owner, repo, number),
           listLatestActionRunsBySource(owner, repo, {
+            sourceType: "issue",
+            numbers: [number]
+          }),
+          listLatestAgentSessionsBySource(owner, repo, {
             sourceType: "issue",
             numbers: [number]
           }),
@@ -152,6 +185,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setAvailableMilestones(nextMilestones);
         setParticipants(nextParticipants);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
+        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
         setLatestRunByCommentId(nextRunByCommentId);
       } catch (loadError) {
         if (!canceled) {
@@ -181,6 +215,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const hasPendingRun =
     latestActionRun !== null &&
     (latestActionRun.status === "queued" || latestActionRun.status === "running");
+  const hasPendingAgentSession = isPendingAgentSession(latestAgentSession);
   const hasPendingCommentRun = comments.some((comment) => {
     const run = latestRunByCommentId[comment.id];
     return run ? run.status === "queued" || run.status === "running" : false;
@@ -188,7 +223,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
   useEffect(() => {
     if (
-      (!hasPendingRun && !hasPendingCommentRun) ||
+      (!hasPendingRun && !hasPendingAgentSession && !hasPendingCommentRun) ||
       !owner ||
       !repo ||
       !Number.isInteger(number) ||
@@ -198,7 +233,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     }
     const timer = window.setInterval(async () => {
       try {
-        await Promise.all([refreshLatestRunStatus(), refreshCommentRunStatuses()]);
+        await Promise.all([
+          refreshLatestRunStatus(),
+          refreshLatestAgentSessionStatus(),
+          refreshCommentRunStatuses()
+        ]);
       } catch {
         // Ignore transient polling errors.
       }
@@ -206,7 +245,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [comments, hasPendingCommentRun, hasPendingRun, number, owner, repo]);
+  }, [comments, hasPendingAgentSession, hasPendingCommentRun, hasPendingRun, number, owner, repo]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (
@@ -238,6 +277,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canComment = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReact = Boolean(user);
+  const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
+  const allowedAgentTypes = FALLBACK_AGENT_TYPES;
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -368,6 +409,34 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       setActionError(formatApiError(error));
     } finally {
       setReactionPendingKey(null);
+    }
+  }
+
+  async function triggerAgentSession(intent: "assign" | "resume") {
+    if (!canRunAgents || !issue || issue.state !== "open" || agentSubmitAction) {
+      return;
+    }
+
+    setAgentSubmitAction(intent);
+    setActionError(null);
+    try {
+      const response =
+        intent === "assign"
+          ? await assignIssueAgent(owner, repo, number, {
+              agentType: selectedAgentType,
+              ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
+            })
+          : await resumeIssueAgent(owner, repo, number, {
+              agentType: selectedAgentType,
+              ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
+            });
+      setLatestAgentSession(response.session);
+      setLatestActionRun(response.run);
+      setAgentInstruction("");
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setAgentSubmitAction(null);
     }
   }
 
@@ -511,6 +580,115 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         </div>
 
         <aside className="space-y-4">
+          <section className="space-y-4 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Agent session</h2>
+              <p className="text-sm text-muted-foreground">
+                将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。
+              </p>
+            </div>
+
+            {latestAgentSession ? (
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ActionStatusBadge status={latestAgentSession.status} />
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
+                    {latestAgentSession.agent_type}
+                  </span>
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
+                    {latestAgentSession.origin}
+                  </span>
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p>Session: {latestAgentSession.id}</p>
+                  <p>Branch: {latestAgentSession.branch_ref ?? "-"}</p>
+                  <p>Triggered by: {latestAgentSession.created_by_username ?? "system"}</p>
+                  <p>Updated: {formatDateTime(latestAgentSession.updated_at)}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/repo/${owner}/${repo}/agent-sessions/${latestAgentSession.id}`}>
+                      查看 session
+                    </Link>
+                  </Button>
+                  {latestAgentSession.linked_run_id ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        to={`/repo/${owner}/${repo}/actions?runId=${latestAgentSession.linked_run_id}`}
+                      >
+                        查看对应 run
+                      </Link>
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前 Issue 还没有 Agent session。</p>
+            )}
+
+            {canRunAgents ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="issue-agent-type">Agent</Label>
+                  <select
+                    id="issue-agent-type"
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={selectedAgentType}
+                    onChange={(event) =>
+                      setSelectedAgentType(event.target.value as ActionAgentType)
+                    }
+                  >
+                    {allowedAgentTypes.map((agentType) => (
+                      <option key={agentType} value={agentType}>
+                        {agentType}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="issue-agent-instruction">Extra instruction</Label>
+                  <Textarea
+                    id="issue-agent-instruction"
+                    value={agentInstruction}
+                    onChange={(event) => setAgentInstruction(event.target.value)}
+                    rows={6}
+                    placeholder="Optional guidance for the next session"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <PendingButton
+                    pending={agentSubmitAction === "assign"}
+                    disabled={agentSubmitAction !== null || issue.state !== "open"}
+                    pendingText="Assigning agent..."
+                    onClick={() => {
+                      void triggerAgentSession("assign");
+                    }}
+                  >
+                    分配 Agent
+                  </PendingButton>
+                  <PendingButton
+                    variant="outline"
+                    pending={agentSubmitAction === "resume"}
+                    disabled={agentSubmitAction !== null || issue.state !== "open"}
+                    pendingText="Resuming agent..."
+                    onClick={() => {
+                      void triggerAgentSession("resume");
+                    }}
+                  >
+                    继续 Agent
+                  </PendingButton>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  运行日志仍会出现在 Actions 页面；Issue 这里保留的是面向任务的 session 视图。
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                仅仓库所有者或协作者可以为当前 Issue 运行 Agent。
+              </p>
+            )}
+          </section>
+
           <section className="rounded-md border p-4">
             <RepositoryMetadataFields
               canEdit={canUpdate}

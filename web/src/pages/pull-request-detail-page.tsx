@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   addReaction,
   compareRepositoryRefs,
+  listLatestAgentSessionsBySource,
   listLatestActionRunsBySource,
   createPullRequestReview,
   formatApiError,
@@ -26,8 +28,11 @@ import {
   listRepositoryParticipants,
   listPullRequestReviews,
   removeReaction,
+  resumePullRequestAgent,
   updatePullRequest,
+  type ActionAgentType,
   type ActionRunRecord,
+  type AgentSessionRecord,
   type AuthUser,
   type PullRequestReviewDecision,
   type PullRequestReviewRecord,
@@ -45,6 +50,8 @@ import { formatDateTime, formatRelativeTime } from "@/lib/format";
 type PullRequestDetailPageProps = {
   user: AuthUser | null;
 };
+
+const FALLBACK_AGENT_TYPES: ActionAgentType[] = ["codex", "claude_code"];
 
 function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
@@ -87,6 +94,10 @@ function mergeabilityLabel(mergeable: RepositoryCompareResponse["mergeable"]): s
   return "Mergeability unknown";
 }
 
+function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
+  return session?.status === "queued" || session?.status === "running";
+}
+
 export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
   const owner = params.owner ?? "";
@@ -105,6 +116,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [draft, setDraft] = useState(false);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
+  const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
+  const [agentInstruction, setAgentInstruction] = useState("");
+  const [agentSubmitting, setAgentSubmitting] = useState(false);
   const [closingIssueNumbers, setClosingIssueNumbers] = useState<number[]>([]);
   const [comparison, setComparison] = useState<RepositoryCompareResponse | null>(null);
   const [reviewSummary, setReviewSummary] = useState<PullRequestReviewSummary>({
@@ -150,10 +165,16 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           baseRef: nextPullRequestDetail.pullRequest.base_ref,
           headRef: nextPullRequestDetail.pullRequest.head_ref
         }).catch(() => null);
-        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
-          sourceType: "pull_request",
-          numbers: [number]
-        });
+        const [latestRunItems, latestSessionItems] = await Promise.all([
+          listLatestActionRunsBySource(owner, repo, {
+            sourceType: "pull_request",
+            numbers: [number]
+          }),
+          listLatestAgentSessionsBySource(owner, repo, {
+            sourceType: "pull_request",
+            numbers: [number]
+          })
+        ]);
         if (canceled) {
           return;
         }
@@ -167,6 +188,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setParticipants(nextParticipants);
         setComparison(nextComparison);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
+        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -197,18 +219,32 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const hasPendingRun =
     latestActionRun !== null &&
     (latestActionRun.status === "queued" || latestActionRun.status === "running");
+  const hasPendingAgentSession = isPendingAgentSession(latestAgentSession);
 
   useEffect(() => {
-    if (!hasPendingRun || !owner || !repo || !Number.isInteger(number) || number <= 0) {
+    if (
+      (!hasPendingRun && !hasPendingAgentSession) ||
+      !owner ||
+      !repo ||
+      !Number.isInteger(number) ||
+      number <= 0
+    ) {
       return;
     }
     const timer = window.setInterval(async () => {
       try {
-        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
-          sourceType: "pull_request",
-          numbers: [number]
-        });
+        const [latestRunItems, latestSessionItems] = await Promise.all([
+          listLatestActionRunsBySource(owner, repo, {
+            sourceType: "pull_request",
+            numbers: [number]
+          }),
+          listLatestAgentSessionsBySource(owner, repo, {
+            sourceType: "pull_request",
+            numbers: [number]
+          })
+        ]);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
+        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
       } catch {
         // Ignore transient polling errors.
       }
@@ -216,7 +252,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRun, number, owner, repo]);
+  }, [hasPendingAgentSession, hasPendingRun, number, owner, repo]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (
@@ -248,6 +284,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReview = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReact = Boolean(user);
+  const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
+  const allowedAgentTypes = FALLBACK_AGENT_TYPES;
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -384,6 +422,28 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setError(formatApiError(error));
     } finally {
       setReactionPendingKey(null);
+    }
+  }
+
+  async function handleResumeAgent() {
+    if (!canRunAgents || !pullRequest || pullRequest.state !== "open" || agentSubmitting) {
+      return;
+    }
+
+    setAgentSubmitting(true);
+    setError(null);
+    try {
+      const response = await resumePullRequestAgent(owner, repo, number, {
+        agentType: selectedAgentType,
+        ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
+      });
+      setLatestAgentSession(response.session);
+      setLatestActionRun(response.run);
+      setAgentInstruction("");
+    } catch (resumeError) {
+      setError(formatApiError(resumeError));
+    } finally {
+      setAgentSubmitting(false);
     }
   }
 
@@ -598,6 +658,102 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         </div>
 
         <aside className="space-y-4">
+          <section className="space-y-4 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Agent session</h2>
+              <p className="text-sm text-muted-foreground">
+                从当前 PR、Review 和 diff 上下文继续一个 Agent session。
+              </p>
+            </div>
+
+            {latestAgentSession ? (
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ActionStatusBadge status={latestAgentSession.status} />
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
+                    {latestAgentSession.agent_type}
+                  </span>
+                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
+                    {latestAgentSession.origin}
+                  </span>
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p>Session: {latestAgentSession.id}</p>
+                  <p>Branch: {latestAgentSession.branch_ref ?? "-"}</p>
+                  <p>Triggered by: {latestAgentSession.created_by_username ?? "system"}</p>
+                  <p>Updated: {formatDateTime(latestAgentSession.updated_at)}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/repo/${owner}/${repo}/agent-sessions/${latestAgentSession.id}`}>
+                      查看 session
+                    </Link>
+                  </Button>
+                  {latestAgentSession.linked_run_id ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        to={`/repo/${owner}/${repo}/actions?runId=${latestAgentSession.linked_run_id}`}
+                      >
+                        查看对应 run
+                      </Link>
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前 PR 还没有 Agent session。</p>
+            )}
+
+            {canRunAgents ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="pull-request-agent-type">Agent</Label>
+                  <select
+                    id="pull-request-agent-type"
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={selectedAgentType}
+                    onChange={(event) =>
+                      setSelectedAgentType(event.target.value as ActionAgentType)
+                    }
+                  >
+                    {allowedAgentTypes.map((agentType) => (
+                      <option key={agentType} value={agentType}>
+                        {agentType}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pull-request-agent-instruction">Extra instruction</Label>
+                  <Textarea
+                    id="pull-request-agent-instruction"
+                    value={agentInstruction}
+                    onChange={(event) => setAgentInstruction(event.target.value)}
+                    rows={6}
+                    placeholder="Optional guidance for the next iteration"
+                  />
+                </div>
+                <PendingButton
+                  pending={agentSubmitting}
+                  disabled={agentSubmitting || pullRequest.state !== "open"}
+                  pendingText="Resuming agent..."
+                  onClick={() => {
+                    void handleResumeAgent();
+                  }}
+                >
+                  继续 Agent
+                </PendingButton>
+                <p className="text-xs text-muted-foreground">
+                  新 session 会继承当前 PR 标题、描述、Review 历史和 head 分支上下文。
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                仅仓库所有者或协作者可以从当前 PR 继续 Agent。
+              </p>
+            )}
+          </section>
+
           <section className="rounded-md border p-4">
             <RepositoryMetadataFields
               canEdit={canUpdate}

@@ -19,6 +19,7 @@ type ExecuteRequest = {
   triggerSourceType?: ActionRunSourceType | null;
   enableIssueReplyToken?: boolean;
   enablePrCreateToken?: boolean;
+  allowGitPush?: boolean;
   gitCommitName?: string;
   gitCommitEmail?: string;
   env?: Record<string, string>;
@@ -48,6 +49,9 @@ type ActiveExecutionTokens = {
 
 type ContainerStopParams = Parameters<Container<AppBindings>["onStop"]>[0];
 
+const ISSUE_REPLY_TOKEN_UNAVAILABLE = "[GITS_ISSUE_REPLY_TOKEN_UNAVAILABLE]";
+const PR_CREATE_TOKEN_UNAVAILABLE = "[GITS_PR_CREATE_TOKEN_UNAVAILABLE]";
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -74,10 +78,8 @@ function buildPendingExecutionAuth(payload: ExecuteRequest): PendingExecutionAut
     runNumber: payload.runNumber,
     triggeredByUserId,
     triggeredByUsername,
-    needsIssueReplyToken:
-      payload.enableIssueReplyToken === true || payload.triggerSourceType === "issue",
-    needsPrCreateToken:
-      payload.enablePrCreateToken === true || payload.triggerSourceType === "issue"
+    needsIssueReplyToken: payload.enableIssueReplyToken ?? payload.triggerSourceType === "issue",
+    needsPrCreateToken: payload.enablePrCreateToken ?? payload.triggerSourceType === "issue"
   };
 }
 
@@ -131,12 +133,14 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
     let runtimePrompt = prompt;
     const issueReplyToken = this.activeExecutionTokens?.issueReplyToken?.token;
     const prCreateToken = this.activeExecutionTokens?.prCreateToken?.token;
-    if (issueReplyToken) {
-      runtimePrompt = runtimePrompt.replaceAll(ISSUE_REPLY_TOKEN_PLACEHOLDER, issueReplyToken);
-    }
-    if (prCreateToken) {
-      runtimePrompt = runtimePrompt.replaceAll(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER, prCreateToken);
-    }
+    runtimePrompt = runtimePrompt.replaceAll(
+      ISSUE_REPLY_TOKEN_PLACEHOLDER,
+      issueReplyToken ?? ISSUE_REPLY_TOKEN_UNAVAILABLE
+    );
+    runtimePrompt = runtimePrompt.replaceAll(
+      ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
+      prCreateToken ?? PR_CREATE_TOKEN_UNAVAILABLE
+    );
     return runtimePrompt;
   }
 
@@ -404,6 +408,7 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
           sha: payload.sha,
           gitUsername: this.activeExecutionTokens?.cloneToken?.username,
           gitToken: this.activeExecutionTokens?.cloneToken?.token,
+          allowGitPush: payload.allowGitPush,
           gitCommitName: payload.gitCommitName,
           gitCommitEmail: payload.gitCommitEmail,
           env: this.buildRuntimeEnv(payload.env),

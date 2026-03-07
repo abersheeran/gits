@@ -9,6 +9,7 @@ import type {
   ActionWorkflowRecord,
   ActionWorkflowTrigger
 } from "../types";
+import { AgentSessionService } from "./agent-session-service";
 
 type GlobalSettingsKey =
   | "actions.codex.config_file_content"
@@ -35,6 +36,10 @@ const GLOBAL_SETTING_KEYS: readonly GlobalSettingsKey[] = [
 
 export class ActionsService {
   constructor(private readonly db: D1Database) {}
+
+  private get agentSessionService(): AgentSessionService {
+    return new AgentSessionService(this.db);
+  }
 
   private normalizeGlobalConfig(rows: GlobalSettingsRow[]): ActionsGlobalConfig {
     const values = new Map<string, string>();
@@ -656,7 +661,18 @@ export class ActionsService {
         };
       }).meta?.changes ?? 0;
 
-    return changes > 0 ? now : null;
+    if (changes > 0) {
+      await this.agentSessionService.syncSessionForRun({
+        repositoryId,
+        runId,
+        status: "running",
+        startedAt: now,
+        updatedAt: now
+      });
+      return now;
+    }
+
+    return null;
   }
 
   async completeRun(
@@ -677,6 +693,13 @@ export class ActionsService {
       )
       .bind(input.status, input.logs, input.exitCode ?? null, now, now, repositoryId, runId)
       .run();
+    await this.agentSessionService.syncSessionForRun({
+      repositoryId,
+      runId,
+      status: input.status,
+      completedAt: now,
+      updatedAt: now
+    });
   }
 
   async updateRunningRunLogs(repositoryId: string, runId: string, logs: string): Promise<boolean> {
@@ -726,8 +749,55 @@ export class ActionsService {
         };
       }).meta?.changes ?? 0;
 
+    if (changes > 0) {
+      await this.agentSessionService.syncSessionForRun({
+        repositoryId,
+        runId,
+        status: "failed",
+        completedAt,
+        updatedAt: completedAt
+      });
+    }
+
     return {
       updated: changes > 0,
+      completedAt
+    };
+  }
+
+  async cancelQueuedRun(
+    repositoryId: string,
+    runId: string
+  ): Promise<{ cancelled: boolean; completedAt: number }> {
+    const completedAt = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE action_runs
+         SET status = 'cancelled', completed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued'`
+      )
+      .bind(completedAt, completedAt, repositoryId, runId)
+      .run();
+
+    const changes =
+      (result as unknown as {
+        meta?: {
+          changes?: number;
+        };
+      }).meta?.changes ?? 0;
+
+    if (changes > 0) {
+      await this.agentSessionService.syncSessionForRun({
+        repositoryId,
+        runId,
+        status: "cancelled",
+        completedAt,
+        updatedAt: completedAt
+      });
+    }
+
+    return {
+      cancelled: changes > 0,
       completedAt
     };
   }

@@ -1,4 +1,5 @@
 import type { AuthUser, RepositoryRecord } from "../types";
+import { AgentSessionService } from "./agent-session-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
@@ -504,15 +505,27 @@ export async function executeActionRun(input: {
 
   try {
     const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
+    const agentSessionService = new AgentSessionService(input.env.DB);
+    let agentSession = null;
+    try {
+      agentSession = await agentSessionService.findSessionByRunId(input.repository.id, input.run.id);
+    } catch {
+      // Session metadata enriches the runtime but should not block execution.
+    }
     const repositoryOrigin = normalizeCloneOrigin({
       requestOrigin: input.requestOrigin
     });
+    const canIssueComment = true;
+    const canCreatePr = true;
+    const canGitPush = true;
     const needsIssueReplyToken =
       input.triggeredByUser !== undefined &&
+      canIssueComment &&
       (input.run.trigger_source_type === "issue" ||
         input.run.prompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER));
     const needsPrCreateToken =
       input.triggeredByUser !== undefined &&
+      canCreatePr &&
       (input.run.trigger_source_type === "issue" ||
         input.run.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER));
     const envVars: Record<string, string> = {
@@ -524,6 +537,14 @@ export async function executeActionRun(input: {
       GITS_REPOSITORY_NAME: input.repository.name,
       ...(input.run.trigger_source_type === "issue" && input.run.trigger_source_number !== null
         ? { GITS_TRIGGER_ISSUE_NUMBER: String(input.run.trigger_source_number) }
+        : {}),
+      ...(agentSession
+        ? {
+            GITS_AGENT_SESSION_ID: agentSession.id,
+            GITS_AGENT_SESSION_ORIGIN: agentSession.origin,
+            GITS_AGENT_SESSION_STATUS: agentSession.status,
+            GITS_AGENT_SESSION_BRANCH_REF: agentSession.branch_ref ?? ""
+          }
         : {})
     };
 
@@ -553,6 +574,7 @@ export async function executeActionRun(input: {
         triggerSourceType: input.run.trigger_source_type,
         enableIssueReplyToken: needsIssueReplyToken,
         enablePrCreateToken: needsPrCreateToken,
+        allowGitPush: canGitPush,
         gitCommitName: ACTIONS_SYSTEM_USERNAME,
         gitCommitEmail: ACTIONS_SYSTEM_EMAIL,
         env: envVars,

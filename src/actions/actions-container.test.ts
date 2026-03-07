@@ -238,4 +238,73 @@ describe("ActionsContainer", () => {
     expect(revokeAccessToken).toHaveBeenCalledWith("user-1", "tok-issue");
     expect(revokeAccessToken).toHaveBeenCalledWith("user-1", "tok-pr");
   });
+
+  it("supports explicitly disabling runtime tokens and push access", async () => {
+    const createAccessToken = vi
+      .spyOn(AuthService.prototype, "createAccessToken")
+      .mockResolvedValue({
+        tokenId: "tok-run",
+        token: "gts_11111111111111111111111111111111"
+      });
+    const revokeAccessToken = vi
+      .spyOn(AuthService.prototype, "revokeAccessToken")
+      .mockResolvedValue(true);
+
+    const container = createTestContainer(async (_url, init) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        prompt: string;
+        gitToken?: string;
+        allowGitPush?: boolean;
+        env?: Record<string, string>;
+      };
+
+      expect(payload.gitToken).toBe("gts_11111111111111111111111111111111");
+      expect(payload.allowGitPush).toBe(false);
+      expect(payload.prompt).toContain("[GITS_ISSUE_REPLY_TOKEN_UNAVAILABLE]");
+      expect(payload.prompt).toContain("[GITS_PR_CREATE_TOKEN_UNAVAILABLE]");
+      expect(payload.env?.GITS_ISSUE_REPLY_TOKEN).toBeUndefined();
+      expect(payload.env?.GITS_PR_CREATE_TOKEN).toBeUndefined();
+
+      return new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    });
+
+    const executeResponse = await container.fetch(
+      new Request("https://actions-container.internal/execute", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          agentType: "codex",
+          prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
+          runNumber: 8,
+          triggeredByUserId: "user-1",
+          triggeredByUsername: "alice",
+          triggerSourceType: "issue",
+          enableIssueReplyToken: false,
+          enablePrCreateToken: false,
+          allowGitPush: false,
+          env: {
+            BASE_ENV: "1"
+          }
+        })
+      })
+    );
+
+    expect(executeResponse.status).toBe(200);
+    expect(createAccessToken).toHaveBeenCalledTimes(1);
+
+    const stopResponse = await container.fetch(
+      new Request("https://actions-container.internal/stop", {
+        method: "POST"
+      })
+    );
+    expect(stopResponse.status).toBe(200);
+    expect(revokeAccessToken).toHaveBeenCalledTimes(1);
+    expect(revokeAccessToken).toHaveBeenCalledWith("user-1", "tok-run");
+  });
 });

@@ -40,6 +40,68 @@ function buildRepositoryRow(overrides?: Partial<Record<string, unknown>>) {
   };
 }
 
+function buildActionRunRow(overrides?: Partial<Record<string, unknown>>) {
+  const now = Date.now();
+  return {
+    id: "run-1",
+    repository_id: "repo-1",
+    run_number: 1,
+    workflow_id: "workflow-1",
+    workflow_name: "CI",
+    trigger_event: "pull_request_created",
+    trigger_ref: "refs/heads/feature",
+    trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    trigger_source_type: "pull_request",
+    trigger_source_number: 1,
+    trigger_source_comment_id: null,
+    triggered_by: "user-2",
+    triggered_by_username: "bob",
+    status: "queued",
+    agent_type: "codex",
+    instance_type: "lite",
+    prompt: "请执行测试并修复失败。",
+    logs: "",
+    exit_code: null,
+    container_instance: null,
+    created_at: now,
+    claimed_at: null,
+    started_at: null,
+    completed_at: null,
+    updated_at: now,
+    ...(overrides ?? {})
+  };
+}
+
+function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
+  const now = Date.now();
+  return {
+    id: "session-1",
+    repository_id: "repo-1",
+    source_type: "pull_request",
+    source_number: 1,
+    source_comment_id: null,
+    origin: "rerun",
+    status: "queued",
+    agent_type: "codex",
+    prompt: "请执行测试并修复失败。",
+    branch_ref: "refs/heads/agent/session-1",
+    trigger_ref: "refs/heads/feature",
+    trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    workflow_id: "workflow-1",
+    workflow_name: "CI",
+    linked_run_id: "run-2",
+    created_by: "user-2",
+    created_by_username: "bob",
+    delegated_from_user_id: "user-2",
+    delegated_from_username: "bob",
+    created_at: now,
+    started_at: null,
+    completed_at: null,
+    updated_at: now,
+    ...(overrides ?? {})
+  };
+}
+
 describe("API issues and pull requests", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -1983,6 +2045,343 @@ describe("API issues and pull requests", () => {
     expect(body.run.run_number).toBe(2);
     expect(body.run.status).toBe("queued");
     expect(enqueueRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block reruns for delegated agent sessions", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("run-2")
+      .mockReturnValueOnce("session-pending");
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    const sourceRun = buildActionRunRow({
+      id: "run-1",
+      status: "failed",
+      logs: "failed logs",
+      exit_code: 1,
+      created_at: now - 10_000,
+      started_at: now - 9_000,
+      completed_at: now - 8_000,
+      updated_at: now - 8_000
+    });
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: (params) => {
+          const runId = String(params[1]);
+          if (runId === "run-1") {
+            return sourceRun;
+          }
+          return buildActionRunRow({
+            id: runId,
+            run_number: 2,
+            created_at: now,
+            updated_at: now
+          });
+        }
+      },
+      {
+        when: "RETURNING action_run_seq AS run_number",
+        first: () => ({ run_number: 2 })
+      },
+      {
+        when: "INSERT INTO action_runs",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
+        first: () => null
+      },
+      {
+        when: "INSERT INTO agent_sessions",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-pending",
+            linked_run_id: "run-2",
+            created_at: now,
+            updated_at: now
+          })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as {
+      run: { id: string; status: string };
+      session: { id: string; status: string };
+    };
+    expect(body.run.id).toBe("run-2");
+    expect(body.run.status).toBe("queued");
+    expect(body.session.id).toBe("session-pending");
+    expect(body.session.status).toBe("queued");
+    expect(enqueueRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns agent session detail with linked run and source context", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-detail",
+            source_type: "issue",
+            source_number: 42,
+            origin: "issue_resume",
+            linked_run_id: "run-detail",
+            created_at: now - 20_000,
+            updated_at: now - 10_000
+          })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-detail",
+            workflow_name: "Issue Bot",
+            trigger_event: "issue_created",
+            trigger_source_type: "issue",
+            trigger_source_number: 42,
+            status: "running",
+            created_at: now - 20_000,
+            updated_at: now - 10_000
+          })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-42",
+          repository_id: "repo-1",
+          number: 42,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need login fix",
+          body: "body",
+          state: "open",
+          created_at: now - 40_000,
+          updated_at: now - 30_000,
+          closed_at: null
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/session-detail"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      session: { id: string; source_type: string; source_number: number };
+      linkedRun: { id: string; workflow_name: string; status: string } | null;
+      sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
+    };
+    expect(body.session.id).toBe("session-detail");
+    expect(body.session.source_type).toBe("issue");
+    expect(body.session.source_number).toBe(42);
+    expect(body.linkedRun?.id).toBe("run-detail");
+    expect(body.linkedRun?.workflow_name).toBe("Issue Bot");
+    expect(body.linkedRun?.status).toBe("running");
+    expect(body.sourceContext.type).toBe("issue");
+    expect(body.sourceContext.number).toBe(42);
+    expect(body.sourceContext.title).toBe("Need login fix");
+    expect(body.sourceContext.url).toBe("/repo/alice/demo/issues/42");
+  });
+
+  it("builds agent session timeline events from linked run logs", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-timeline",
+            source_type: "issue",
+            source_number: 7,
+            origin: "issue_assign",
+            status: "failed",
+            linked_run_id: "run-timeline",
+            created_at: now - 12_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
+          })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-timeline",
+            run_number: 9,
+            workflow_name: "Issue Bot",
+            trigger_event: "issue_created",
+            trigger_source_type: "issue",
+            trigger_source_number: 7,
+            status: "failed",
+            logs: `run_id: run-timeline
+run_number: 9
+agent_type: codex
+prompt: debug
+
+claimed_at: ${new Date(now - 11_000).toISOString()}
+started_at: ${new Date(now - 10_000).toISOString()}
+
+[stdout]
+Analyzing repository
+Applying fix
+
+[stderr]
+Tests still failing`,
+            exit_code: 1,
+            created_at: now - 12_000,
+            claimed_at: now - 11_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
+          })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/session-timeline/timeline"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      events: Array<{
+        type: string;
+        title: string;
+        detail: string | null;
+        stream: string | null;
+      }>;
+    };
+    expect(body.events.some((event) => event.type === "session_created")).toBe(true);
+    expect(body.events.some((event) => event.type === "run_queued")).toBe(true);
+    expect(body.events.some((event) => event.type === "run_claimed")).toBe(true);
+    expect(body.events.some((event) => event.type === "session_started")).toBe(true);
+    expect(
+      body.events.some(
+        (event) => event.type === "log" && event.stream === "stdout" && event.detail === "Analyzing repository"
+      )
+    ).toBe(true);
+    expect(
+      body.events.some(
+        (event) => event.type === "log" && event.stream === "stderr" && event.detail === "Tests still failing"
+      )
+    ).toBe(true);
+    expect(
+      body.events.some((event) => event.type === "session_completed" && event.title === "Session failed")
+    ).toBe(true);
+  });
+
+  it("cancels a queued agent session before it starts running", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    let sessionReadCount = 0;
+    let runReadCount = 0;
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () => {
+          sessionReadCount += 1;
+          return buildAgentSessionRow({
+            id: "session-cancel",
+            linked_run_id: "run-2",
+            status: sessionReadCount >= 2 ? "cancelled" : "queued",
+            completed_at: sessionReadCount >= 2 ? Date.now() : null
+          });
+        }
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () => {
+          runReadCount += 1;
+          return buildActionRunRow({
+            id: "run-2",
+            run_number: 2,
+            status: runReadCount >= 2 ? "cancelled" : "queued",
+            completed_at: runReadCount >= 2 ? Date.now() : null
+          });
+        }
+      },
+      {
+        when: "SET status = 'cancelled', completed_at = ?, updated_at = ?",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/session-cancel/cancel", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      session: { status: string };
+      run: { status: string } | null;
+    };
+    expect(body.session.status).toBe("cancelled");
+    expect(body.run?.status).toBe("cancelled");
   });
 
   it("allows collaborators to create actions workflows", async () => {

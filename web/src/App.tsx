@@ -5,6 +5,7 @@ import { PageLoadingState } from "@/components/ui/loading-state";
 import { getCurrentUser, type AuthUser } from "@/lib/api";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { HomePage } from "@/pages/home-page";
+import { AgentSessionDetailPage } from "@/pages/agent-session-detail-page";
 import { IssueDetailPage } from "@/pages/issue-detail-page";
 import { LoginPage } from "@/pages/login-page";
 import { ActionsSettingsPage } from "@/pages/actions-settings-page";
@@ -59,6 +60,15 @@ function titleForPath(pathname: string): string {
   if (pullRequestDetail) {
     const repository = formatRepositoryName(pullRequestDetail.params.owner, pullRequestDetail.params.repo);
     return `Pull Request #${pullRequestDetail.params.number} · ${repository} · ${APP_NAME}`;
+  }
+
+  const agentSessionDetail = matchPath("/repo/:owner/:repo/agent-sessions/:sessionId", pathname);
+  if (agentSessionDetail) {
+    const repository = formatRepositoryName(
+      agentSessionDetail.params.owner,
+      agentSessionDetail.params.repo
+    );
+    return `Agent Session · ${repository} · ${APP_NAME}`;
   }
 
   const pulls = matchPath("/repo/:owner/:repo/pulls", pathname);
@@ -178,6 +188,10 @@ function App() {
         <Route
           path="/repo/:owner/:repo/pulls/:number"
           element={<PullRequestDetailPage user={user} />}
+        />
+        <Route
+          path="/repo/:owner/:repo/agent-sessions/:sessionId"
+          element={<AgentSessionDetailPage user={user} />}
         />
         <Route path="/repo/:owner/:repo/actions" element={<RepositoryActionsPage user={user} />} />
         <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />

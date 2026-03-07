@@ -14,6 +14,7 @@ type RunRequest = {
   sha?: string;
   gitUsername?: string;
   gitToken?: string;
+  allowGitPush?: boolean;
   gitCommitName?: string;
   gitCommitEmail?: string;
   env?: Record<string, string>;
@@ -660,6 +661,25 @@ async function gitFetchShaWithFallback(workspaceDir: string, sha: string): Promi
   return runCommand("git", ["-C", workspaceDir, "fetch", "origin", sha]);
 }
 
+async function disableWorkspaceGitPush(
+  workspaceDir: string,
+  repositoryUrl: string
+): Promise<void> {
+  const commands: Array<readonly string[]> = [
+    ["remote", "set-url", "origin", repositoryUrl],
+    ["remote", "set-url", "--push", "origin", repositoryUrl]
+  ];
+
+  for (const args of commands) {
+    const result = await runCommand("git", ["-C", workspaceDir, ...args]);
+    if (!result.spawnError && result.exitCode === 0) {
+      continue;
+    }
+    const detail = buildCommandFailureDetail(result);
+    throw new Error(`git ${args.join(" ")} failed: ${detail || `exit code ${result.exitCode}`}`);
+  }
+}
+
 async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: string; workspaceDir: string }> {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "gits-actions-"));
   const repositoryUrl = request.repositoryUrl?.trim() ?? "";
@@ -705,6 +725,10 @@ async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: s
         throw new Error(`git checkout sha failed: ${detail || `exit code ${retryCheckoutSha.exitCode}`}`);
       }
     }
+  }
+
+  if (request.allowGitPush === false) {
+    await disableWorkspaceGitPush(workspaceDir, repositoryUrl);
   }
 
   return {

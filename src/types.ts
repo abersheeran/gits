@@ -39,6 +39,18 @@ export type ActionWorkflowTrigger =
 
 export type ActionAgentType = "codex" | "claude_code";
 
+export type AgentSessionSourceType = "issue" | "pull_request" | "manual";
+
+export type AgentSessionOrigin =
+  | "workflow"
+  | "mention"
+  | "manual"
+  | "rerun"
+  | "dispatch"
+  | "issue_assign"
+  | "issue_resume"
+  | "pull_request_resume";
+
 export type ActionContainerInstanceType =
   | "lite"
   | "basic"
@@ -49,6 +61,8 @@ export type ActionContainerInstanceType =
 
 export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type ActionRunSourceType = "issue" | "pull_request";
+
+export type AgentSessionStatus = ActionRunStatus;
 
 export type ActionRunQueueMessage = {
   repositoryId: string;
@@ -238,6 +252,32 @@ export type RepositoryActionsConfig = {
   inheritsGlobalCodexConfig: boolean;
   inheritsGlobalClaudeCodeConfig: boolean;
   updated_at: number | null;
+};
+
+export type AgentSessionRecord = {
+  id: string;
+  repository_id: string;
+  source_type: AgentSessionSourceType;
+  source_number: number | null;
+  source_comment_id: string | null;
+  origin: AgentSessionOrigin;
+  status: AgentSessionStatus;
+  agent_type: ActionAgentType;
+  prompt: string;
+  branch_ref: string | null;
+  trigger_ref: string | null;
+  trigger_sha: string | null;
+  workflow_id: string | null;
+  workflow_name: string | null;
+  linked_run_id: string | null;
+  created_by: string | null;
+  created_by_username: string | null;
+  delegated_from_user_id: string | null;
+  delegated_from_username: string | null;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
 };
 
 export type AppBindings = {

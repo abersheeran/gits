@@ -1,11 +1,15 @@
 import type {
+  ActionAgentType,
   ActionRunRecord,
   ActionRunSourceType,
   ActionWorkflowRecord,
+  AgentSessionOrigin,
+  AgentSessionRecord,
   AppBindings,
   AuthUser,
   RepositoryRecord
 } from "../types";
+import { AgentSessionService } from "./agent-session-service";
 import { enqueueActionRunExecution } from "./action-run-queue-service";
 import { executeActionRun } from "./action-runner-service";
 import { ActionsService } from "./actions-service";
@@ -13,6 +17,7 @@ import { ActionsService } from "./actions-service";
 const ACTIONS_MENTION_PATTERN = /@\s*actions\b/i;
 const MENTION_WORKFLOW_NAME = "__mention_actions_internal__";
 const ISSUE_CREATED_WORKFLOW_NAME = "__issue_created_internal__";
+const AGENT_SESSION_WORKFLOW_NAME_PREFIX = "__agent_session_internal__";
 const ISSUE_CREATED_DEFAULT_PROMPT =
   "You are the repository issue automation agent. Follow the provided issue context and required decision strictly.";
 
@@ -198,6 +203,72 @@ async function ensureIssueCreatedWorkflow(
   });
 }
 
+async function ensureInteractiveAgentWorkflow(
+  actionsService: ActionsService,
+  repository: RepositoryRecord,
+  agentType: ActionAgentType
+): Promise<ActionWorkflowRecord> {
+  const workflowName = `${AGENT_SESSION_WORKFLOW_NAME_PREFIX}_${agentType}`;
+  const workflows = await actionsService.listWorkflows(repository.id);
+  const existing = workflows.find(
+    (workflow) =>
+      workflow.trigger_event === "mention_actions" && workflow.name === workflowName
+  );
+  if (existing && existing.enabled === 1 && existing.agent_type === agentType) {
+    return existing;
+  }
+  if (existing) {
+    const updated = await actionsService.updateWorkflow(repository.id, existing.id, {
+      enabled: true,
+      agentType
+    });
+    if (updated) {
+      return updated;
+    }
+  }
+
+  return actionsService.createWorkflow({
+    repositoryId: repository.id,
+    name: workflowName,
+    triggerEvent: "mention_actions",
+    agentType,
+    prompt: "internal interactive agent session workflow",
+    pushBranchRegex: null,
+    pushTagRegex: null,
+    enabled: true,
+    createdBy: repository.owner_id
+  });
+}
+
+export async function createLinkedAgentSessionForRun(input: {
+  db: D1Database;
+  repositoryId: string;
+  run: Pick<
+    ActionRunRecord,
+    | "id"
+    | "workflow_id"
+    | "trigger_source_type"
+    | "trigger_source_number"
+    | "trigger_source_comment_id"
+    | "agent_type"
+    | "prompt"
+    | "trigger_ref"
+    | "trigger_sha"
+  >;
+  origin: AgentSessionOrigin;
+  createdBy?: string | null;
+  delegatedFromUserId?: string | null;
+}): Promise<AgentSessionRecord> {
+  const agentSessionService = new AgentSessionService(input.db);
+  return agentSessionService.createSessionForRun({
+    repositoryId: input.repositoryId,
+    run: input.run,
+    origin: input.origin,
+    createdBy: input.createdBy ?? null,
+    delegatedFromUserId: input.delegatedFromUserId ?? input.createdBy ?? null
+  });
+}
+
 export async function triggerMentionActionRun(input: {
   env: Pick<
     AppBindings,
@@ -243,6 +314,14 @@ export async function triggerMentionActionRun(input: {
     agentType: workflow.agent_type,
     instanceType: repositoryConfig.instanceType,
     prompt
+  });
+  await createLinkedAgentSessionForRun({
+    db: input.env.DB,
+    repositoryId: input.repository.id,
+    run,
+    origin: "mention",
+    createdBy: input.triggeredByUser?.id ?? null,
+    delegatedFromUserId: input.triggeredByUser?.id ?? null
   });
 
   await scheduleActionRunExecution({
@@ -320,6 +399,14 @@ export async function triggerActionWorkflows(input: {
       prompt
     });
     runs.push(run);
+    await createLinkedAgentSessionForRun({
+      db: input.env.DB,
+      repositoryId: input.repository.id,
+      run,
+      origin: "workflow",
+      createdBy: input.triggeredByUser?.id ?? null,
+      delegatedFromUserId: input.triggeredByUser?.id ?? null
+    });
     await scheduleActionRunExecution({
       env: input.env,
       ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
@@ -331,4 +418,77 @@ export async function triggerActionWorkflows(input: {
   }
 
   return runs;
+}
+
+export async function triggerInteractiveAgentSession(input: {
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+    | "ACTIONS_QUEUE"
+  >;
+  executionCtx?: ExecutionContext;
+  repository: RepositoryRecord;
+  origin: Extract<
+    AgentSessionOrigin,
+    "manual" | "issue_assign" | "issue_resume" | "pull_request_resume"
+  >;
+  agentType: ActionAgentType;
+  prompt: string;
+  triggerRef?: string | null;
+  triggerSha?: string | null;
+  triggerSourceType?: ActionRunSourceType | null;
+  triggerSourceNumber?: number | null;
+  triggerSourceCommentId?: string | null;
+  triggeredByUser?: AuthUser;
+  requestOrigin: string;
+}): Promise<{ run: ActionRunRecord; session: AgentSessionRecord }> {
+  const actionsService = new ActionsService(input.env.DB);
+  const workflow = await ensureInteractiveAgentWorkflow(
+    actionsService,
+    input.repository,
+    input.agentType
+  );
+  const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
+  const run = await actionsService.createRun({
+    repositoryId: input.repository.id,
+    workflowId: workflow.id,
+    triggerEvent: "mention_actions",
+    ...(input.triggerRef ? { triggerRef: input.triggerRef } : {}),
+    ...(input.triggerSha ? { triggerSha: input.triggerSha } : {}),
+    ...(input.triggerSourceType ? { triggerSourceType: input.triggerSourceType } : {}),
+    ...(input.triggerSourceNumber ? { triggerSourceNumber: input.triggerSourceNumber } : {}),
+    ...(input.triggerSourceCommentId
+      ? { triggerSourceCommentId: input.triggerSourceCommentId }
+      : {}),
+    ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
+    agentType: input.agentType,
+    instanceType: repositoryConfig.instanceType,
+    prompt: input.prompt
+  });
+  const session = await createLinkedAgentSessionForRun({
+    db: input.env.DB,
+    repositoryId: input.repository.id,
+    run,
+    origin: input.origin,
+    createdBy: input.triggeredByUser?.id ?? null,
+    delegatedFromUserId: input.triggeredByUser?.id ?? null
+  });
+
+  await scheduleActionRunExecution({
+    env: input.env,
+    ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
+    repository: input.repository,
+    run,
+    ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
+    requestOrigin: input.requestOrigin
+  });
+
+  return { run, session };
 }

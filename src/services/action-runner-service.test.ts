@@ -4,6 +4,7 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "./action-runner-prompt-tokens";
+import { AgentSessionService } from "./agent-session-service";
 import { ActionsService } from "./actions-service";
 import {
   ACTIONS_SYSTEM_EMAIL,
@@ -272,5 +273,113 @@ describe("executeActionRun", () => {
     expect(revokeAccessToken).not.toHaveBeenCalled();
     expect(runnerFetch).toHaveBeenCalledTimes(1);
     expect(stopFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("grants push and PR permissions for delegated agent sessions", async () => {
+    vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
+    vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
+    vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
+      codexConfigFileContent: "",
+      claudeCodeConfigFileContent: "",
+      inheritsGlobalCodexConfig: true,
+      inheritsGlobalClaudeCodeConfig: true,
+      updated_at: 1
+    });
+    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue({
+      id: "session-1",
+      repository_id: "repo-1",
+      source_type: "issue",
+      source_number: 42,
+      source_comment_id: null,
+      origin: "issue_assign",
+      status: "queued",
+      agent_type: "codex",
+      prompt: "do the work",
+      branch_ref: "refs/heads/agent/session-1",
+      trigger_ref: "refs/heads/main",
+      trigger_sha: "abc123",
+      workflow_id: "workflow-1",
+      workflow_name: "__agent_session_internal__codex",
+      linked_run_id: "run-4",
+      created_by: "user-1",
+      created_by_username: "alice",
+      delegated_from_user_id: "user-1",
+      delegated_from_username: "alice",
+      created_at: 1,
+      started_at: null,
+      completed_at: null,
+      updated_at: 1
+    });
+
+    const runnerFetch = vi.fn(async (_url: string, init?: RequestInit) =>
+      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+    const stopFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        JWT_SECRET: "test-secret",
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: (url: string, init?: RequestInit) =>
+              url.endsWith("/stop") ? stopFetch(url, init) : runnerFetch(url, init)
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      run: {
+        id: "run-4",
+        run_number: 4,
+        repository_id: "repo-1",
+        agent_type: "codex",
+        instance_type: "lite",
+        prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
+        trigger_ref: "refs/heads/main",
+        trigger_sha: "abc123",
+        trigger_source_type: "issue",
+        trigger_source_number: 42
+      },
+      triggeredByUser: {
+        id: "user-1",
+        username: "alice"
+      },
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(runnerFetch).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(String(runnerFetch.mock.calls[0]?.[1]?.body)) as {
+      enableIssueReplyToken?: boolean;
+      enablePrCreateToken?: boolean;
+      allowGitPush?: boolean;
+      env?: Record<string, string>;
+    };
+    expect(payload.enableIssueReplyToken).toBe(true);
+    expect(payload.enablePrCreateToken).toBe(true);
+    expect(payload.allowGitPush).toBe(true);
+    expect(payload.env).toMatchObject({
+      GITS_AGENT_SESSION_ID: "session-1",
+      GITS_AGENT_SESSION_BRANCH_REF: "refs/heads/agent/session-1"
+    });
   });
 });

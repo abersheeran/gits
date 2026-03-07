@@ -9,7 +9,9 @@ import {
 import { buildActionRunLifecycleLines } from "../services/action-run-log-format";
 import {
   containsActionsMention,
+  createLinkedAgentSessionForRun,
   scheduleActionRunExecution,
+  triggerInteractiveAgentSession,
   triggerActionWorkflows,
   triggerMentionActionRun
 } from "../services/action-trigger-service";
@@ -17,6 +19,7 @@ import {
   ACTION_CONTAINER_INSTANCE_TYPES,
   getActionRunnerNamespace
 } from "../services/action-container-instance-types";
+import { AgentSessionService } from "../services/agent-session-service";
 import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 import { RepositoryMetadataService } from "../services/repository-metadata-service";
@@ -45,6 +48,8 @@ import type {
   ActionRunRecord,
   ActionRunSourceType,
   ActionWorkflowTrigger,
+  AgentSessionRecord,
+  AgentSessionSourceType,
   AppEnv,
   IssueCommentRecord,
   IssueState,
@@ -163,6 +168,11 @@ type UpdateRepositoryActionsConfigInput = {
   instanceType?: ActionContainerInstanceType | null;
   codexConfigFileContent?: string | null;
   claudeCodeConfigFileContent?: string | null;
+};
+
+type TriggerRepositoryAgentInput = {
+  agentType?: ActionAgentType;
+  prompt?: string;
 };
 
 type CreateRepositoryLabelInput = {
@@ -504,6 +514,15 @@ function assertActionRunSourceType(value: string | undefined): ActionRunSourceTy
   });
 }
 
+function assertAgentSessionSourceType(value: string | undefined): AgentSessionSourceType {
+  if (value === "issue" || value === "pull_request" || value === "manual") {
+    return value;
+  }
+  throw new HTTPException(400, {
+    message: "Query 'sourceType' must be one of: issue, pull_request, manual"
+  });
+}
+
 function parseActionRunSourceNumbers(value: string | undefined): number[] {
   if (!value) {
     throw new HTTPException(400, { message: "Query 'numbers' is required" });
@@ -691,6 +710,94 @@ function buildIssueCommentMentionPrompt(input: {
   return `Issue #${input.issueNumber}: ${input.issueTitle}\n\nFull conversation history:\n${input.issueConversationHistory}`;
 }
 
+function buildInteractiveIssueAgentPrompt(input: {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueConversationHistory: string;
+  reason: "assign" | "resume";
+  instruction?: string;
+}): string {
+  const taskInstruction =
+    input.instruction?.trim() ||
+    "Review the issue, implement a fix if the request is actionable, push a branch, and open a pull request. If information is missing, reply with focused follow-up questions.";
+  return [
+    input.reason === "assign"
+      ? "You are taking ownership of a repository issue."
+      : "Continue the existing work for this repository issue.",
+    `Repository: ${input.owner}/${input.repo}`,
+    buildIssueCommentMentionPrompt({
+      issueNumber: input.issueNumber,
+      issueTitle: input.issueTitle,
+      issueConversationHistory: input.issueConversationHistory
+    }),
+    "",
+    "[Instruction]",
+    taskInstruction
+  ].join("\n");
+}
+
+function buildPullRequestReviewHistory(input: {
+  reviews: ReadonlyArray<{
+    reviewer_username: string;
+    decision: PullRequestReviewDecision;
+    body: string;
+  }>;
+}): string {
+  if (input.reviews.length === 0) {
+    return "(none)";
+  }
+
+  return input.reviews
+    .map((review) => {
+      const body = review.body.trim() || "(empty)";
+      return [
+        `- reviewer: @${review.reviewer_username}`,
+        `  decision: ${review.decision}`,
+        "  body:",
+        ...body.split("\n").map((line) => `    ${line}`)
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+function buildInteractivePullRequestAgentPrompt(input: {
+  owner: string;
+  repo: string;
+  pullRequestNumber: number;
+  pullRequestTitle: string;
+  pullRequestBody: string;
+  baseRef: string;
+  headRef: string;
+  reviews: ReadonlyArray<{
+    reviewer_username: string;
+    decision: PullRequestReviewDecision;
+    body: string;
+  }>;
+  instruction?: string;
+}): string {
+  const taskInstruction =
+    input.instruction?.trim() ||
+    "Review the feedback, update the pull request branch with the required changes, and preserve the existing intent of the pull request.";
+  return [
+    "Continue work on an existing pull request.",
+    `Repository: ${input.owner}/${input.repo}`,
+    `Pull request: #${input.pullRequestNumber} ${input.pullRequestTitle}`,
+    `Base ref: ${input.baseRef}`,
+    `Head ref: ${input.headRef}`,
+    "",
+    "[Pull Request Body]",
+    input.pullRequestBody.trim() || "(empty)",
+    "",
+    "[Reviews]",
+    buildPullRequestReviewHistory({ reviews: input.reviews }),
+    "",
+    "[Instruction]",
+    taskInstruction
+  ].join("\n");
+}
+
 async function resolveDefaultBranchTarget(
   storageService: StorageService,
   owner: string,
@@ -816,6 +923,94 @@ async function findReadableRepositoryOr404(args: {
     throw new HTTPException(404, { message: "Repository not found" });
   }
   return repository;
+}
+
+function buildAgentSessionSourceUrl(args: {
+  owner: string;
+  repo: string;
+  session: Pick<AgentSessionRecord, "source_type" | "source_number">;
+}): string | null {
+  if (args.session.source_number === null) {
+    return null;
+  }
+  if (args.session.source_type === "issue") {
+    return `/repo/${args.owner}/${args.repo}/issues/${args.session.source_number}`;
+  }
+  if (args.session.source_type === "pull_request") {
+    return `/repo/${args.owner}/${args.repo}/pulls/${args.session.source_number}`;
+  }
+  return null;
+}
+
+async function buildAgentSessionSourceContext(args: {
+  db: D1Database;
+  repository: RepositoryRecord;
+  owner: string;
+  repo: string;
+  session: AgentSessionRecord;
+  viewerId?: string;
+}): Promise<{
+  type: AgentSessionRecord["source_type"];
+  number: number | null;
+  title: string | null;
+  url: string | null;
+  commentId: string | null;
+}> {
+  const url = buildAgentSessionSourceUrl({
+    owner: args.owner,
+    repo: args.repo,
+    session: args.session
+  });
+
+  if (args.session.source_number === null) {
+    return {
+      type: args.session.source_type,
+      number: null,
+      title: null,
+      url,
+      commentId: args.session.source_comment_id
+    };
+  }
+
+  if (args.session.source_type === "issue") {
+    const issueService = new IssueService(args.db);
+    const issue = await issueService.findIssueByNumber(
+      args.repository.id,
+      args.session.source_number,
+      args.viewerId
+    );
+    return {
+      type: args.session.source_type,
+      number: args.session.source_number,
+      title: issue?.title ?? null,
+      url,
+      commentId: args.session.source_comment_id
+    };
+  }
+
+  if (args.session.source_type === "pull_request") {
+    const pullRequestService = new PullRequestService(args.db);
+    const pullRequest = await pullRequestService.findPullRequestByNumber(
+      args.repository.id,
+      args.session.source_number,
+      args.viewerId
+    );
+    return {
+      type: args.session.source_type,
+      number: args.session.source_number,
+      title: pullRequest?.title ?? null,
+      url,
+      commentId: args.session.source_comment_id
+    };
+  }
+
+  return {
+    type: args.session.source_type,
+    number: args.session.source_number,
+    title: null,
+    url,
+    commentId: args.session.source_comment_id
+  };
 }
 
 async function listRepositoryParticipants(
@@ -1558,21 +1753,28 @@ router.get("/repos/:owner/:repo", optionalSession, async (c) => {
   if (detailRef) {
     detailInput.ref = detailRef;
   }
-  const [details, openIssueCount, openPullRequestCount, canCreateIssueOrPullRequest] = await Promise.all(
-    [
-      browserService.getRepositoryDetail(detailInput),
-      issueService.countOpenIssues(repository.id),
-      pullRequestService.countOpenPullRequests(repository.id),
-      repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id)
-    ]
-  );
+  const [
+    details,
+    openIssueCount,
+    openPullRequestCount,
+    canCreateIssueOrPullRequest,
+    canManageActions
+  ] = await Promise.all([
+    browserService.getRepositoryDetail(detailInput),
+    issueService.countOpenIssues(repository.id),
+    pullRequestService.countOpenPullRequests(repository.id),
+    repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id),
+    repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id)
+  ]);
 
   return c.json({
     repository,
     openIssueCount,
     openPullRequestCount,
     permissions: {
-      canCreateIssueOrPullRequest
+      canCreateIssueOrPullRequest,
+      canRunAgents: canCreateIssueOrPullRequest,
+      canManageActions
     },
     ...details
   });
@@ -2198,6 +2400,154 @@ router.post("/repos/:owner/:repo/issues/:number/comments", requireSession, async
   return c.json({ comment }, 201);
 });
 
+router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: TriggerRepositoryAgentInput = {};
+  if (payload.agentType !== undefined) {
+    input.agentType = assertActionAgentType(payload.agentType, "agentType");
+  }
+  if (payload.prompt !== undefined) {
+    const prompt = assertOptionalString(payload.prompt, "prompt");
+    if (prompt !== undefined) {
+      input.prompt = prompt;
+    }
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canRunAgents = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canRunAgents) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const issueService = new IssueService(c.env.DB);
+  const issue = await issueService.findIssueByNumber(repository.id, number);
+  if (!issue) {
+    throw new HTTPException(404, { message: "Issue not found" });
+  }
+  if (issue.state !== "open") {
+    throw new HTTPException(409, { message: "Issue must be open to assign an agent" });
+  }
+
+  const comments = await issueService.listIssueComments(repository.id, issue.number);
+  const issueConversationHistory = buildIssueConversationHistory({
+    issueAuthorUsername: issue.author_username,
+    issueBody: issue.body,
+    comments
+  });
+  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const agentType = input.agentType ?? "codex";
+
+  const execution = await triggerInteractiveAgentSession({
+    env: c.env,
+    ...executionCtxArg(c),
+    repository,
+    origin: "issue_assign",
+    agentType,
+    prompt: buildInteractiveIssueAgentPrompt({
+      owner,
+      repo,
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueConversationHistory,
+      reason: "assign",
+      ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
+    }),
+    ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
+    ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
+    triggerSourceType: "issue",
+    triggerSourceNumber: issue.number,
+    triggeredByUser: sessionUser,
+    requestOrigin: new URL(c.req.url).origin
+  });
+
+  return c.json(execution, 202);
+});
+
+router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: TriggerRepositoryAgentInput = {};
+  if (payload.agentType !== undefined) {
+    input.agentType = assertActionAgentType(payload.agentType, "agentType");
+  }
+  if (payload.prompt !== undefined) {
+    const prompt = assertOptionalString(payload.prompt, "prompt");
+    if (prompt !== undefined) {
+      input.prompt = prompt;
+    }
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canRunAgents = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canRunAgents) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const issueService = new IssueService(c.env.DB);
+  const issue = await issueService.findIssueByNumber(repository.id, number);
+  if (!issue) {
+    throw new HTTPException(404, { message: "Issue not found" });
+  }
+  if (issue.state !== "open") {
+    throw new HTTPException(409, { message: "Issue must be open to resume an agent" });
+  }
+
+  const comments = await issueService.listIssueComments(repository.id, issue.number);
+  const issueConversationHistory = buildIssueConversationHistory({
+    issueAuthorUsername: issue.author_username,
+    issueBody: issue.body,
+    comments
+  });
+  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const agentType = input.agentType ?? "codex";
+
+  const execution = await triggerInteractiveAgentSession({
+    env: c.env,
+    ...executionCtxArg(c),
+    repository,
+    origin: "issue_resume",
+    agentType,
+    prompt: buildInteractiveIssueAgentPrompt({
+      owner,
+      repo,
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueConversationHistory,
+      reason: "resume",
+      ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
+    }),
+    ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
+    ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
+    triggerSourceType: "issue",
+    triggerSourceNumber: issue.number,
+    triggeredByUser: sessionUser,
+    requestOrigin: new URL(c.req.url).origin
+  });
+
+  return c.json(execution, 202);
+});
+
 router.get("/repos/:owner/:repo/pulls", optionalSession, async (c) => {
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
@@ -2335,6 +2685,75 @@ router.post("/repos/:owner/:repo/pulls/:number/reviews", requireSession, async (
   });
   const nextReviewSummary = await pullRequestService.summarizePullRequestReviews(repository.id, number);
   return c.json({ review, reviewSummary: nextReviewSummary }, 201);
+});
+
+router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: TriggerRepositoryAgentInput = {};
+  if (payload.agentType !== undefined) {
+    input.agentType = assertActionAgentType(payload.agentType, "agentType");
+  }
+  if (payload.prompt !== undefined) {
+    const prompt = assertOptionalString(payload.prompt, "prompt");
+    if (prompt !== undefined) {
+      input.prompt = prompt;
+    }
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canRunAgents = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canRunAgents) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const pullRequestService = new PullRequestService(c.env.DB);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  if (!pullRequest) {
+    throw new HTTPException(404, { message: "Pull request not found" });
+  }
+  if (pullRequest.state !== "open") {
+    throw new HTTPException(409, { message: "Pull request must be open to resume an agent" });
+  }
+
+  const reviews = await pullRequestService.listPullRequestReviews(repository.id, number);
+  const agentType = input.agentType ?? "codex";
+
+  const execution = await triggerInteractiveAgentSession({
+    env: c.env,
+    ...executionCtxArg(c),
+    repository,
+    origin: "pull_request_resume",
+    agentType,
+    prompt: buildInteractivePullRequestAgentPrompt({
+      owner,
+      repo,
+      pullRequestNumber: pullRequest.number,
+      pullRequestTitle: pullRequest.title,
+      pullRequestBody: pullRequest.body,
+      baseRef: pullRequest.base_ref,
+      headRef: pullRequest.head_ref,
+      reviews,
+      ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
+    }),
+    ...(pullRequest.head_ref ? { triggerRef: pullRequest.head_ref } : {}),
+    ...(pullRequest.head_oid ? { triggerSha: pullRequest.head_oid } : {}),
+    triggerSourceType: "pull_request",
+    triggerSourceNumber: pullRequest.number,
+    triggeredByUser: sessionUser,
+    requestOrigin: new URL(c.req.url).origin
+  });
+
+  return c.json(execution, 202);
 });
 
 router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
@@ -3400,6 +3819,203 @@ router.get("/repos/:owner/:repo/actions/runs/latest-by-comments", optionalSessio
   });
 });
 
+router.get("/repos/:owner/:repo/agent-sessions", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const sourceTypeParam = c.req.query("sourceType");
+  const sourceNumberParam = c.req.query("sourceNumber");
+  if (sourceNumberParam && !sourceTypeParam) {
+    throw new HTTPException(400, {
+      message: "Query 'sourceType' is required when 'sourceNumber' is provided"
+    });
+  }
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const sessions = await agentSessionService.listSessions({
+    repositoryId: repository.id,
+    limit: parseLimit(c.req.query("limit"), 30),
+    ...(sourceTypeParam ? { sourceType: assertAgentSessionSourceType(sourceTypeParam) } : {}),
+    ...(sourceNumberParam
+      ? { sourceNumber: assertPositiveInteger(sourceNumberParam, "sourceNumber") }
+      : {})
+  });
+  return c.json({ sessions });
+});
+
+router.get("/repos/:owner/:repo/agent-sessions/latest", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sourceType = assertAgentSessionSourceType(c.req.query("sourceType"));
+  if (sourceType === "manual") {
+    throw new HTTPException(400, {
+      message: "Query 'sourceType' cannot be manual for latest source lookups"
+    });
+  }
+  const sourceNumbers = parseActionRunSourceNumbers(c.req.query("numbers"));
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const latestSessions = await agentSessionService.listLatestSessionsBySource(
+    repository.id,
+    sourceType,
+    sourceNumbers
+  );
+  const sessionBySourceNumber = new Map<number, (typeof latestSessions)[number]>();
+  for (const session of latestSessions) {
+    if (session.source_number !== null) {
+      sessionBySourceNumber.set(session.source_number, session);
+    }
+  }
+
+  return c.json({
+    sourceType,
+    items: sourceNumbers.map((sourceNumber) => ({
+      sourceNumber,
+      session: sessionBySourceNumber.get(sourceNumber) ?? null
+    }))
+  });
+});
+
+router.get("/repos/:owner/:repo/agent-sessions/:sessionId", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sessionId = assertString(c.req.param("sessionId"), "sessionId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const session = await agentSessionService.findSessionById(repository.id, sessionId);
+  if (!session) {
+    throw new HTTPException(404, { message: "Agent session not found" });
+  }
+
+  const actionsService = new ActionsService(c.env.DB);
+  const linkedRun = session.linked_run_id
+    ? await actionsService.findRunById(repository.id, session.linked_run_id)
+    : null;
+  const sourceContext = await buildAgentSessionSourceContext({
+    db: c.env.DB,
+    repository,
+    owner,
+    repo,
+    session,
+    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+  });
+
+  return c.json({
+    session,
+    linkedRun,
+    sourceContext
+  });
+});
+
+router.get("/repos/:owner/:repo/agent-sessions/:sessionId/timeline", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sessionId = assertString(c.req.param("sessionId"), "sessionId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const session = await agentSessionService.findSessionById(repository.id, sessionId);
+  if (!session) {
+    throw new HTTPException(404, { message: "Agent session not found" });
+  }
+
+  const actionsService = new ActionsService(c.env.DB);
+  const linkedRun = session.linked_run_id
+    ? await actionsService.findRunById(repository.id, session.linked_run_id)
+    : null;
+  const events = agentSessionService.buildTimeline({
+    session,
+    run: linkedRun
+  });
+
+  return c.json({ events });
+});
+
+router.post("/repos/:owner/:repo/agent-sessions/:sessionId/cancel", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sessionId = assertString(c.req.param("sessionId"), "sessionId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canManageActions = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canManageActions) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const session = await agentSessionService.findSessionById(repository.id, sessionId);
+  if (!session) {
+    throw new HTTPException(404, { message: "Agent session not found" });
+  }
+  if (session.status !== "queued") {
+    throw new HTTPException(409, { message: "Only queued agent sessions can be cancelled" });
+  }
+
+  const actionsService = new ActionsService(c.env.DB);
+  const run = session.linked_run_id
+    ? await actionsService.findRunById(repository.id, session.linked_run_id)
+    : null;
+  if (session.linked_run_id && !run) {
+    throw new HTTPException(404, { message: "Linked action run not found" });
+  }
+  if (run && run.status !== "queued") {
+    throw new HTTPException(409, { message: "Only queued action runs can be cancelled" });
+  }
+
+  if (run) {
+    const cancelResult = await actionsService.cancelQueuedRun(repository.id, run.id);
+    if (!cancelResult.cancelled) {
+      throw new HTTPException(409, { message: "Action run is no longer queued" });
+    }
+  } else {
+    await agentSessionService.cancelSession({
+      repositoryId: repository.id,
+      sessionId: session.id
+    });
+  }
+
+  const updatedSession = await agentSessionService.findSessionById(repository.id, session.id);
+  const nextRun = run ? await actionsService.findRunById(repository.id, run.id) : null;
+  return c.json({ session: updatedSession, run: nextRun });
+});
+
 router.get("/repos/:owner/:repo/actions/runs/:runId", optionalSession, async (c) => {
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
@@ -3632,6 +4248,14 @@ router.post("/repos/:owner/:repo/actions/runs/:runId/rerun", requireSession, asy
     instanceType: sourceRun.instance_type ?? "lite",
     prompt: sourceRun.prompt
   });
+  const session = await createLinkedAgentSessionForRun({
+    db: c.env.DB,
+    repositoryId: repository.id,
+    run,
+    origin: "rerun",
+    createdBy: sessionUser.id,
+    delegatedFromUserId: sourceRun.triggered_by ?? sessionUser.id
+  });
 
   await scheduleActionRunExecution({
     env: c.env,
@@ -3642,7 +4266,7 @@ router.post("/repos/:owner/:repo/actions/runs/:runId/rerun", requireSession, asy
     requestOrigin: new URL(c.req.url).origin
   });
 
-  return c.json({ run }, 202);
+  return c.json({ run, session }, 202);
 });
 
 router.post("/repos/:owner/:repo/actions/workflows/:workflowId/dispatch", requireSession, async (c) => {
@@ -3698,6 +4322,14 @@ router.post("/repos/:owner/:repo/actions/workflows/:workflowId/dispatch", requir
     instanceType: repositoryConfig.instanceType,
     prompt: workflow.prompt
   });
+  const session = await createLinkedAgentSessionForRun({
+    db: c.env.DB,
+    repositoryId: repository.id,
+    run,
+    origin: "dispatch",
+    createdBy: sessionUser.id,
+    delegatedFromUserId: sessionUser.id
+  });
 
   await scheduleActionRunExecution({
     env: c.env,
@@ -3708,7 +4340,7 @@ router.post("/repos/:owner/:repo/actions/workflows/:workflowId/dispatch", requir
     requestOrigin: new URL(c.req.url).origin
   });
 
-  return c.json({ run }, 202);
+  return c.json({ run, session }, 202);
 });
 
 router.post("/repos", requireSession, async (c) => {
