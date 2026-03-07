@@ -33,7 +33,9 @@ app.all("*", async (c) => {
     return response;
   }
 
-  const fallbackUrl = new URL("/index.html", c.req.url);
+  // Request the root document instead of /index.html so the assets binding
+  // does not canonicalize the response into a redirect back to "/".
+  const fallbackUrl = new URL("/", c.req.url);
   return c.env.ASSETS.fetch(new Request(fallbackUrl.toString(), c.req.raw));
 });
 

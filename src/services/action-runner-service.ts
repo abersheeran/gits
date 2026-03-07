@@ -7,6 +7,7 @@ import { getActionRunnerNamespace } from "./action-container-instance-types";
 import { buildActionRunLifecycleLines } from "./action-run-log-format";
 import { AuthService } from "./auth-service";
 import { ActionsService } from "./actions-service";
+import { createSecretRedactor } from "../utils/secret-redaction";
 
 type RunnerExecuteResult = {
   exitCode?: number;
@@ -102,6 +103,13 @@ function formatBoundedLog(buffer: BoundedLogBuffer): string {
   return `[truncated ${buffer.truncatedChars} chars]\n${buffer.text}`;
 }
 
+function redactLogText(
+  value: string,
+  redactText?: ((input: string) => string) | undefined
+): string {
+  return redactText ? redactText(value) : value;
+}
+
 function buildRunLogs(input: {
   runId: string;
   runNumber: number;
@@ -112,12 +120,13 @@ function buildRunLogs(input: {
   reconciledAt?: number | null | undefined;
   result?: RunnerExecuteResult;
   errorMessage?: string;
+  redactText?: (input: string) => string;
 }): string {
   const lines: string[] = [];
   lines.push(`run_id: ${input.runId}`);
   lines.push(`run_number: ${input.runNumber}`);
   lines.push(`agent_type: ${input.agentType}`);
-  lines.push(`prompt: ${input.prompt}`);
+  lines.push(`prompt: ${redactLogText(input.prompt, input.redactText)}`);
   lines.push("");
   lines.push(
     ...buildActionRunLifecycleLines(
@@ -137,25 +146,25 @@ function buildRunLogs(input: {
   if (input.errorMessage) {
     lines.push("");
     lines.push("[error]");
-    lines.push(input.errorMessage);
+    lines.push(redactLogText(input.errorMessage, input.redactText));
   }
 
   if (input.result?.error) {
     lines.push("");
     lines.push("[runner_error]");
-    lines.push(input.result.error);
+    lines.push(redactLogText(input.result.error, input.redactText));
   }
 
   if (input.result?.stdout) {
     lines.push("");
     lines.push("[stdout]");
-    lines.push(input.result.stdout);
+    lines.push(redactLogText(input.result.stdout, input.redactText));
   }
 
   if (input.result?.stderr) {
     lines.push("");
     lines.push("[stderr]");
-    lines.push(input.result.stderr);
+    lines.push(redactLogText(input.result.stderr, input.redactText));
   }
 
   return truncateLog(lines.join("\n"));
@@ -198,6 +207,7 @@ function buildLiveRunLogs(input: {
   stderr: string;
   durationMs?: number;
   error?: string;
+  redactText?: (input: string) => string;
 }): string {
   const result: RunnerExecuteResult = {
     ...(input.stdout ? { stdout: input.stdout } : {}),
@@ -213,7 +223,8 @@ function buildLiveRunLogs(input: {
     prompt: input.prompt,
     claimedAt: input.claimedAt,
     startedAt: input.startedAt,
-    result
+    result,
+    ...(input.redactText ? { redactText: input.redactText } : {})
   });
 }
 
@@ -227,6 +238,7 @@ async function consumeStreamedRunnerResponse(input: {
   claimedAt?: number | null | undefined;
   startedAt?: number | null | undefined;
   response: Response;
+  redactText?: (input: string) => string;
 }): Promise<RunnerExecuteResult> {
   if (!input.response.body) {
     return {};
@@ -271,7 +283,8 @@ async function consumeStreamedRunnerResponse(input: {
         stdout: formatBoundedLog(stdout),
         stderr: formatBoundedLog(stderr),
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(error ? { error } : {})
+        ...(error ? { error } : {}),
+        ...(input.redactText ? { redactText: input.redactText } : {})
       });
 
       if (!force && logs === lastFlushedLogs) {
@@ -316,15 +329,17 @@ async function consumeStreamedRunnerResponse(input: {
 
   const handleEvent = async (event: RunnerStreamEvent): Promise<void> => {
     if (event.type === "stdout") {
-      stdout = appendBoundedLog(stdout, event.data);
-      pendingCharsSinceFlush += event.data.length;
+      const redactedData = redactLogText(event.data, input.redactText);
+      stdout = appendBoundedLog(stdout, redactedData);
+      pendingCharsSinceFlush += redactedData.length;
       await flushLogs();
       return;
     }
 
     if (event.type === "stderr") {
-      stderr = appendBoundedLog(stderr, event.data);
-      pendingCharsSinceFlush += event.data.length;
+      const redactedData = redactLogText(event.data, input.redactText);
+      stderr = appendBoundedLog(stderr, redactedData);
+      pendingCharsSinceFlush += redactedData.length;
       await flushLogs();
       return;
     }
@@ -333,15 +348,25 @@ async function consumeStreamedRunnerResponse(input: {
     durationMs = event.durationMs;
     error = event.error;
     receivedResultEvent = true;
-    stderr = appendBoundedDiagnostic(stderr, event.stderr);
-    stderr = appendBoundedDiagnostic(stderr, event.spawnError);
     stderr = appendBoundedDiagnostic(
       stderr,
-      event.mcpSetupWarning ? `[mcp_setup] ${event.mcpSetupWarning}` : null
+      event.stderr ? redactLogText(event.stderr, input.redactText) : undefined
     );
     stderr = appendBoundedDiagnostic(
       stderr,
-      event.attemptedCommand ? `[attempted] ${event.attemptedCommand}` : null
+      event.spawnError ? redactLogText(event.spawnError, input.redactText) : undefined
+    );
+    stderr = appendBoundedDiagnostic(
+      stderr,
+      event.mcpSetupWarning
+        ? `[mcp_setup] ${redactLogText(event.mcpSetupWarning, input.redactText)}`
+        : null
+    );
+    stderr = appendBoundedDiagnostic(
+      stderr,
+      event.attemptedCommand
+        ? `[attempted] ${redactLogText(event.attemptedCommand, input.redactText)}`
+        : null
     );
     await flushLogs(true);
   };
@@ -450,6 +475,7 @@ export async function executeActionRun(input: {
   const containerInstance = `action-run-${input.run.id}`;
   const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
   const actionsRunner = getActionRunnerNamespace(input.env, instanceType);
+  let redactLogs = createSecretRedactor();
 
   if (!actionsRunner) {
     const logs = buildRunLogs({
@@ -457,7 +483,8 @@ export async function executeActionRun(input: {
       runNumber: input.run.run_number,
       agentType: input.run.agent_type,
       prompt: input.run.prompt,
-      errorMessage: `Actions runner binding is not configured for instance type '${instanceType}'`
+      errorMessage: `Actions runner binding is not configured for instance type '${instanceType}'`,
+      redactText: redactLogs
     });
     await actionsService.completeRun(input.repository.id, input.run.id, {
       status: "failed",
@@ -482,6 +509,10 @@ export async function executeActionRun(input: {
   let runnerResult: RunnerExecuteResult | undefined;
   let runtimePrompt = input.run.prompt;
 
+  const refreshLogRedactor = (): void => {
+    redactLogs = createSecretRedactor([ephemeralToken, issueReplyToken, prCreateToken]);
+  };
+
   try {
     if (input.triggeredByUser) {
       const authService = new AuthService(input.env.DB, input.env.JWT_SECRET);
@@ -493,6 +524,7 @@ export async function executeActionRun(input: {
       });
       ephemeralTokenId = createdToken.tokenId;
       ephemeralToken = createdToken.token;
+      refreshLogRedactor();
 
       const needsIssueReplyToken =
         input.run.trigger_source_type === "issue" ||
@@ -511,6 +543,7 @@ export async function executeActionRun(input: {
         });
         issueReplyTokenId = replyToken.tokenId;
         issueReplyToken = replyToken.token;
+        refreshLogRedactor();
         runtimePrompt = runtimePrompt.replaceAll(ISSUE_REPLY_TOKEN_PLACEHOLDER, replyToken.token);
       }
 
@@ -523,6 +556,7 @@ export async function executeActionRun(input: {
         });
         prCreateTokenId = prToken.tokenId;
         prCreateToken = prToken.token;
+        refreshLogRedactor();
         runtimePrompt = runtimePrompt.replaceAll(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER, prToken.token);
       }
     }
@@ -592,7 +626,8 @@ export async function executeActionRun(input: {
         agentType: input.run.agent_type,
         prompt: input.run.prompt,
         claimedAt,
-        startedAt
+        startedAt,
+        redactText: redactLogs
       })
     );
 
@@ -606,7 +641,8 @@ export async function executeActionRun(input: {
         prompt: input.run.prompt,
         claimedAt,
         startedAt,
-        response: runnerResponse
+        response: runnerResponse,
+        redactText: redactLogs
       });
     } else {
       let responsePayload: unknown = null;
@@ -628,7 +664,8 @@ export async function executeActionRun(input: {
         claimedAt,
         startedAt,
         result: runnerResult,
-        errorMessage: `Container runner responded with HTTP ${runnerResponse.status}`
+        errorMessage: `Container runner responded with HTTP ${runnerResponse.status}`,
+        redactText: redactLogs
       });
       await actionsService.completeRun(input.repository.id, input.run.id, {
         status: "failed",
@@ -646,7 +683,8 @@ export async function executeActionRun(input: {
       prompt: input.run.prompt,
       claimedAt,
       startedAt,
-      result: runnerResult
+      result: runnerResult,
+      redactText: redactLogs
     });
 
     await actionsService.completeRun(input.repository.id, input.run.id, {
@@ -664,7 +702,8 @@ export async function executeActionRun(input: {
       claimedAt,
       startedAt,
       ...(runnerResult ? { result: runnerResult } : {}),
-      errorMessage: message
+      errorMessage: message,
+      redactText: redactLogs
     });
     await actionsService.completeRun(input.repository.id, input.run.id, {
       status: "failed",

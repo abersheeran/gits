@@ -27,14 +27,14 @@ describe("SPA assets fallback", () => {
     await expect(response.text()).resolves.toContain("ok");
   });
 
-  it("falls back to index.html for html routes", async () => {
+  it("falls back to the root document for html routes", async () => {
     const visited: string[] = [];
     const env = createBaseEnv({
       ASSETS: {
         fetch: async (request) => {
           const pathname = new URL(request.url).pathname;
           visited.push(pathname);
-          if (pathname === "/index.html") {
+          if (pathname === "/") {
             return new Response("<html>spa</html>", { status: 200 });
           }
           return new Response("Not Found", { status: 404 });
@@ -53,10 +53,10 @@ describe("SPA assets fallback", () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toContain("spa");
-    expect(visited).toEqual(["/dashboard", "/index.html"]);
+    expect(visited).toEqual(["/dashboard", "/"]);
   });
 
-  it("does not fall back to index.html for non-html accept", async () => {
+  it("does not fall back to the root document for non-html accept", async () => {
     const visited: string[] = [];
     const env = createBaseEnv({
       ASSETS: {
