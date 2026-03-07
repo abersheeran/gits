@@ -31,7 +31,17 @@ export async function enqueueActionRunExecution(
 }
 
 export async function consumeActionRunQueueMessage(input: {
-  env: Pick<AppBindings, "DB" | "JWT_SECRET" | "ACTIONS_RUNNER">;
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+  >;
   message: ActionRunQueueMessage;
 }): Promise<void> {
   const repositoryService = new RepositoryService(input.env.DB);
@@ -58,6 +68,7 @@ export async function consumeActionRunQueueMessage(input: {
       run_number: run.run_number,
       repository_id: run.repository_id,
       agent_type: run.agent_type,
+      instance_type: run.instance_type ?? "lite",
       prompt: run.prompt,
       trigger_ref: run.trigger_ref,
       trigger_sha: run.trigger_sha,
@@ -71,7 +82,17 @@ export async function consumeActionRunQueueMessage(input: {
 
 export async function consumeActionRunQueueBatch(input: {
   batch: MessageBatch<unknown>;
-  env: Pick<AppBindings, "DB" | "JWT_SECRET" | "ACTIONS_RUNNER">;
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+  >;
 }): Promise<void> {
   for (const queueMessage of input.batch.messages) {
     const body = queueMessage.body;

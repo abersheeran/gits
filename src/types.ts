@@ -37,6 +37,14 @@ export type ActionWorkflowTrigger =
 
 export type ActionAgentType = "codex" | "claude_code";
 
+export type ActionContainerInstanceType =
+  | "lite"
+  | "basic"
+  | "standard-1"
+  | "standard-2"
+  | "standard-3"
+  | "standard-4";
+
 export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type ActionRunSourceType = "issue" | "pull_request";
 
@@ -135,6 +143,7 @@ export type ActionRunRecord = {
   triggered_by_username: string | null;
   status: ActionRunStatus;
   agent_type: ActionAgentType;
+  instance_type: ActionContainerInstanceType;
   prompt: string;
   logs: string;
   exit_code: number | null;
@@ -153,6 +162,7 @@ export type ActionsGlobalConfig = {
 };
 
 export type RepositoryActionsConfig = {
+  instanceType: ActionContainerInstanceType;
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
   inheritsGlobalCodexConfig: boolean;
@@ -164,6 +174,11 @@ export type AppBindings = {
   DB: D1Database;
   GIT_BUCKET: R2Bucket;
   ACTIONS_RUNNER?: DurableObjectNamespace;
+  ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
+  ACTIONS_RUNNER_STANDARD_1?: DurableObjectNamespace;
+  ACTIONS_RUNNER_STANDARD_2?: DurableObjectNamespace;
+  ACTIONS_RUNNER_STANDARD_3?: DurableObjectNamespace;
+  ACTIONS_RUNNER_STANDARD_4?: DurableObjectNamespace;
   ACTIONS_QUEUE?: Queue<ActionRunQueueMessage>;
   ASSETS?: Fetcher;
   JWT_SECRET: string;

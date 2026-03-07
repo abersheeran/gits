@@ -587,7 +587,7 @@ describe("API issues and pull requests", () => {
       {
         when: "INSERT INTO action_runs",
         run: (params) => {
-          createdRunPrompt = String(params[14] ?? "");
+          createdRunPrompt = String(params[15] ?? "");
           return { success: true };
         }
       },
@@ -1302,6 +1302,7 @@ describe("API issues and pull requests", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       config: {
+        instanceType: string;
         codexConfigFileContent: string;
         claudeCodeConfigFileContent: string;
         inheritsGlobalCodexConfig: boolean;
@@ -1309,6 +1310,7 @@ describe("API issues and pull requests", () => {
         updated_at: number | null;
       };
     };
+    expect(body.config.instanceType).toBe("lite");
     expect(body.config.codexConfigFileContent).toContain("gpt-5-codex");
     expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
     expect(body.config.inheritsGlobalCodexConfig).toBe(true);
@@ -1325,6 +1327,7 @@ describe("API issues and pull requests", () => {
     let repositoryConfigRow:
       | {
           repository_id: string;
+          instance_type: string | null;
           codex_config_file_content: string | null;
           claude_code_config_file_content: string | null;
           updated_at: number;
@@ -1349,11 +1352,12 @@ describe("API issues and pull requests", () => {
         run: (params) => {
           repositoryConfigRow = {
             repository_id: String(params[0]),
+            instance_type: params[1] === null ? null : String(params[1]),
             codex_config_file_content:
-              params[1] === null ? null : String(params[1]),
-            claude_code_config_file_content:
               params[2] === null ? null : String(params[2]),
-            updated_at: Number(params[3])
+            claude_code_config_file_content:
+              params[3] === null ? null : String(params[3]),
+            updated_at: Number(params[4])
           };
           return { success: true };
         }
@@ -1379,6 +1383,7 @@ describe("API issues and pull requests", () => {
           "content-type": "application/json"
         },
         body: JSON.stringify({
+          instanceType: "standard-2",
           codexConfigFileContent: "model = \"gpt-5-codex\"\napproval_policy = \"never\"",
           claudeCodeConfigFileContent: "{\n  \"permissions\": \"bypass\"\n}"
         })
@@ -1389,16 +1394,19 @@ describe("API issues and pull requests", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       config: {
+        instanceType: string;
         codexConfigFileContent: string;
         claudeCodeConfigFileContent: string;
         inheritsGlobalCodexConfig: boolean;
         inheritsGlobalClaudeCodeConfig: boolean;
       };
     };
+    expect(body.config.instanceType).toBe("standard-2");
     expect(body.config.codexConfigFileContent).toContain("approval_policy");
     expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
     expect(body.config.inheritsGlobalCodexConfig).toBe(false);
     expect(body.config.inheritsGlobalClaudeCodeConfig).toBe(false);
+    expect(repositoryConfigRow?.instance_type).toBe("standard-2");
     expect(repositoryConfigRow?.codex_config_file_content).toContain("approval_policy");
     expect(repositoryConfigRow?.claude_code_config_file_content).toContain("\"permissions\"");
   });

@@ -62,12 +62,42 @@ export function containsActionsMention(input: { title?: string; body?: string })
   return ACTIONS_MENTION_PATTERN.test(`${title}\n${body}`);
 }
 
-function canScheduleActionRun(env: Pick<AppBindings, "ACTIONS_RUNNER" | "ACTIONS_QUEUE">): boolean {
-  return Boolean(env.ACTIONS_RUNNER || env.ACTIONS_QUEUE);
+function canScheduleActionRun(
+  env: Pick<
+    AppBindings,
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+    | "ACTIONS_QUEUE"
+  >
+): boolean {
+  return Boolean(
+    env.ACTIONS_RUNNER ||
+      env.ACTIONS_RUNNER_BASIC ||
+      env.ACTIONS_RUNNER_STANDARD_1 ||
+      env.ACTIONS_RUNNER_STANDARD_2 ||
+      env.ACTIONS_RUNNER_STANDARD_3 ||
+      env.ACTIONS_RUNNER_STANDARD_4 ||
+      env.ACTIONS_QUEUE
+  );
 }
 
 export async function scheduleActionRunExecution(input: {
-  env: Pick<AppBindings, "DB" | "JWT_SECRET" | "ACTIONS_RUNNER" | "ACTIONS_QUEUE">;
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+    | "ACTIONS_QUEUE"
+  >;
   executionCtx?: ExecutionContext;
   repository: RepositoryRecord;
   run: {
@@ -75,6 +105,7 @@ export async function scheduleActionRunExecution(input: {
     run_number: number;
     repository_id: string;
     agent_type: "codex" | "claude_code";
+    instance_type: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
     prompt: string;
     trigger_ref: string | null;
     trigger_sha: string | null;
@@ -168,7 +199,18 @@ async function ensureIssueCreatedWorkflow(
 }
 
 export async function triggerMentionActionRun(input: {
-  env: Pick<AppBindings, "DB" | "JWT_SECRET" | "ACTIONS_RUNNER" | "ACTIONS_QUEUE">;
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+    | "ACTIONS_QUEUE"
+  >;
   executionCtx?: ExecutionContext;
   repository: RepositoryRecord;
   prompt: string;
@@ -187,6 +229,7 @@ export async function triggerMentionActionRun(input: {
 
   const actionsService = new ActionsService(input.env.DB);
   const workflow = await ensureMentionWorkflow(actionsService, input.repository);
+  const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
   const run = await actionsService.createRun({
     repositoryId: input.repository.id,
     workflowId: workflow.id,
@@ -198,6 +241,7 @@ export async function triggerMentionActionRun(input: {
     ...(input.triggerSourceCommentId ? { triggerSourceCommentId: input.triggerSourceCommentId } : {}),
     ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
     agentType: workflow.agent_type,
+    instanceType: repositoryConfig.instanceType,
     prompt
   });
 
@@ -213,7 +257,18 @@ export async function triggerMentionActionRun(input: {
 }
 
 export async function triggerActionWorkflows(input: {
-  env: Pick<AppBindings, "DB" | "JWT_SECRET" | "ACTIONS_RUNNER" | "ACTIONS_QUEUE">;
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "JWT_SECRET"
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+    | "ACTIONS_QUEUE"
+  >;
   executionCtx?: ExecutionContext;
   repository: RepositoryRecord;
   triggerEvent: ActionWorkflowRecord["trigger_event"];
@@ -243,6 +298,7 @@ export async function triggerActionWorkflows(input: {
     input.triggerEvent === "push"
       ? workflows.filter((workflow) => matchesPushWorkflow(workflow, input.triggerRef ?? null))
       : workflows;
+  const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
 
   const runs: ActionRunRecord[] = [];
   for (const workflow of matchedWorkflows) {
@@ -260,6 +316,7 @@ export async function triggerActionWorkflows(input: {
         : {}),
       ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
       agentType: workflow.agent_type,
+      instanceType: repositoryConfig.instanceType,
       prompt
     });
     runs.push(run);

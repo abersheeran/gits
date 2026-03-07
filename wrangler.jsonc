@@ -10,6 +10,37 @@
 		{
 			"class_name": "ActionsContainer",
 			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "lite",
+			"max_instances": 10
+		},
+		{
+			"class_name": "ActionsContainerBasic",
+			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "basic",
+			"max_instances": 10
+		},
+		{
+			"class_name": "ActionsContainerStandard1",
+			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "standard-1",
+			"max_instances": 10
+		},
+		{
+			"class_name": "ActionsContainerStandard2",
+			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "standard-2",
+			"max_instances": 10
+		},
+		{
+			"class_name": "ActionsContainerStandard3",
+			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "standard-3",
+			"max_instances": 10
+		},
+		{
+			"class_name": "ActionsContainerStandard4",
+			"image": "./containers/actions-runner/Dockerfile",
+			"instance_type": "standard-4",
 			"max_instances": 10
 		}
 	],
@@ -18,6 +49,26 @@
 			{
 				"name": "ACTIONS_RUNNER",
 				"class_name": "ActionsContainer"
+			},
+			{
+				"name": "ACTIONS_RUNNER_BASIC",
+				"class_name": "ActionsContainerBasic"
+			},
+			{
+				"name": "ACTIONS_RUNNER_STANDARD_1",
+				"class_name": "ActionsContainerStandard1"
+			},
+			{
+				"name": "ACTIONS_RUNNER_STANDARD_2",
+				"class_name": "ActionsContainerStandard2"
+			},
+			{
+				"name": "ACTIONS_RUNNER_STANDARD_3",
+				"class_name": "ActionsContainerStandard3"
+			},
+			{
+				"name": "ACTIONS_RUNNER_STANDARD_4",
+				"class_name": "ActionsContainerStandard4"
 			}
 		]
 	},
@@ -26,6 +77,16 @@
 			"tag": "actions-container-v1",
 			"new_sqlite_classes": [
 				"ActionsContainer"
+			]
+		},
+		{
+			"tag": "actions-container-instance-types-v1",
+			"new_sqlite_classes": [
+				"ActionsContainerBasic",
+				"ActionsContainerStandard1",
+				"ActionsContainerStandard2",
+				"ActionsContainerStandard3",
+				"ActionsContainerStandard4"
 			]
 		}
 	],

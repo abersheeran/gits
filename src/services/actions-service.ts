@@ -1,5 +1,6 @@
 import type {
   ActionAgentType,
+  ActionContainerInstanceType,
   ActionRunRecord,
   ActionRunSourceType,
   ActionRunStatus,
@@ -21,6 +22,7 @@ type GlobalSettingsRow = {
 
 type RepositoryActionsConfigRow = {
   repository_id: string;
+  instance_type: ActionContainerInstanceType | null;
   codex_config_file_content: string | null;
   claude_code_config_file_content: string | null;
   updated_at: number;
@@ -122,6 +124,7 @@ export class ActionsService {
       .prepare(
         `SELECT
           repository_id,
+          instance_type,
           codex_config_file_content,
           claude_code_config_file_content,
           updated_at
@@ -147,6 +150,7 @@ export class ActionsService {
       repositoryConfig === null || repositoryConfig.claude_code_config_file_content === null;
 
     return {
+      instanceType: repositoryConfig?.instance_type ?? "lite",
       codexConfigFileContent:
         repositoryConfig?.codex_config_file_content ?? globalConfig.codexConfigFileContent,
       claudeCodeConfigFileContent:
@@ -160,11 +164,16 @@ export class ActionsService {
   async updateRepositoryConfig(
     repositoryId: string,
     patch: {
+      instanceType?: ActionContainerInstanceType | null;
       codexConfigFileContent?: string | null;
       claudeCodeConfigFileContent?: string | null;
     }
   ): Promise<RepositoryActionsConfig> {
     const existing = await this.findRepositoryConfigRow(repositoryId);
+    const nextInstanceType =
+      patch.instanceType !== undefined
+        ? patch.instanceType
+        : (existing?.instance_type ?? null);
     const nextCodexConfigFileContent =
       patch.codexConfigFileContent !== undefined
         ? patch.codexConfigFileContent
@@ -174,7 +183,11 @@ export class ActionsService {
         ? patch.claudeCodeConfigFileContent
         : (existing?.claude_code_config_file_content ?? null);
 
-    if (nextCodexConfigFileContent === null && nextClaudeCodeConfigFileContent === null) {
+    if (
+      nextInstanceType === null &&
+      nextCodexConfigFileContent === null &&
+      nextClaudeCodeConfigFileContent === null
+    ) {
       await this.db
         .prepare(`DELETE FROM repository_actions_configs WHERE repository_id = ?`)
         .bind(repositoryId)
@@ -186,18 +199,21 @@ export class ActionsService {
       .prepare(
         `INSERT INTO repository_actions_configs (
           repository_id,
+          instance_type,
           codex_config_file_content,
           claude_code_config_file_content,
           updated_at
-        ) VALUES (?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(repository_id)
         DO UPDATE SET
+          instance_type = excluded.instance_type,
           codex_config_file_content = excluded.codex_config_file_content,
           claude_code_config_file_content = excluded.claude_code_config_file_content,
           updated_at = excluded.updated_at`
       )
       .bind(
         repositoryId,
+        nextInstanceType,
         nextCodexConfigFileContent,
         nextClaudeCodeConfigFileContent,
         Date.now()
@@ -438,6 +454,7 @@ export class ActionsService {
     triggerSourceCommentId?: string | null;
     triggeredBy?: string;
     agentType: ActionAgentType;
+    instanceType: ActionContainerInstanceType;
     prompt: string;
   }): Promise<ActionRunRecord> {
     const runNumber = await this.nextActionRunNumber(input.repositoryId);
@@ -461,6 +478,7 @@ export class ActionsService {
           status,
           command,
           agent_type,
+          instance_type,
           prompt,
           logs,
           exit_code,
@@ -470,7 +488,7 @@ export class ActionsService {
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         id,
@@ -487,6 +505,7 @@ export class ActionsService {
         "queued",
         input.prompt,
         input.agentType,
+        input.instanceType,
         input.prompt,
         "",
         null,
@@ -526,6 +545,7 @@ export class ActionsService {
           u.username AS triggered_by_username,
           r.status,
           r.agent_type,
+          COALESCE(r.instance_type, 'lite') AS instance_type,
           r.prompt,
           r.logs,
           r.exit_code,
@@ -567,6 +587,7 @@ export class ActionsService {
           u.username AS triggered_by_username,
           r.status,
           r.agent_type,
+          COALESCE(r.instance_type, 'lite') AS instance_type,
           r.prompt,
           r.logs,
           r.exit_code,
@@ -739,6 +760,7 @@ export class ActionsService {
           u.username AS triggered_by_username,
           r.status,
           r.agent_type,
+          COALESCE(r.instance_type, 'lite') AS instance_type,
           r.prompt,
           r.logs,
           r.exit_code,
@@ -804,6 +826,7 @@ export class ActionsService {
           u.username AS triggered_by_username,
           r.status,
           r.agent_type,
+          COALESCE(r.instance_type, 'lite') AS instance_type,
           r.prompt,
           r.logs,
           r.exit_code,

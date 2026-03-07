@@ -3,6 +3,7 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "./action-runner-prompt-tokens";
+import { getActionRunnerNamespace } from "./action-container-instance-types";
 import { buildActionRunLifecycleLines } from "./action-run-log-format";
 import { AuthService } from "./auth-service";
 import { ActionsService } from "./actions-service";
@@ -44,6 +45,7 @@ const MAX_LOG_CHARS = 120_000;
 const RUN_LOG_FLUSH_INTERVAL_MS = 1_000;
 const RUN_LOG_FLUSH_MIN_CHARS = 1_024;
 const MAX_RUNNER_STREAM_EVENT_CHARS = 256_000;
+const DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE = "lite";
 
 function normalizeCloneOrigin(input: {
   requestOrigin: string;
@@ -422,6 +424,11 @@ export async function executeActionRun(input: {
     DB: D1Database;
     JWT_SECRET: string;
     ACTIONS_RUNNER?: DurableObjectNamespace;
+    ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
+    ACTIONS_RUNNER_STANDARD_1?: DurableObjectNamespace;
+    ACTIONS_RUNNER_STANDARD_2?: DurableObjectNamespace;
+    ACTIONS_RUNNER_STANDARD_3?: DurableObjectNamespace;
+    ACTIONS_RUNNER_STANDARD_4?: DurableObjectNamespace;
   };
   repository: RepositoryRecord;
   run: {
@@ -429,6 +436,7 @@ export async function executeActionRun(input: {
     run_number: number;
     repository_id: string;
     agent_type: "codex" | "claude_code";
+    instance_type: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
     prompt: string;
     trigger_ref: string | null;
     trigger_sha: string | null;
@@ -440,14 +448,16 @@ export async function executeActionRun(input: {
 }): Promise<void> {
   const actionsService = new ActionsService(input.env.DB);
   const containerInstance = `action-run-${input.run.id}`;
+  const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
+  const actionsRunner = getActionRunnerNamespace(input.env, instanceType);
 
-  if (!input.env.ACTIONS_RUNNER) {
+  if (!actionsRunner) {
     const logs = buildRunLogs({
       runId: input.run.id,
       runNumber: input.run.run_number,
       agentType: input.run.agent_type,
       prompt: input.run.prompt,
-      errorMessage: "ACTIONS_RUNNER binding is not configured"
+      errorMessage: `Actions runner binding is not configured for instance type '${instanceType}'`
     });
     await actionsService.completeRun(input.repository.id, input.run.id, {
       status: "failed",
@@ -543,7 +553,7 @@ export async function executeActionRun(input: {
       configFiles[CLAUDE_CODE_CONFIG_FILE_PATH] = repositoryConfig.claudeCodeConfigFileContent;
     }
 
-    const runnerStub = input.env.ACTIONS_RUNNER.getByName(containerInstance);
+    const runnerStub = actionsRunner.getByName(containerInstance);
     const runnerResponse = await runnerStub.fetch("https://actions-container.internal/execute", {
       method: "POST",
       headers: {
@@ -682,7 +692,7 @@ export async function executeActionRun(input: {
     }
 
     try {
-      const runnerStub = input.env.ACTIONS_RUNNER.getByName(containerInstance);
+      const runnerStub = actionsRunner.getByName(containerInstance);
       await runnerStub.fetch("https://actions-container.internal/stop", {
         method: "POST"
       });

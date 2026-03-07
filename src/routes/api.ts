@@ -13,6 +13,10 @@ import {
   triggerActionWorkflows,
   triggerMentionActionRun
 } from "../services/action-trigger-service";
+import {
+  ACTION_CONTAINER_INSTANCE_TYPES,
+  getActionRunnerNamespace
+} from "../services/action-container-instance-types";
 import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 import {
@@ -36,6 +40,7 @@ import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
 import type {
   ActionAgentType,
+  ActionContainerInstanceType,
   ActionRunRecord,
   ActionRunSourceType,
   ActionWorkflowTrigger,
@@ -135,6 +140,7 @@ type UpdateActionsGlobalConfigInput = {
 };
 
 type UpdateRepositoryActionsConfigInput = {
+  instanceType?: ActionContainerInstanceType | null;
   codexConfigFileContent?: string | null;
   claudeCodeConfigFileContent?: string | null;
 };
@@ -320,6 +326,21 @@ function assertActionAgentType(value: unknown, field: string): ActionAgentType {
     });
   }
   return agentType;
+}
+
+function assertActionContainerInstanceType(
+  value: unknown,
+  field: string
+): ActionContainerInstanceType {
+  if (
+    typeof value !== "string" ||
+    !ACTION_CONTAINER_INSTANCE_TYPES.includes(value as ActionContainerInstanceType)
+  ) {
+    throw new HTTPException(400, {
+      message: `Field '${field}' must be one of: ${ACTION_CONTAINER_INSTANCE_TYPES.join(", ")}`
+    });
+  }
+  return value as ActionContainerInstanceType;
 }
 
 function assertActionRunSourceType(value: string | undefined): ActionRunSourceType {
@@ -727,16 +748,19 @@ function shouldSkipActionRunReconciliation(run: ActionRunRecord, now: number): b
 }
 
 async function reconcileRunningActionRuns(input: {
-  env: Pick<AppEnv["Bindings"], "ACTIONS_RUNNER">;
+  env: Pick<
+    AppEnv["Bindings"],
+    | "ACTIONS_RUNNER"
+    | "ACTIONS_RUNNER_BASIC"
+    | "ACTIONS_RUNNER_STANDARD_1"
+    | "ACTIONS_RUNNER_STANDARD_2"
+    | "ACTIONS_RUNNER_STANDARD_3"
+    | "ACTIONS_RUNNER_STANDARD_4"
+  >;
   actionsService: ActionsService;
   repositoryId: string;
   runs: ActionRunRecord[];
 }): Promise<ActionRunRecord[]> {
-  const actionsRunner = input.env.ACTIONS_RUNNER;
-  if (!actionsRunner) {
-    return input.runs;
-  }
-
   const runningRuns = input.runs.filter(
     (run) =>
       (run.status === "queued" || run.status === "running") &&
@@ -758,6 +782,10 @@ async function reconcileRunningActionRuns(input: {
         return;
       }
 
+      const actionsRunner = getActionRunnerNamespace(input.env, run.instance_type ?? "lite");
+      if (!actionsRunner) {
+        return;
+      }
       const state = await fetchActionsContainerState(actionsRunner, containerInstance);
       const containerStatus = state?.status;
       if (
@@ -1126,6 +1154,7 @@ router.get("/repos/:owner/:repo/actions/config", requireSession, async (c) => {
   const config = await actionsService.getRepositoryConfig(repository.id);
   return c.json({
     config: {
+      instanceType: config.instanceType,
       codexConfigFileContent: config.codexConfigFileContent,
       claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
       inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
@@ -1140,6 +1169,13 @@ router.patch("/repos/:owner/:repo/actions/config", requireSession, async (c) => 
   const repo = c.req.param("repo");
   const payload = await parseJsonObject(c.req.raw);
   const patch: UpdateRepositoryActionsConfigInput = {};
+  if (payload.instanceType !== undefined) {
+    const instanceType = payload.instanceType;
+    patch.instanceType =
+      instanceType === null
+        ? null
+        : assertActionContainerInstanceType(instanceType, "instanceType");
+  }
   if (payload.codexConfigFileContent !== undefined) {
     const codexConfigFileContent = assertOptionalNullableRawString(
       payload.codexConfigFileContent,
@@ -1173,6 +1209,7 @@ router.patch("/repos/:owner/:repo/actions/config", requireSession, async (c) => 
   }
 
   if (
+    patch.instanceType === undefined &&
     patch.codexConfigFileContent === undefined &&
     patch.claudeCodeConfigFileContent === undefined
   ) {
@@ -1196,6 +1233,7 @@ router.patch("/repos/:owner/:repo/actions/config", requireSession, async (c) => 
   const config = await actionsService.updateRepositoryConfig(repository.id, patch);
   return c.json({
     config: {
+      instanceType: config.instanceType,
       codexConfigFileContent: config.codexConfigFileContent,
       claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
       inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
@@ -2550,6 +2588,7 @@ router.post("/repos/:owner/:repo/actions/runs/:runId/rerun", requireSession, asy
       : {}),
     triggeredBy: sessionUser.id,
     agentType: sourceRun.agent_type,
+    instanceType: sourceRun.instance_type ?? "lite",
     prompt: sourceRun.prompt
   });
 
@@ -2605,6 +2644,7 @@ router.post("/repos/:owner/:repo/actions/workflows/:workflowId/dispatch", requir
   if (workflow.enabled !== 1) {
     throw new HTTPException(409, { message: "Workflow is disabled" });
   }
+  const repositoryConfig = await actionsService.getRepositoryConfig(repository.id);
 
   const run = await actionsService.createRun({
     repositoryId: repository.id,
@@ -2614,6 +2654,7 @@ router.post("/repos/:owner/:repo/actions/workflows/:workflowId/dispatch", requir
     ...(input.sha ? { triggerSha: input.sha } : {}),
     triggeredBy: sessionUser.id,
     agentType: workflow.agent_type,
+    instanceType: repositoryConfig.instanceType,
     prompt: workflow.prompt
   });
 

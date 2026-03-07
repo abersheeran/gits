@@ -7,6 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getActionRunLogStreamPath,
@@ -17,6 +24,7 @@ import {
   listActionRuns,
   rerunActionRun,
   updateRepositoryActionsConfig,
+  type ActionContainerInstanceType,
   type ActionRunLogStreamEvent,
   type ActionRunRecord,
   type AuthUser,
@@ -28,6 +36,19 @@ import { formatDateTime } from "@/lib/format";
 type RepositoryActionsPageProps = {
   user: AuthUser | null;
 };
+
+const ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS: Array<{
+  value: ActionContainerInstanceType;
+  label: string;
+  spec: string;
+}> = [
+  { value: "lite", label: "lite", spec: "1/16 vCPU · 256 MiB · 2 GB" },
+  { value: "basic", label: "basic", spec: "1/4 vCPU · 1 GiB · 4 GB" },
+  { value: "standard-1", label: "standard-1", spec: "1/2 vCPU · 4 GiB · 8 GB" },
+  { value: "standard-2", label: "standard-2", spec: "1 vCPU · 6 GiB · 12 GB" },
+  { value: "standard-3", label: "standard-3", spec: "2 vCPU · 8 GiB · 16 GB" },
+  { value: "standard-4", label: "standard-4", spec: "4 vCPU · 12 GiB · 20 GB" }
+];
 
 function statusBadgeVariant(status: ActionRunRecord["status"]): "default" | "secondary" | "destructive" | "outline" {
   if (status === "success") {
@@ -265,6 +286,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
   const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
 
+  const [runnerInstanceType, setRunnerInstanceType] = useState<ActionContainerInstanceType>("lite");
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
   const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
   const backgroundRefreshInFlightRef = useRef(false);
@@ -365,6 +387,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
+      setRunnerInstanceType(nextConfig.instanceType);
       setCodexConfigFileContent(nextConfig.codexConfigFileContent);
       setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
     } catch (loadError) {
@@ -382,6 +405,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     if (!canManageActions) {
       setRunnerConfig(null);
       setRunnerConfigSuccess(null);
+      setRunnerInstanceType("lite");
       setCodexConfigFileContent("");
       setClaudeCodeConfigFileContent("");
       return;
@@ -540,6 +564,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setRunnerConfigSuccess(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        instanceType: runnerInstanceType,
         codexConfigFileContent,
         claudeCodeConfigFileContent
       });
@@ -547,6 +572,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
+      setRunnerInstanceType(nextConfig.instanceType);
       setCodexConfigFileContent(nextConfig.codexConfigFileContent);
       setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
       setRunnerConfigSuccess("容器配置已保存。新的 Actions run 会使用当前仓库配置。");
@@ -571,6 +597,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setRunnerConfigSuccess(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        instanceType: null,
         codexConfigFileContent: null,
         claudeCodeConfigFileContent: null
       });
@@ -578,6 +605,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
+      setRunnerInstanceType(nextConfig.instanceType);
       setCodexConfigFileContent(nextConfig.codexConfigFileContent);
       setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
       setRunnerConfigSuccess("已恢复为继承全局默认容器配置。");
@@ -731,6 +759,60 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                   <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
                     <section className="space-y-4 rounded-md border p-4">
                       <div className="space-y-1">
+                        <h2 className="text-sm font-semibold">Instance Type</h2>
+                        <p className="text-xs text-muted-foreground">
+                          这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
+                        </p>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
+                        <div className="space-y-2">
+                          <Label htmlFor="repository-runner-instance-type">实例规格</Label>
+                          <Select
+                            value={runnerInstanceType}
+                            onValueChange={(value) =>
+                              setRunnerInstanceType(value as ActionContainerInstanceType)
+                            }
+                          >
+                            <SelectTrigger id="repository-runner-instance-type">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <table className="min-w-full text-left text-xs">
+                            <thead className="bg-muted/40 text-muted-foreground">
+                              <tr>
+                                <th className="px-3 py-2 font-medium">Instance Type</th>
+                                <th className="px-3 py-2 font-medium">规格</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                <tr
+                                  key={option.value}
+                                  className={
+                                    option.value === runnerInstanceType ? "bg-muted/30" : ""
+                                  }
+                                >
+                                  <td className="px-3 py-2 font-mono">{option.label}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{option.spec}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-4 rounded-md border p-4">
+                      <div className="space-y-1">
                         <h2 className="text-sm font-semibold">Codex</h2>
                         <p className="text-xs text-muted-foreground">
                           {runnerConfig.inheritsGlobalCodexConfig
@@ -846,6 +928,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={statusBadgeVariant(run.status)}>{run.status}</Badge>
                           <Badge variant="outline">{run.agent_type}</Badge>
+                          <Badge variant="outline">{run.instance_type}</Badge>
                           <Badge variant="outline">
                             exit: {run.exit_code === null ? "-" : String(run.exit_code)}
                           </Badge>

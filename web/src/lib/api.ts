@@ -184,6 +184,14 @@ export type ActionWorkflowTrigger =
 
 export type ActionAgentType = "codex" | "claude_code";
 
+export type ActionContainerInstanceType =
+  | "lite"
+  | "basic"
+  | "standard-1"
+  | "standard-2"
+  | "standard-3"
+  | "standard-4";
+
 export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type ActionRunSourceType = "issue" | "pull_request";
 
@@ -218,6 +226,7 @@ export type ActionRunRecord = {
   triggered_by_username: string | null;
   status: ActionRunStatus;
   agent_type: ActionAgentType;
+  instance_type: ActionContainerInstanceType;
   prompt: string;
   logs: string;
   exit_code: number | null;
@@ -287,6 +296,7 @@ export type ActionsGlobalConfig = {
 };
 
 export type RepositoryActionsConfig = {
+  instanceType: ActionContainerInstanceType;
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
   inheritsGlobalCodexConfig: boolean;
@@ -681,6 +691,7 @@ export async function updateRepositoryActionsConfig(
   owner: string,
   repo: string,
   input: {
+    instanceType?: ActionContainerInstanceType | null;
     codexConfigFileContent?: string | null;
     claudeCodeConfigFileContent?: string | null;
   }

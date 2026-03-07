@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS global_settings (
 
 CREATE TABLE IF NOT EXISTS repository_actions_configs (
   repository_id TEXT PRIMARY KEY,
+  instance_type TEXT CHECK (instance_type IN ('lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4')),
   codex_config_file_content TEXT,
   claude_code_config_file_content TEXT,
   updated_at INTEGER NOT NULL,
@@ -180,6 +181,7 @@ CREATE TABLE IF NOT EXISTS action_runs (
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'success', 'failed', 'cancelled')),
   command TEXT NOT NULL,
   agent_type TEXT NOT NULL DEFAULT 'codex' CHECK (agent_type IN ('codex', 'claude_code')),
+  instance_type TEXT NOT NULL DEFAULT 'lite' CHECK (instance_type IN ('lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4')),
   prompt TEXT NOT NULL,
   logs TEXT NOT NULL DEFAULT '',
   exit_code INTEGER,

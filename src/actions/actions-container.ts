@@ -21,7 +21,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-export class ActionsContainer extends Container {
+abstract class BaseActionsContainer extends Container {
   defaultPort = 8080;
   sleepAfter = "10m";
 
@@ -100,3 +100,15 @@ export class ActionsContainer extends Container {
     return jsonResponse({ message: "Not found" }, 404);
   }
 }
+
+export class ActionsContainer extends BaseActionsContainer {}
+
+export class ActionsContainerBasic extends BaseActionsContainer {}
+
+export class ActionsContainerStandard1 extends BaseActionsContainer {}
+
+export class ActionsContainerStandard2 extends BaseActionsContainer {}
+
+export class ActionsContainerStandard3 extends BaseActionsContainer {}
+
+export class ActionsContainerStandard4 extends BaseActionsContainer {}
