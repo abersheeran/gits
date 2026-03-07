@@ -152,6 +152,14 @@ export type ActionsGlobalConfig = {
   updated_at: number | null;
 };
 
+export type RepositoryActionsConfig = {
+  codexConfigFileContent: string;
+  claudeCodeConfigFileContent: string;
+  inheritsGlobalCodexConfig: boolean;
+  inheritsGlobalClaudeCodeConfig: boolean;
+  updated_at: number | null;
+};
+
 export type AppBindings = {
   DB: D1Database;
   GIT_BUCKET: R2Bucket;

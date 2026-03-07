@@ -517,7 +517,7 @@ export async function executeActionRun(input: {
       }
     }
 
-    const globalConfig = await actionsService.getGlobalConfig();
+    const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
     const repositoryOrigin = normalizeCloneOrigin({
       requestOrigin: input.requestOrigin
     });
@@ -536,11 +536,11 @@ export async function executeActionRun(input: {
     };
 
     const configFiles: Record<string, string> = {};
-    if (globalConfig.codexConfigFileContent.length > 0) {
-      configFiles[CODEX_CONFIG_FILE_PATH] = globalConfig.codexConfigFileContent;
+    if (repositoryConfig.codexConfigFileContent.length > 0) {
+      configFiles[CODEX_CONFIG_FILE_PATH] = repositoryConfig.codexConfigFileContent;
     }
-    if (globalConfig.claudeCodeConfigFileContent.length > 0) {
-      configFiles[CLAUDE_CODE_CONFIG_FILE_PATH] = globalConfig.claudeCodeConfigFileContent;
+    if (repositoryConfig.claudeCodeConfigFileContent.length > 0) {
+      configFiles[CLAUDE_CODE_CONFIG_FILE_PATH] = repositoryConfig.claudeCodeConfigFileContent;
     }
 
     const runnerStub = input.env.ACTIONS_RUNNER.getByName(containerInstance);

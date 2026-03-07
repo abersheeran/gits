@@ -4,6 +4,7 @@ import type {
   ActionRunSourceType,
   ActionRunStatus,
   ActionsGlobalConfig,
+  RepositoryActionsConfig,
   ActionWorkflowRecord,
   ActionWorkflowTrigger
 } from "../types";
@@ -15,6 +16,13 @@ type GlobalSettingsKey =
 type GlobalSettingsRow = {
   key: GlobalSettingsKey;
   value: string;
+  updated_at: number;
+};
+
+type RepositoryActionsConfigRow = {
+  repository_id: string;
+  codex_config_file_content: string | null;
+  claude_code_config_file_content: string | null;
   updated_at: number;
 };
 
@@ -105,6 +113,98 @@ export class ActionsService {
     }
 
     return this.getGlobalConfig();
+  }
+
+  private async findRepositoryConfigRow(
+    repositoryId: string
+  ): Promise<RepositoryActionsConfigRow | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+          repository_id,
+          codex_config_file_content,
+          claude_code_config_file_content,
+          updated_at
+         FROM repository_actions_configs
+         WHERE repository_id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId)
+      .first<RepositoryActionsConfigRow>();
+
+    return row ?? null;
+  }
+
+  async getRepositoryConfig(repositoryId: string): Promise<RepositoryActionsConfig> {
+    const [globalConfig, repositoryConfig] = await Promise.all([
+      this.getGlobalConfig(),
+      this.findRepositoryConfigRow(repositoryId)
+    ]);
+
+    const inheritsGlobalCodexConfig =
+      repositoryConfig === null || repositoryConfig.codex_config_file_content === null;
+    const inheritsGlobalClaudeCodeConfig =
+      repositoryConfig === null || repositoryConfig.claude_code_config_file_content === null;
+
+    return {
+      codexConfigFileContent:
+        repositoryConfig?.codex_config_file_content ?? globalConfig.codexConfigFileContent,
+      claudeCodeConfigFileContent:
+        repositoryConfig?.claude_code_config_file_content ?? globalConfig.claudeCodeConfigFileContent,
+      inheritsGlobalCodexConfig,
+      inheritsGlobalClaudeCodeConfig,
+      updated_at: repositoryConfig?.updated_at ?? globalConfig.updated_at
+    };
+  }
+
+  async updateRepositoryConfig(
+    repositoryId: string,
+    patch: {
+      codexConfigFileContent?: string | null;
+      claudeCodeConfigFileContent?: string | null;
+    }
+  ): Promise<RepositoryActionsConfig> {
+    const existing = await this.findRepositoryConfigRow(repositoryId);
+    const nextCodexConfigFileContent =
+      patch.codexConfigFileContent !== undefined
+        ? patch.codexConfigFileContent
+        : (existing?.codex_config_file_content ?? null);
+    const nextClaudeCodeConfigFileContent =
+      patch.claudeCodeConfigFileContent !== undefined
+        ? patch.claudeCodeConfigFileContent
+        : (existing?.claude_code_config_file_content ?? null);
+
+    if (nextCodexConfigFileContent === null && nextClaudeCodeConfigFileContent === null) {
+      await this.db
+        .prepare(`DELETE FROM repository_actions_configs WHERE repository_id = ?`)
+        .bind(repositoryId)
+        .run();
+      return this.getRepositoryConfig(repositoryId);
+    }
+
+    await this.db
+      .prepare(
+        `INSERT INTO repository_actions_configs (
+          repository_id,
+          codex_config_file_content,
+          claude_code_config_file_content,
+          updated_at
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(repository_id)
+        DO UPDATE SET
+          codex_config_file_content = excluded.codex_config_file_content,
+          claude_code_config_file_content = excluded.claude_code_config_file_content,
+          updated_at = excluded.updated_at`
+      )
+      .bind(
+        repositoryId,
+        nextCodexConfigFileContent,
+        nextClaudeCodeConfigFileContent,
+        Date.now()
+      )
+      .run();
+
+    return this.getRepositoryConfig(repositoryId);
   }
 
   async listWorkflows(repositoryId: string): Promise<ActionWorkflowRecord[]> {

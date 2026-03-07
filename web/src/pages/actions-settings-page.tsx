@@ -123,9 +123,9 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Actions 全局配置</CardTitle>
+          <CardTitle>Actions 全局默认配置</CardTitle>
           <CardDescription>
-            这里直接编辑并保存 Codex / Claude Code 的配置文件内容。
+            这里编辑的是全局默认值。仓库 Actions 页面可以在此基础上保存自己的覆盖配置。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

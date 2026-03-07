@@ -1254,6 +1254,155 @@ describe("API issues and pull requests", () => {
     expect(settings.get("actions.claude_code.config_file_content")).toContain("\"permissions\"");
   });
 
+  it("returns repository actions config with global fallback for collaborators", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM repository_actions_configs",
+        first: () => null
+      },
+      {
+        when: "FROM global_settings",
+        all: () => [
+          {
+            key: "actions.codex.config_file_content",
+            value: "model = \"gpt-5-codex\"",
+            updated_at: 10
+          },
+          {
+            key: "actions.claude_code.config_file_content",
+            value: "{\n  \"permissions\": \"bypass\"\n}",
+            updated_at: 12
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/config", {
+        method: "GET",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      config: {
+        codexConfigFileContent: string;
+        claudeCodeConfigFileContent: string;
+        inheritsGlobalCodexConfig: boolean;
+        inheritsGlobalClaudeCodeConfig: boolean;
+        updated_at: number | null;
+      };
+    };
+    expect(body.config.codexConfigFileContent).toContain("gpt-5-codex");
+    expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
+    expect(body.config.inheritsGlobalCodexConfig).toBe(true);
+    expect(body.config.inheritsGlobalClaudeCodeConfig).toBe(true);
+    expect(body.config.updated_at).toBe(12);
+  });
+
+  it("updates repository actions config via repository API", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+
+    let repositoryConfigRow:
+      | {
+          repository_id: string;
+          codex_config_file_content: string | null;
+          claude_code_config_file_content: string | null;
+          updated_at: number;
+        }
+      | null = null;
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM repository_actions_configs",
+        first: () => repositoryConfigRow
+      },
+      {
+        when: "INSERT INTO repository_actions_configs",
+        run: (params) => {
+          repositoryConfigRow = {
+            repository_id: String(params[0]),
+            codex_config_file_content:
+              params[1] === null ? null : String(params[1]),
+            claude_code_config_file_content:
+              params[2] === null ? null : String(params[2]),
+            updated_at: Number(params[3])
+          };
+          return { success: true };
+        }
+      },
+      {
+        when: "DELETE FROM repository_actions_configs",
+        run: () => {
+          repositoryConfigRow = null;
+          return { success: true };
+        }
+      },
+      {
+        when: "FROM global_settings",
+        all: () => []
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/config", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          codexConfigFileContent: "model = \"gpt-5-codex\"\napproval_policy = \"never\"",
+          claudeCodeConfigFileContent: "{\n  \"permissions\": \"bypass\"\n}"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      config: {
+        codexConfigFileContent: string;
+        claudeCodeConfigFileContent: string;
+        inheritsGlobalCodexConfig: boolean;
+        inheritsGlobalClaudeCodeConfig: boolean;
+      };
+    };
+    expect(body.config.codexConfigFileContent).toContain("approval_policy");
+    expect(body.config.claudeCodeConfigFileContent).toContain("\"permissions\": \"bypass\"");
+    expect(body.config.inheritsGlobalCodexConfig).toBe(false);
+    expect(body.config.inheritsGlobalClaudeCodeConfig).toBe(false);
+    expect(repositoryConfigRow?.codex_config_file_content).toContain("approval_policy");
+    expect(repositoryConfigRow?.claude_code_config_file_content).toContain("\"permissions\"");
+  });
+
   it("reconciles running action runs when container is already stopped", async () => {
     const now = Date.now();
     const fetchContainerState = vi.fn(async () =>

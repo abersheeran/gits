@@ -134,6 +134,11 @@ type UpdateActionsGlobalConfigInput = {
   claudeCodeConfigFileContent?: string | null;
 };
 
+type UpdateRepositoryActionsConfigInput = {
+  codexConfigFileContent?: string | null;
+  claudeCodeConfigFileContent?: string | null;
+};
+
 const USERNAME_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?$/;
 const REPO_NAME_REGEX = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1096,6 +1101,105 @@ router.patch("/settings/actions", requireSession, async (c) => {
     config: {
       codexConfigFileContent: config.codexConfigFileContent,
       claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
+      updated_at: config.updated_at
+    }
+  });
+});
+
+router.get("/repos/:owner/:repo/actions/config", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canManageActions = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canManageActions) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const actionsService = new ActionsService(c.env.DB);
+  const config = await actionsService.getRepositoryConfig(repository.id);
+  return c.json({
+    config: {
+      codexConfigFileContent: config.codexConfigFileContent,
+      claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
+      inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
+      inheritsGlobalClaudeCodeConfig: config.inheritsGlobalClaudeCodeConfig,
+      updated_at: config.updated_at
+    }
+  });
+});
+
+router.patch("/repos/:owner/:repo/actions/config", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const payload = await parseJsonObject(c.req.raw);
+  const patch: UpdateRepositoryActionsConfigInput = {};
+  if (payload.codexConfigFileContent !== undefined) {
+    const codexConfigFileContent = assertOptionalNullableRawString(
+      payload.codexConfigFileContent,
+      "codexConfigFileContent"
+    );
+    if (
+      codexConfigFileContent !== null &&
+      codexConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
+    ) {
+      throw new HTTPException(400, {
+        message: `Field 'codexConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
+      });
+    }
+    patch.codexConfigFileContent = codexConfigFileContent;
+  }
+
+  if (payload.claudeCodeConfigFileContent !== undefined) {
+    const claudeCodeConfigFileContent = assertOptionalNullableRawString(
+      payload.claudeCodeConfigFileContent,
+      "claudeCodeConfigFileContent"
+    );
+    if (
+      claudeCodeConfigFileContent !== null &&
+      claudeCodeConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
+    ) {
+      throw new HTTPException(400, {
+        message: `Field 'claudeCodeConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
+      });
+    }
+    patch.claudeCodeConfigFileContent = claudeCodeConfigFileContent;
+  }
+
+  if (
+    patch.codexConfigFileContent === undefined &&
+    patch.claudeCodeConfigFileContent === undefined
+  ) {
+    throw new HTTPException(400, { message: "No updatable fields provided" });
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canManageActions = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
+  if (!canManageActions) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const actionsService = new ActionsService(c.env.DB);
+  const config = await actionsService.updateRepositoryConfig(repository.id, patch);
+  return c.json({
+    config: {
+      codexConfigFileContent: config.codexConfigFileContent,
+      claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
+      inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
+      inheritsGlobalClaudeCodeConfig: config.inheritsGlobalClaudeCodeConfig,
       updated_at: config.updated_at
     }
   });

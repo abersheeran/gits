@@ -1,42 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Play, Workflow } from "lucide-react";
+import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getActionRunLogStreamPath,
-  createActionWorkflow,
-  dispatchActionWorkflow,
   formatApiError,
   getActionRun,
+  getRepositoryActionsConfig,
   getRepositoryDetail,
   listActionRuns,
-  listActionWorkflows,
   rerunActionRun,
-  updateActionWorkflow,
+  updateRepositoryActionsConfig,
   type ActionRunLogStreamEvent,
   type ActionRunRecord,
-  type ActionAgentType,
-  type ActionWorkflowRecord,
-  type ActionWorkflowTrigger,
   type AuthUser,
+  type RepositoryActionsConfig,
   type RepositoryDetailResponse
 } from "@/lib/api";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 
 type RepositoryActionsPageProps = {
   user: AuthUser | null;
@@ -266,33 +253,29 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const selectedRunId = searchParams.get("runId")?.trim() || null;
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [workflows, setWorkflows] = useState<ActionWorkflowRecord[]>([]);
   const [runs, setRuns] = useState<ActionRunRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [creatingWorkflow, setCreatingWorkflow] = useState(false);
-  const [dispatchingWorkflowId, setDispatchingWorkflowId] = useState<string | null>(null);
   const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
+  const [runnerConfig, setRunnerConfig] = useState<RepositoryActionsConfig | null>(null);
+  const [loadingRunnerConfig, setLoadingRunnerConfig] = useState(false);
+  const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
+  const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
 
-  const [workflowName, setWorkflowName] = useState("");
-  const [workflowTriggerEvent, setWorkflowTriggerEvent] = useState<ActionWorkflowTrigger>(
-    "pull_request_created"
-  );
-  const [workflowAgentType, setWorkflowAgentType] = useState<ActionAgentType>("codex");
-  const [workflowPrompt, setWorkflowPrompt] = useState(
-    "请完整检查这个仓库并运行测试，修复失败并提交变更。"
-  );
-  const [workflowPushBranchRegex, setWorkflowPushBranchRegex] = useState("");
-  const [workflowPushTagRegex, setWorkflowPushTagRegex] = useState("");
-  const [workflowEnabled, setWorkflowEnabled] = useState(true);
+  const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
+  const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
   const backgroundRefreshInFlightRef = useRef(false);
   const mountedRef = useRef(true);
   const loadDataRef = useRef<((options?: { background?: boolean }) => Promise<void>) | null>(null);
   const runsRef = useRef<ActionRunRecord[]>([]);
 
   const canManageActions = Boolean(user) && Boolean(detail?.permissions.canCreateIssueOrPullRequest);
+  const configEditorStyle = {
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
+  } as const;
 
   const loadData = useCallback(
     async (options?: { background?: boolean }) => {
@@ -305,9 +288,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       }
       setError(null);
       try {
-        const [nextDetail, nextWorkflows, nextRuns] = await Promise.all([
+        const [nextDetail, nextRuns] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listActionWorkflows(owner, repo),
           listActionRuns(owner, repo, { limit: 50 })
         ]);
         let mergedRuns = nextRuns;
@@ -327,7 +309,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           return;
         }
         setDetail(nextDetail);
-        setWorkflows(nextWorkflows);
         setRuns((currentRuns) => mergeRuns(currentRuns, mergedRuns));
       } catch (loadError) {
         if (mountedRef.current) {
@@ -370,6 +351,42 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const loadRunnerConfig = useCallback(async () => {
+    if (!owner || !repo || !canManageActions) {
+      return;
+    }
+
+    setLoadingRunnerConfig(true);
+    try {
+      const nextConfig = await getRepositoryActionsConfig(owner, repo);
+      if (!mountedRef.current) {
+        return;
+      }
+      setRunnerConfig(nextConfig);
+      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
+      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+    } catch (loadError) {
+      if (mountedRef.current) {
+        setError(formatApiError(loadError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingRunnerConfig(false);
+      }
+    }
+  }, [canManageActions, owner, repo]);
+
+  useEffect(() => {
+    if (!canManageActions) {
+      setRunnerConfig(null);
+      setRunnerConfigSuccess(null);
+      setCodexConfigFileContent("");
+      setClaudeCodeConfigFileContent("");
+      return;
+    }
+    void loadRunnerConfig();
+  }, [canManageActions, loadRunnerConfig]);
 
   const liveExpandedRunIds = useMemo(
     () =>
@@ -494,78 +511,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     };
   }, [liveExpandedRunIdsKey, owner, repo]);
 
-  async function handleCreateWorkflow(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canManageActions || creatingWorkflow) {
-      return;
-    }
-
-    setCreatingWorkflow(true);
-    setError(null);
-    try {
-      await createActionWorkflow(owner, repo, {
-        name: workflowName,
-        triggerEvent: workflowTriggerEvent,
-        agentType: workflowAgentType,
-        prompt: workflowPrompt,
-        pushBranchRegex:
-          workflowTriggerEvent === "push"
-            ? (workflowPushBranchRegex.trim() || null)
-            : null,
-        pushTagRegex:
-          workflowTriggerEvent === "push" ? (workflowPushTagRegex.trim() || null) : null,
-        enabled: workflowEnabled
-      });
-      setWorkflowName("");
-      setWorkflowAgentType("codex");
-      setWorkflowPrompt("请完整检查这个仓库并运行测试，修复失败并提交变更。");
-      setWorkflowTriggerEvent("pull_request_created");
-      setWorkflowPushBranchRegex("");
-      setWorkflowPushTagRegex("");
-      setWorkflowEnabled(true);
-      await loadData();
-    } catch (createError) {
-      setError(formatApiError(createError));
-    } finally {
-      setCreatingWorkflow(false);
-    }
-  }
-
-  async function handleToggleWorkflow(workflow: ActionWorkflowRecord) {
-    if (!canManageActions) {
-      return;
-    }
-
-    setError(null);
-    try {
-      await updateActionWorkflow(owner, repo, workflow.id, {
-        enabled: workflow.enabled !== 1
-      });
-      await loadData();
-    } catch (toggleError) {
-      setError(formatApiError(toggleError));
-    }
-  }
-
-  async function handleDispatchWorkflow(workflow: ActionWorkflowRecord) {
-    if (!canManageActions || dispatchingWorkflowId) {
-      return;
-    }
-
-    setDispatchingWorkflowId(workflow.id);
-    setError(null);
-    try {
-      await dispatchActionWorkflow(owner, repo, workflow.id);
-      await loadData();
-    } catch (dispatchError) {
-      setError(formatApiError(dispatchError));
-    } finally {
-      setDispatchingWorkflowId(null);
-    }
-  }
-
   async function handleRerunRun(run: ActionRunRecord) {
-    if (!canManageActions || rerunningRunId || dispatchingWorkflowId) {
+    if (!canManageActions || rerunningRunId) {
       return;
     }
 
@@ -578,6 +525,69 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setError(formatApiError(rerunError));
     } finally {
       setRerunningRunId(null);
+    }
+  }
+
+  async function handleSaveRunnerConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageActions || savingRunnerConfig) {
+      return;
+    }
+
+    setSavingRunnerConfig(true);
+    setError(null);
+    setRunnerConfigSuccess(null);
+    try {
+      const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        codexConfigFileContent,
+        claudeCodeConfigFileContent
+      });
+      if (!mountedRef.current) {
+        return;
+      }
+      setRunnerConfig(nextConfig);
+      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
+      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      setRunnerConfigSuccess("容器配置已保存。新的 Actions run 会使用当前仓库配置。");
+    } catch (saveError) {
+      if (mountedRef.current) {
+        setError(formatApiError(saveError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSavingRunnerConfig(false);
+      }
+    }
+  }
+
+  async function handleResetRunnerConfig() {
+    if (!canManageActions || savingRunnerConfig) {
+      return;
+    }
+
+    setSavingRunnerConfig(true);
+    setError(null);
+    setRunnerConfigSuccess(null);
+    try {
+      const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        codexConfigFileContent: null,
+        claudeCodeConfigFileContent: null
+      });
+      if (!mountedRef.current) {
+        return;
+      }
+      setRunnerConfig(nextConfig);
+      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
+      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      setRunnerConfigSuccess("已恢复为继承全局默认容器配置。");
+    } catch (resetError) {
+      if (mountedRef.current) {
+        setError(formatApiError(resetError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSavingRunnerConfig(false);
+      }
     }
   }
 
@@ -596,7 +606,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     );
   }
 
-  if (error) {
+  if (error && !detail) {
     return (
       <Alert variant="destructive">
         <AlertTitle>加载失败</AlertTitle>
@@ -611,6 +621,20 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
 
   return (
     <div className="space-y-4">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {runnerConfigSuccess ? (
+        <Alert>
+          <AlertTitle>已保存</AlertTitle>
+          <AlertDescription>{runnerConfigSuccess}</AlertDescription>
+        </Alert>
+      ) : null}
+
       <header className="space-y-3 rounded-md border bg-card p-4 shadow-sm">
         <h1 className="text-xl font-semibold">
           <Link className="gh-link" to={`/repo/${owner}/${repo}`}>
@@ -654,169 +678,99 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </nav>
       </header>
 
+
       {canManageActions ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Create workflow</CardTitle>
+            <CardTitle className="text-base">Cloudflare container config</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={handleCreateWorkflow}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="workflow-name">Name</Label>
-                  <Input
-                    id="workflow-name"
-                    value={workflowName}
-                    onChange={(event) => setWorkflowName(event.target.value)}
-                    placeholder="CI"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="workflow-agent">Agent</Label>
-                  <Select
-                    value={workflowAgentType}
-                    onValueChange={(value) => setWorkflowAgentType(value as ActionAgentType)}
+            {loadingRunnerConfig || !runnerConfig ? (
+              <p className="text-sm text-muted-foreground">正在加载容器配置...</p>
+            ) : (
+              <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
+                <section className="space-y-4 rounded-md border p-4">
+                  <div className="space-y-1">
+                    <h2 className="text-sm font-semibold">Codex</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {runnerConfig.inheritsGlobalCodexConfig
+                        ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                        : "当前使用当前仓库保存的覆盖配置。"}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="repository-codex-config-file-content">
+                      配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
+                    </Label>
+                    <Textarea
+                      id="repository-codex-config-file-content"
+                      value={codexConfigFileContent}
+                      onChange={(event) => setCodexConfigFileContent(event.target.value)}
+                      rows={10}
+                      wrap="off"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                      style={configEditorStyle}
+                    />
+                  </div>
+                </section>
+
+                <section className="space-y-4 rounded-md border p-4">
+                  <div className="space-y-1">
+                    <h2 className="text-sm font-semibold">Claude Code</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {runnerConfig.inheritsGlobalClaudeCodeConfig
+                        ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
+                        : "当前使用当前仓库保存的覆盖配置。"}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="repository-claude-code-config-file-content">
+                      配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
+                    </Label>
+                    <Textarea
+                      id="repository-claude-code-config-file-content"
+                      value={claudeCodeConfigFileContent}
+                      onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
+                      rows={10}
+                      wrap="off"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
+                      style={configEditorStyle}
+                    />
+                  </div>
+                </section>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="submit" disabled={savingRunnerConfig}>
+                    {savingRunnerConfig ? "保存中..." : "保存容器配置"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={savingRunnerConfig}
+                    onClick={() => {
+                      void handleResetRunnerConfig();
+                    }}
                   >
-                    <SelectTrigger id="workflow-agent">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="codex">codex</SelectItem>
-                      <SelectItem value="claude_code">claude_code</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="workflow-event">Trigger event</Label>
-                  <Select
-                    value={workflowTriggerEvent}
-                    onValueChange={(value) => setWorkflowTriggerEvent(value as ActionWorkflowTrigger)}
-                  >
-                    <SelectTrigger id="workflow-event">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pull_request_created">pull_request_created</SelectItem>
-                      <SelectItem value="push">push</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    恢复全局默认
+                  </Button>
                   <p className="text-xs text-muted-foreground">
-                    `issue_created` is built-in and runs automatically.
+                    updated: {formatDateTime(runnerConfig.updated_at)}
                   </p>
                 </div>
-              </div>
-              {workflowTriggerEvent === "push" ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="workflow-push-branch-regex">Branch Regex（可选）</Label>
-                    <Input
-                      id="workflow-push-branch-regex"
-                      value={workflowPushBranchRegex}
-                      onChange={(event) => setWorkflowPushBranchRegex(event.target.value)}
-                      placeholder="^main$|^release/.*$"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="workflow-push-tag-regex">Tag Regex（可选）</Label>
-                    <Input
-                      id="workflow-push-tag-regex"
-                      value={workflowPushTagRegex}
-                      onChange={(event) => setWorkflowPushTagRegex(event.target.value)}
-                      placeholder="^v\\d+\\.\\d+\\.\\d+$"
-                    />
-                  </div>
-                </div>
-              ) : null}
-              <div className="space-y-2">
-                <Label htmlFor="workflow-prompt">Agent Prompt</Label>
-                <Textarea
-                  id="workflow-prompt"
-                  value={workflowPrompt}
-                  onChange={(event) => setWorkflowPrompt(event.target.value)}
-                  placeholder="让 agent 在容器里执行的任务描述"
-                  rows={6}
-                  required
-                />
-              </div>
-              <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-                <Checkbox
-                  checked={workflowEnabled}
-                  onCheckedChange={(checked) => setWorkflowEnabled(Boolean(checked))}
-                />
-                Enabled
-              </label>
-              <div>
-                <Button type="submit" disabled={creatingWorkflow}>
-                  {creatingWorkflow ? "Creating..." : "Create workflow"}
-                </Button>
-              </div>
-            </form>
+              </form>
+            )}
           </CardContent>
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Workflows</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {workflows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No workflows yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {workflows.map((workflow) => (
-                <li key={workflow.id} className="space-y-2 rounded-md border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{workflow.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {workflow.trigger_event} · updated {formatRelativeTime(workflow.updated_at)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{workflow.agent_type}</Badge>
-                      <Badge variant={workflow.enabled === 1 ? "default" : "outline"}>
-                        {workflow.enabled === 1 ? "enabled" : "disabled"}
-                      </Badge>
-                      {canManageActions ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            void handleToggleWorkflow(workflow);
-                          }}
-                        >
-                          {workflow.enabled === 1 ? "Disable" : "Enable"}
-                        </Button>
-                      ) : null}
-                      {canManageActions ? (
-                        <Button
-                          size="sm"
-                          disabled={dispatchingWorkflowId !== null || workflow.enabled !== 1}
-                          onClick={() => {
-                            void handleDispatchWorkflow(workflow);
-                          }}
-                        >
-                          <Play className="mr-1 h-3.5 w-3.5" />
-                          Run
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {workflow.trigger_event === "push" ? (
-                    <p className="text-xs text-muted-foreground">
-                      branch regex: {workflow.push_branch_regex ?? "(all)"} · tag regex:{" "}
-                      {workflow.push_tag_regex ?? "(all)"}
-                    </p>
-                  ) : null}
-                  <pre className="overflow-x-auto rounded-md bg-muted/30 p-2 text-xs">{workflow.prompt}</pre>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -857,7 +811,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={rerunningRunId !== null || dispatchingWorkflowId !== null}
+                            disabled={rerunningRunId !== null}
                             onClick={() => {
                               void handleRerunRun(run);
                             }}

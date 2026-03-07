@@ -286,6 +286,14 @@ export type ActionsGlobalConfig = {
   updated_at: number | null;
 };
 
+export type RepositoryActionsConfig = {
+  codexConfigFileContent: string;
+  claudeCodeConfigFileContent: string;
+  inheritsGlobalCodexConfig: boolean;
+  inheritsGlobalClaudeCodeConfig: boolean;
+  updated_at: number | null;
+};
+
 type ApiRequestInit = RequestInit & {
   bodyJson?: unknown;
 };
@@ -656,6 +664,34 @@ export async function updateActionsGlobalConfig(input: {
     method: "PATCH",
     bodyJson: input
   });
+  return response.config;
+}
+
+export async function getRepositoryActionsConfig(
+  owner: string,
+  repo: string
+): Promise<RepositoryActionsConfig> {
+  const response = await requestJson<{ config: RepositoryActionsConfig }>(
+    `/api/repos/${owner}/${repo}/actions/config`
+  );
+  return response.config;
+}
+
+export async function updateRepositoryActionsConfig(
+  owner: string,
+  repo: string,
+  input: {
+    codexConfigFileContent?: string | null;
+    claudeCodeConfigFileContent?: string | null;
+  }
+): Promise<RepositoryActionsConfig> {
+  const response = await requestJson<{ config: RepositoryActionsConfig }>(
+    `/api/repos/${owner}/${repo}/actions/config`,
+    {
+      method: "PATCH",
+      bodyJson: input
+    }
+  );
   return response.config;
 }
 
