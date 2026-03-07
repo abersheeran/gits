@@ -2,6 +2,10 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import type { AccessTokenContext, AuthUser } from "../types";
 
+export const ACTIONS_SYSTEM_USER_ID = "actions-system-user";
+export const ACTIONS_SYSTEM_USERNAME = "actions";
+export const ACTIONS_SYSTEM_EMAIL = "actions@system.local";
+
 type UserRow = {
   id: string;
   username: string;
@@ -41,9 +45,6 @@ export class AuthService {
     return new TextEncoder().encode(this.jwtSecret);
   }
 
-  private static readonly ACTIONS_USER_ID = "actions-system-user";
-  private static readonly ACTIONS_USERNAME = "actions";
-  private static readonly ACTIONS_EMAIL = "actions@system.local";
   private static readonly ACTIONS_PASSWORD_HASH = "!";
 
   async hashPassword(password: string): Promise<string> {
@@ -117,14 +118,14 @@ export class AuthService {
   }
 
   async getOrCreateActionsUser(): Promise<AuthUser> {
-    const byId = await this.getUserById(AuthService.ACTIONS_USER_ID);
+    const byId = await this.getUserById(ACTIONS_SYSTEM_USER_ID);
     if (byId) {
       return byId;
     }
 
     const byUsername = await this.db
       .prepare(`SELECT id, username FROM users WHERE username = ? LIMIT 1`)
-      .bind(AuthService.ACTIONS_USERNAME)
+      .bind(ACTIONS_SYSTEM_USERNAME)
       .first<AuthUser>();
     if (byUsername) {
       return byUsername;
@@ -136,9 +137,9 @@ export class AuthService {
          VALUES (?, ?, ?, ?, ?)`
       )
       .bind(
-        AuthService.ACTIONS_USER_ID,
-        AuthService.ACTIONS_USERNAME,
-        AuthService.ACTIONS_EMAIL,
+        ACTIONS_SYSTEM_USER_ID,
+        ACTIONS_SYSTEM_USERNAME,
+        ACTIONS_SYSTEM_EMAIL,
         AuthService.ACTIONS_PASSWORD_HASH,
         Date.now()
       )
@@ -146,10 +147,10 @@ export class AuthService {
       .catch(() => undefined);
 
     const created =
-      (await this.getUserById(AuthService.ACTIONS_USER_ID)) ??
+      (await this.getUserById(ACTIONS_SYSTEM_USER_ID)) ??
       (await this.db
         .prepare(`SELECT id, username FROM users WHERE username = ? LIMIT 1`)
-        .bind(AuthService.ACTIONS_USERNAME)
+        .bind(ACTIONS_SYSTEM_USERNAME)
         .first<AuthUser>());
     if (!created) {
       throw new Error("Failed to create actions system user");

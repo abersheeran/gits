@@ -14,6 +14,8 @@ type RunRequest = {
   sha?: string;
   gitUsername?: string;
   gitToken?: string;
+  gitCommitName?: string;
+  gitCommitEmail?: string;
   env?: Record<string, string>;
   configFiles?: Record<string, string>;
 };
@@ -559,15 +561,31 @@ async function runAgentPrompt(
   prompt: string,
   workspaceDir: string,
   runtimeEnv: Record<string, string> | undefined,
+  gitCommitIdentity:
+    | {
+        name?: string;
+        email?: string;
+      }
+    | undefined,
   outputHandlers?: {
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
   },
   signal?: AbortSignal
 ): Promise<AgentCommandResult> {
+  const commitName = gitCommitIdentity?.name?.trim() ?? "";
+  const commitEmail = gitCommitIdentity?.email?.trim() ?? "";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...(runtimeEnv ?? {}),
+    ...(commitName && commitEmail
+      ? {
+          GIT_AUTHOR_NAME: commitName,
+          GIT_AUTHOR_EMAIL: commitEmail,
+          GIT_COMMITTER_NAME: commitName,
+          GIT_COMMITTER_EMAIL: commitEmail
+        }
+      : {}),
     HOME: RUNTIME_HOME_PATH,
     XDG_CONFIG_HOME: path.join(RUNTIME_HOME_PATH, ".config"),
     GITS_ACTION_AGENT_TYPE: agentType,
@@ -695,6 +713,34 @@ async function prepareWorkspace(request: RunRequest): Promise<{ workspaceRoot: s
   };
 }
 
+async function configureWorkspaceGitIdentity(
+  workspaceDir: string,
+  input: {
+    name?: string;
+    email?: string;
+  }
+): Promise<void> {
+  const name = input.name?.trim() ?? "";
+  const email = input.email?.trim() ?? "";
+  if (!name || !email) {
+    return;
+  }
+
+  const configEntries = [
+    ["user.name", name],
+    ["user.email", email]
+  ] as const;
+
+  for (const [key, value] of configEntries) {
+    const result = await runCommand("git", ["-C", workspaceDir, "config", key, value]);
+    if (!result.spawnError && result.exitCode === 0) {
+      continue;
+    }
+    const detail = buildCommandFailureDetail(result);
+    throw new Error(`git config ${key} failed: ${detail || `exit code ${result.exitCode}`}`);
+  }
+}
+
 async function applyConfigFiles(configFiles: Record<string, string> | undefined): Promise<void> {
   if (!configFiles) {
     return;
@@ -798,6 +844,12 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
     const prepared = await prepareWorkspace(runRequest);
     workspaceRoot = prepared.workspaceRoot;
     await applyConfigFiles(runRequest.configFiles);
+    if (runRequest.repositoryUrl?.trim()) {
+      await configureWorkspaceGitIdentity(prepared.workspaceDir, {
+        name: runRequest.gitCommitName,
+        email: runRequest.gitCommitEmail
+      });
+    }
 
     response.statusCode = 200;
     response.setHeader("content-type", "application/x-ndjson");
@@ -809,6 +861,10 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
       prompt,
       prepared.workspaceDir,
       runRequest.env,
+      {
+        name: runRequest.gitCommitName,
+        email: runRequest.gitCommitEmail
+      },
       {
         onStdout: (chunk) => {
           writeRunStreamEvent(response, {

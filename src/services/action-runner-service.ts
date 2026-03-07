@@ -5,7 +5,7 @@ import {
 } from "./action-runner-prompt-tokens";
 import { getActionRunnerNamespace } from "./action-container-instance-types";
 import { buildActionRunLifecycleLines } from "./action-run-log-format";
-import { AuthService } from "./auth-service";
+import { ACTIONS_SYSTEM_EMAIL, ACTIONS_SYSTEM_USERNAME } from "./auth-service";
 import { ActionsService } from "./actions-service";
 import { createSecretRedactor } from "../utils/secret-redaction";
 
@@ -499,72 +499,22 @@ export async function executeActionRun(input: {
     return;
   }
 
-  let ephemeralTokenId: string | null = null;
-  let ephemeralToken: string | null = null;
-  let issueReplyTokenId: string | null = null;
-  let issueReplyToken: string | null = null;
-  let prCreateTokenId: string | null = null;
-  let prCreateToken: string | null = null;
   let startedAt: number | null = null;
   let runnerResult: RunnerExecuteResult | undefined;
-  let runtimePrompt = input.run.prompt;
-
-  const refreshLogRedactor = (): void => {
-    redactLogs = createSecretRedactor([ephemeralToken, issueReplyToken, prCreateToken]);
-  };
 
   try {
-    if (input.triggeredByUser) {
-      const authService = new AuthService(input.env.DB, input.env.JWT_SECRET);
-      const createdToken = await authService.createAccessToken({
-        userId: input.triggeredByUser.id,
-        name: `actions-run-${input.run.run_number}`,
-        expiresAt: Date.now() + 15 * 60 * 1000,
-        internal: true
-      });
-      ephemeralTokenId = createdToken.tokenId;
-      ephemeralToken = createdToken.token;
-      refreshLogRedactor();
-
-      const needsIssueReplyToken =
-        input.run.trigger_source_type === "issue" ||
-        runtimePrompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER);
-      const needsPrCreateToken =
-        input.run.trigger_source_type === "issue" ||
-        runtimePrompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER);
-
-      if (needsIssueReplyToken) {
-        const replyToken = await authService.createAccessToken({
-          userId: input.triggeredByUser.id,
-          name: `actions-issue-reply-${input.run.run_number}`,
-          expiresAt: Date.now() + 20 * 60 * 1000,
-          internal: true,
-          displayAsActions: true
-        });
-        issueReplyTokenId = replyToken.tokenId;
-        issueReplyToken = replyToken.token;
-        refreshLogRedactor();
-        runtimePrompt = runtimePrompt.replaceAll(ISSUE_REPLY_TOKEN_PLACEHOLDER, replyToken.token);
-      }
-
-      if (needsPrCreateToken) {
-        const prToken = await authService.createAccessToken({
-          userId: input.triggeredByUser.id,
-          name: `actions-pr-create-${input.run.run_number}`,
-          expiresAt: Date.now() + 20 * 60 * 1000,
-          internal: true
-        });
-        prCreateTokenId = prToken.tokenId;
-        prCreateToken = prToken.token;
-        refreshLogRedactor();
-        runtimePrompt = runtimePrompt.replaceAll(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER, prToken.token);
-      }
-    }
-
     const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
     const repositoryOrigin = normalizeCloneOrigin({
       requestOrigin: input.requestOrigin
     });
+    const needsIssueReplyToken =
+      input.triggeredByUser !== undefined &&
+      (input.run.trigger_source_type === "issue" ||
+        input.run.prompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER));
+    const needsPrCreateToken =
+      input.triggeredByUser !== undefined &&
+      (input.run.trigger_source_type === "issue" ||
+        input.run.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER));
     const envVars: Record<string, string> = {
       GITS_ACTION_RUN_ID: input.run.id,
       GITS_ACTION_RUN_NUMBER: String(input.run.run_number),
@@ -574,9 +524,7 @@ export async function executeActionRun(input: {
       GITS_REPOSITORY_NAME: input.repository.name,
       ...(input.run.trigger_source_type === "issue" && input.run.trigger_source_number !== null
         ? { GITS_TRIGGER_ISSUE_NUMBER: String(input.run.trigger_source_number) }
-        : {}),
-      ...(issueReplyToken ? { GITS_ISSUE_REPLY_TOKEN: issueReplyToken } : {}),
-      ...(prCreateToken ? { GITS_PR_CREATE_TOKEN: prCreateToken } : {})
+        : {})
     };
 
     const configFiles: Record<string, string> = {};
@@ -595,12 +543,18 @@ export async function executeActionRun(input: {
       },
       body: JSON.stringify({
         agentType: input.run.agent_type,
-        prompt: runtimePrompt,
+        prompt: input.run.prompt,
         repositoryUrl: `${repositoryOrigin}/${input.repository.owner_username}/${input.repository.name}.git`,
         ref: input.run.trigger_ref ?? undefined,
         sha: input.run.trigger_sha ?? undefined,
-        gitUsername: input.triggeredByUser?.username,
-        gitToken: ephemeralToken ?? undefined,
+        runNumber: input.run.run_number,
+        triggeredByUserId: input.triggeredByUser?.id,
+        triggeredByUsername: input.triggeredByUser?.username,
+        triggerSourceType: input.run.trigger_source_type,
+        enableIssueReplyToken: needsIssueReplyToken,
+        enablePrCreateToken: needsPrCreateToken,
+        gitCommitName: ACTIONS_SYSTEM_USERNAME,
+        gitCommitEmail: ACTIONS_SYSTEM_EMAIL,
         env: envVars,
         configFiles
       })
@@ -711,25 +665,6 @@ export async function executeActionRun(input: {
       exitCode: runnerResult?.exitCode ?? null
     });
   } finally {
-    if (input.triggeredByUser && (ephemeralTokenId || issueReplyTokenId || prCreateTokenId)) {
-      const authService = new AuthService(input.env.DB, input.env.JWT_SECRET);
-      if (ephemeralTokenId) {
-        await authService
-          .revokeAccessToken(input.triggeredByUser.id, ephemeralTokenId)
-          .catch(() => undefined);
-      }
-      if (issueReplyTokenId) {
-        await authService
-          .revokeAccessToken(input.triggeredByUser.id, issueReplyTokenId)
-          .catch(() => undefined);
-      }
-      if (prCreateTokenId) {
-        await authService
-          .revokeAccessToken(input.triggeredByUser.id, prCreateTokenId)
-          .catch(() => undefined);
-      }
-    }
-
     try {
       const runnerStub = actionsRunner.getByName(containerInstance);
       await runnerStub.fetch("https://actions-container.internal/stop", {

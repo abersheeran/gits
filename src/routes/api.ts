@@ -2458,9 +2458,18 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
     }
   }
   try {
+    let pullRequestAuthorId = sessionUser.id;
+    const accessTokenContext = c.get("accessTokenContext");
+    const isActionsPullRequest = accessTokenContext?.displayAsActions === true;
+    if (isActionsPullRequest) {
+      const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+      const actionsUser = await authService.getOrCreateActionsUser();
+      pullRequestAuthorId = actionsUser.id;
+    }
+
     const createdPullRequest = await pullRequestService.createPullRequest({
       repositoryId: repository.id,
-      authorId: sessionUser.id,
+      authorId: pullRequestAuthorId,
       title: input.title,
       ...(input.body !== undefined ? { body: input.body } : {}),
       baseRef: baseRef.name,

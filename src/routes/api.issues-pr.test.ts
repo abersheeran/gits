@@ -804,6 +804,97 @@ describe("API issues and pull requests", () => {
     expect(body.issues[0]?.title).toBe("Issue one");
   });
 
+  it("creates pull requests as actions when token requests actions identity", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(null);
+    vi.spyOn(AuthService.prototype, "verifyAccessTokenWithMetadata").mockResolvedValue({
+      user: { id: "user-2", username: "bob" },
+      context: {
+        tokenId: "tok-actions-pr",
+        isInternal: true,
+        displayAsActions: true
+      }
+    });
+    vi.spyOn(AuthService.prototype, "getOrCreateActionsUser").mockResolvedValue({
+      id: "actions-system-user",
+      username: "actions"
+    });
+    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+    ]);
+
+    const now = Date.now();
+    let insertedAuthorId: string | null = null;
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "state = 'open' AND base_ref = ? AND head_ref = ?",
+        first: () => null
+      },
+      {
+        when: "RETURNING pull_number_seq AS pull_number",
+        first: () => ({ pull_number: 2 })
+      },
+      {
+        when: "INSERT INTO pull_requests",
+        run: (params) => {
+          insertedAuthorId = String(params[3] ?? "");
+          return { success: true };
+        }
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-2",
+          repository_id: "repo-1",
+          number: 2,
+          author_id: "actions-system-user",
+          author_username: "actions",
+          title: "Add feature",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer pat-actions-pr",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          title: "Add feature",
+          baseRef: "main",
+          headRef: "feature"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    expect(insertedAuthorId).toBe("actions-system-user");
+    const body = (await response.json()) as { pullRequest: { author_username: string } };
+    expect(body.pullRequest.author_username).toBe("actions");
+  });
+
   it("rejects pull request review for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-3",
