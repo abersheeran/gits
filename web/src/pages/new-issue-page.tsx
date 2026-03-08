@@ -38,6 +38,7 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
   const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
@@ -137,6 +138,7 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       const issue = await createIssue(owner, repo, {
         title,
         body,
+        acceptanceCriteria,
         labelIds: selectedLabelIds,
         assigneeUserIds: selectedAssigneeIds,
         milestoneId: selectedMilestoneId
@@ -179,6 +181,13 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
               onChange={setBody}
               rows={10}
               previewEmptyText="Nothing to preview."
+            />
+            <MarkdownEditor
+              label="验收标准"
+              value={acceptanceCriteria}
+              onChange={setAcceptanceCriteria}
+              rows={6}
+              previewEmptyText="暂无验收标准。"
             />
             <div className="flex flex-wrap gap-2">
               <PendingButton type="submit" pending={submitting} pendingText="Creating issue...">

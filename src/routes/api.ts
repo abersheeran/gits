@@ -26,7 +26,9 @@ import { RepositoryMetadataService } from "../services/repository-metadata-servi
 import {
   RepositoryBrowserService,
   RepositoryBrowseInvalidPathError,
-  RepositoryBrowsePathNotFoundError
+  RepositoryBrowsePathNotFoundError,
+  type RepositoryCompareResult,
+  type RepositoryDiffHunk
 } from "../services/repository-browser-service";
 import { IssueService, type IssueListState } from "../services/issue-service";
 import {
@@ -53,8 +55,11 @@ import type {
   AppEnv,
   IssueCommentRecord,
   IssueState,
+  IssueTaskStatus,
   MilestoneState,
   PullRequestReviewDecision,
+  PullRequestReviewThreadRecord,
+  PullRequestReviewThreadSide,
   PullRequestState,
   ReactionContent,
   ReactionSubjectType,
@@ -86,6 +91,7 @@ type CreateTokenInput = {
 type CreateIssueInput = {
   title: string;
   body?: string;
+  acceptanceCriteria?: string;
   labelIds?: string[];
   assigneeUserIds?: string[];
   milestoneId?: string | null;
@@ -95,6 +101,8 @@ type UpdateIssueInput = {
   title?: string;
   body?: string;
   state?: IssueState;
+  taskStatus?: IssueTaskStatus;
+  acceptanceCriteria?: string;
   labelIds?: string[];
   assigneeUserIds?: string[];
   milestoneId?: string | null;
@@ -132,6 +140,24 @@ type UpdatePullRequestInput = {
 type CreatePullRequestReviewInput = {
   decision: PullRequestReviewDecision;
   body?: string;
+};
+
+type CreatePullRequestReviewThreadInput = {
+  path: string;
+  baseOid: string;
+  headOid: string;
+  startSide: PullRequestReviewThreadSide;
+  startLine: number;
+  endSide: PullRequestReviewThreadSide;
+  endLine: number;
+  hunkHeader: string;
+  body?: string;
+  suggestedCode?: string;
+};
+
+type CreatePullRequestReviewThreadCommentInput = {
+  body?: string;
+  suggestedCode?: string;
 };
 
 type CreateActionWorkflowInput = {
@@ -173,6 +199,7 @@ type UpdateRepositoryActionsConfigInput = {
 type TriggerRepositoryAgentInput = {
   agentType?: ActionAgentType;
   prompt?: string;
+  threadId?: string;
 };
 
 type CreateRepositoryLabelInput = {
@@ -203,6 +230,7 @@ type UpdateRepositoryMilestoneInput = {
 const USERNAME_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?$/;
 const REPO_NAME_REGEX = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const COMMIT_OID_REGEX = /^[0-9a-f]{40}$/i;
 const MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH = 120_000;
 const RESERVED_USERNAMES = new Set(["actions"]);
 
@@ -434,6 +462,22 @@ function assertIssueState(value: unknown): IssueState {
   return state;
 }
 
+function assertIssueTaskStatus(value: unknown): IssueTaskStatus {
+  const taskStatus = assertString(value, "taskStatus");
+  if (
+    taskStatus !== "open" &&
+    taskStatus !== "agent-working" &&
+    taskStatus !== "waiting-human" &&
+    taskStatus !== "done"
+  ) {
+    throw new HTTPException(400, {
+      message:
+        "Field 'taskStatus' must be one of: open, agent-working, waiting-human, done"
+    });
+  }
+  return taskStatus;
+}
+
 function parsePullRequestListState(value: string | undefined): PullRequestListState {
   if (!value || value === "open") {
     return "open";
@@ -464,6 +508,16 @@ function assertPullRequestReviewDecision(value: unknown): PullRequestReviewDecis
     });
   }
   return decision;
+}
+
+function assertPullRequestReviewThreadSide(value: unknown): PullRequestReviewThreadSide {
+  const side = assertString(value, "side");
+  if (side !== "base" && side !== "head") {
+    throw new HTTPException(400, {
+      message: "Field 'side' must be one of: base, head"
+    });
+  }
+  return side;
 }
 
 function assertActionWorkflowTrigger(value: unknown, field: string): ActionWorkflowTrigger {
@@ -613,6 +667,124 @@ function assertPositiveInteger(value: string, field: string): number {
   return parsed;
 }
 
+function assertPositiveIntegerInput(value: unknown, field: string): number {
+  if (typeof value === "number") {
+    if (Number.isInteger(value) && value > 0) {
+      return value;
+    }
+    throw new HTTPException(400, { message: `Field '${field}' must be a positive integer` });
+  }
+
+  if (typeof value === "string") {
+    return assertPositiveInteger(value, field);
+  }
+
+  throw new HTTPException(400, { message: `Field '${field}' must be a positive integer` });
+}
+
+function assertCommitOid(value: unknown, field: string): string {
+  const oid = assertString(value, field);
+  if (!COMMIT_OID_REGEX.test(oid)) {
+    throw new HTTPException(400, { message: `Field '${field}' must be a 40-character commit oid` });
+  }
+  return oid.toLowerCase();
+}
+
+function assertOptionalSuggestedCode(value: unknown): string | undefined {
+  const normalized = assertOptionalString(value, "suggestedCode");
+  if (normalized === undefined || normalized.length === 0) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function buildPullRequestReviewThreadSuggestion(args: {
+  side: PullRequestReviewThreadSide;
+  startLine: number;
+  endLine: number;
+  suggestedCode?: string;
+}) {
+  if (!args.suggestedCode) {
+    return null;
+  }
+  if (args.side !== "head") {
+    throw new HTTPException(400, {
+      message: "Suggested changes are only supported for head-side diff ranges"
+    });
+  }
+  return {
+    side: args.side,
+    start_line: args.startLine,
+    end_line: args.endLine,
+    code: args.suggestedCode
+  };
+}
+
+function getDiffLineNumberForSide(
+  line: RepositoryDiffHunk["lines"][number],
+  side: PullRequestReviewThreadSide
+): number | null {
+  return side === "base" ? line.oldLineNumber : line.newLineNumber;
+}
+
+function assertDiffBoundPullRequestThreadInput(args: {
+  comparison: RepositoryCompareResult;
+  input: CreatePullRequestReviewThreadInput;
+}): { line: number; side: PullRequestReviewThreadSide } {
+  if (args.input.startSide !== args.input.endSide) {
+    throw new HTTPException(400, {
+      message: "Review thread ranges must stay on one diff side for this iteration"
+    });
+  }
+  if (args.input.endLine < args.input.startLine) {
+    throw new HTTPException(400, {
+      message: "Field 'endLine' must be greater than or equal to 'startLine'"
+    });
+  }
+
+  const compareBaseOid = args.comparison.mergeBaseOid ?? args.comparison.baseOid;
+  if (args.input.baseOid !== compareBaseOid || args.input.headOid !== args.comparison.headOid) {
+    throw new HTTPException(409, {
+      message: "Pull request diff range is stale. Reload the compare view and try again."
+    });
+  }
+
+  const change = args.comparison.changes.find((item) => item.path === args.input.path);
+  if (!change) {
+    throw new HTTPException(400, { message: "Review thread path is not part of the current diff" });
+  }
+
+  const hunk = change.hunks.find((item) => item.header === args.input.hunkHeader);
+  if (!hunk) {
+    throw new HTTPException(400, {
+      message: "Review thread hunk is not part of the current diff"
+    });
+  }
+
+  const selectedLines = hunk.lines.filter((line) => {
+    if (line.kind === "meta") {
+      return false;
+    }
+    const lineNumber = getDiffLineNumberForSide(line, args.input.startSide);
+    return (
+      lineNumber !== null &&
+      lineNumber >= args.input.startLine &&
+      lineNumber <= args.input.endLine
+    );
+  });
+
+  if (selectedLines.length !== args.input.endLine - args.input.startLine + 1) {
+    throw new HTTPException(400, {
+      message: "Review thread range must map to a contiguous block within one diff hunk"
+    });
+  }
+
+  return {
+    line: args.input.startLine,
+    side: args.input.startSide
+  };
+}
+
 function assertOptionalIssueNumberArray(value: unknown, field: string): number[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -675,11 +847,16 @@ function buildMentionPrompt(input: { title: string; body: string }): string {
 function buildIssueConversationHistory(input: {
   issueAuthorUsername: string;
   issueBody: string;
+  issueAcceptanceCriteria: string;
   comments: readonly IssueCommentRecord[];
 }): string {
   const sections: string[] = [];
   sections.push(`[Issue Description by @${input.issueAuthorUsername}]`);
   sections.push(input.issueBody.trim() ? input.issueBody : "(empty)");
+  sections.push("");
+  sections.push("[Acceptance Criteria]");
+  const acceptanceCriteria = input.issueAcceptanceCriteria ?? "";
+  sections.push(acceptanceCriteria.trim() ? acceptanceCriteria : "(none)");
 
   if (input.comments.length === 0) {
     sections.push("");
@@ -715,6 +892,7 @@ function buildInteractiveIssueAgentPrompt(input: {
   repo: string;
   issueNumber: number;
   issueTitle: string;
+  acceptanceCriteria: string;
   issueConversationHistory: string;
   reason: "assign" | "resume";
   instruction?: string;
@@ -727,6 +905,9 @@ function buildInteractiveIssueAgentPrompt(input: {
       ? "You are taking ownership of a repository issue."
       : "Continue the existing work for this repository issue.",
     `Repository: ${input.owner}/${input.repo}`,
+    "[Acceptance Criteria]",
+    input.acceptanceCriteria.trim() || "(none)",
+    "",
     buildIssueCommentMentionPrompt({
       issueNumber: input.issueNumber,
       issueTitle: input.issueTitle,
@@ -762,6 +943,71 @@ function buildPullRequestReviewHistory(input: {
     .join("\n");
 }
 
+function buildPullRequestReviewThreadHistory(input: {
+  threads: ReadonlyArray<
+    Pick<
+      PullRequestReviewThreadRecord,
+      | "author_username"
+      | "path"
+      | "body"
+      | "status"
+      | "base_oid"
+      | "head_oid"
+      | "start_side"
+      | "start_line"
+      | "end_side"
+      | "end_line"
+      | "hunk_header"
+      | "comments"
+    >
+  >;
+}): string {
+  if (input.threads.length === 0) {
+    return "(none)";
+  }
+
+  return input.threads
+    .map((thread) => {
+      const anchorLabel =
+        thread.start_line === thread.end_line && thread.start_side === thread.end_side
+          ? `${thread.path}:${thread.start_line} (${thread.start_side})`
+          : `${thread.path}:${thread.start_line}-${thread.end_line} (${thread.start_side})`;
+      const sections = [
+        `- status: ${thread.status}`,
+        `  author: @${thread.author_username}`,
+        `  location: ${anchorLabel}`
+      ];
+      if (thread.base_oid && thread.head_oid) {
+        sections.push(`  compare_range: ${thread.base_oid}..${thread.head_oid}`);
+      }
+      if (thread.hunk_header) {
+        sections.push(`  hunk: ${thread.hunk_header}`);
+      }
+
+      if (thread.comments.length === 0) {
+        sections.push("  body:");
+        sections.push(...(thread.body.trim() || "(empty)").split("\n").map((line) => `    ${line}`));
+        return sections.join("\n");
+      }
+
+      sections.push("  comments:");
+      for (const comment of thread.comments) {
+        sections.push(`    - author: @${comment.author_username}`);
+        sections.push("      body:");
+        const body = comment.body.trim() || "(empty)";
+        sections.push(...body.split("\n").map((line) => `        ${line}`));
+        if (comment.suggestion) {
+          sections.push(
+            `      suggestion (${comment.suggestion.side} ${comment.suggestion.start_line}-${comment.suggestion.end_line}):`
+          );
+          sections.push(...comment.suggestion.code.split("\n").map((line) => `        ${line}`));
+        }
+      }
+      return sections.join("\n");
+    })
+    .join("\n");
+}
+
 function buildInteractivePullRequestAgentPrompt(input: {
   owner: string;
   repo: string;
@@ -775,11 +1021,15 @@ function buildInteractivePullRequestAgentPrompt(input: {
     decision: PullRequestReviewDecision;
     body: string;
   }>;
+  reviewThreads: ReadonlyArray<PullRequestReviewThreadRecord>;
+  focusedThread?: PullRequestReviewThreadRecord | null;
   instruction?: string;
 }): string {
   const taskInstruction =
     input.instruction?.trim() ||
-    "Review the feedback, update the pull request branch with the required changes, and preserve the existing intent of the pull request.";
+    (input.focusedThread
+      ? "Resolve the focused review thread, update the pull request branch with the required changes, and keep the pull request intent intact."
+      : "Review the feedback, update the pull request branch with the required changes, and preserve the existing intent of the pull request.");
   return [
     "Continue work on an existing pull request.",
     `Repository: ${input.owner}/${input.repo}`,
@@ -793,6 +1043,25 @@ function buildInteractivePullRequestAgentPrompt(input: {
     "[Reviews]",
     buildPullRequestReviewHistory({ reviews: input.reviews }),
     "",
+    "[Review Threads]",
+    buildPullRequestReviewThreadHistory({ threads: input.reviewThreads }),
+    "",
+    ...(input.focusedThread
+      ? [
+          "[Focused Review Thread]",
+          buildPullRequestReviewThreadHistory({
+            threads: [input.focusedThread]
+          }),
+          ""
+        ]
+      : []),
+    ...(input.focusedThread
+      ? [
+          "[Focus Requirement]",
+          "Prioritize fixing the focused review thread first, then address other still-open review threads if they are directly related.",
+          ""
+        ]
+      : []),
     "[Instruction]",
     taskInstruction
   ].join("\n");
@@ -836,6 +1105,7 @@ function buildIssueCreatedAgentPrompt(input: {
   issueNumber: number;
   issueTitle: string;
   issueBody: string;
+  acceptanceCriteria: string;
   issueConversationHistory: string;
   triggerReason: "issue_created" | "issue_comment_added";
   triggerCommentId?: string;
@@ -866,6 +1136,8 @@ issue_title: ${input.issueTitle}
 trigger_reason: ${input.triggerReason}
 ${triggerCommentLines ? `${triggerCommentLines}\n` : ""}issue_body:
 ${input.issueBody || "(empty)"}
+acceptance_criteria:
+${input.acceptanceCriteria || "(none)"}
 issue_conversation_history:
 ${input.issueConversationHistory}
 default_branch_ref: ${input.defaultBranchRef ?? "(not found)"}
@@ -1010,6 +1282,50 @@ async function buildAgentSessionSourceContext(args: {
     title: null,
     url,
     commentId: args.session.source_comment_id
+  };
+}
+
+async function buildAgentSessionDetailPayload(args: {
+  db: D1Database;
+  repository: RepositoryRecord;
+  owner: string;
+  repo: string;
+  session: AgentSessionRecord;
+  viewerId?: string;
+}): Promise<{
+  session: AgentSessionRecord;
+  linkedRun: ActionRunRecord | null;
+  sourceContext: Awaited<ReturnType<typeof buildAgentSessionSourceContext>>;
+  artifacts: Awaited<ReturnType<AgentSessionService["listArtifacts"]>>;
+  usageRecords: Awaited<ReturnType<AgentSessionService["listUsageRecords"]>>;
+  interventions: Awaited<ReturnType<AgentSessionService["listInterventions"]>>;
+}> {
+  const agentSessionService = new AgentSessionService(args.db);
+  const actionsService = new ActionsService(args.db);
+  const [linkedRun, sourceContext, artifacts, usageRecords, interventions] = await Promise.all([
+    args.session.linked_run_id
+      ? actionsService.findRunById(args.repository.id, args.session.linked_run_id)
+      : null,
+    buildAgentSessionSourceContext({
+      db: args.db,
+      repository: args.repository,
+      owner: args.owner,
+      repo: args.repo,
+      session: args.session,
+      ...(args.viewerId ? { viewerId: args.viewerId } : {})
+    }),
+    agentSessionService.listArtifacts(args.repository.id, args.session.id),
+    agentSessionService.listUsageRecords(args.repository.id, args.session.id),
+    agentSessionService.listInterventions(args.repository.id, args.session.id)
+  ]);
+
+  return {
+    session: args.session,
+    linkedRun,
+    sourceContext,
+    artifacts,
+    usageRecords,
+    interventions
   };
 }
 
@@ -1996,7 +2312,8 @@ router.get("/repos/:owner/:repo/issues/:number", optionalSession, async (c) => {
   if (!issue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
-  return c.json({ issue });
+  const linkedPullRequests = await issueService.listLinkedPullRequestsForIssue(repository.id, number);
+  return c.json({ issue, linkedPullRequests });
 });
 
 router.get("/repos/:owner/:repo/issues/:number/comments", optionalSession, async (c) => {
@@ -2030,6 +2347,10 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
   };
   if (payload.body !== undefined) {
     input.body = assertOptionalString(payload.body, "body") ?? "";
+  }
+  if (payload.acceptanceCriteria !== undefined) {
+    input.acceptanceCriteria =
+      assertOptionalString(payload.acceptanceCriteria, "acceptanceCriteria") ?? "";
   }
   if (payload.labelIds !== undefined) {
     const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
@@ -2094,6 +2415,9 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
     authorId: sessionUser.id,
     title: input.title,
     ...(input.body !== undefined ? { body: input.body } : {}),
+    ...(input.acceptanceCriteria !== undefined
+      ? { acceptanceCriteria: input.acceptanceCriteria }
+      : {}),
     ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {})
   });
   if (input.labelIds !== undefined) {
@@ -2108,6 +2432,7 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
   const issueConversationHistory = buildIssueConversationHistory({
     issueAuthorUsername: issue.author_username,
     issueBody: issue.body,
+    issueAcceptanceCriteria: issue.acceptance_criteria,
     comments: []
   });
   const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -2133,6 +2458,7 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
         issueNumber: issue.number,
         issueTitle: issue.title,
         issueBody: issue.body,
+        acceptanceCriteria: issue.acceptance_criteria,
         issueConversationHistory,
         triggerReason: "issue_created",
         defaultBranchRef: defaultBranchTarget.ref,
@@ -2173,6 +2499,13 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
   if (payload.state !== undefined) {
     patch.state = assertIssueState(payload.state);
   }
+  if (payload.taskStatus !== undefined) {
+    patch.taskStatus = assertIssueTaskStatus(payload.taskStatus);
+  }
+  if (payload.acceptanceCriteria !== undefined) {
+    patch.acceptanceCriteria =
+      assertOptionalString(payload.acceptanceCriteria, "acceptanceCriteria") ?? "";
+  }
   if (payload.labelIds !== undefined) {
     const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
     if (labelIds !== undefined) {
@@ -2195,6 +2528,8 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
     patch.title === undefined &&
     patch.body === undefined &&
     patch.state === undefined &&
+    patch.taskStatus === undefined &&
+    patch.acceptanceCriteria === undefined &&
     patch.labelIds === undefined &&
     patch.assigneeUserIds === undefined &&
     patch.milestoneId === undefined
@@ -2254,6 +2589,10 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
     ...(patch.title !== undefined ? { title: patch.title } : {}),
     ...(patch.body !== undefined ? { body: patch.body } : {}),
     ...(patch.state !== undefined ? { state: patch.state } : {}),
+    ...(patch.taskStatus !== undefined ? { taskStatus: patch.taskStatus } : {}),
+    ...(patch.acceptanceCriteria !== undefined
+      ? { acceptanceCriteria: patch.acceptanceCriteria }
+      : {}),
     ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {})
   });
   if (!updatedIssue) {
@@ -2339,6 +2678,7 @@ router.post("/repos/:owner/:repo/issues/:number/comments", requireSession, async
   const issueConversationHistory = buildIssueConversationHistory({
     issueAuthorUsername: issue.author_username,
     issueBody: issue.body,
+    issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
   const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -2366,6 +2706,7 @@ router.post("/repos/:owner/:repo/issues/:number/comments", requireSession, async
           issueNumber: issue.number,
           issueTitle: issue.title,
           issueBody: issue.body,
+          acceptanceCriteria: issue.acceptance_criteria,
           issueConversationHistory,
           triggerReason: "issue_comment_added",
           triggerCommentId: comment.id,
@@ -2415,6 +2756,12 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
       input.prompt = prompt;
     }
   }
+  if (payload.threadId !== undefined) {
+    const threadId = assertOptionalString(payload.threadId, "threadId");
+    if (threadId !== undefined) {
+      input.threadId = threadId;
+    }
+  }
 
   const repositoryService = new RepositoryService(c.env.DB);
   const sessionUser = mustSessionUser(c);
@@ -2442,6 +2789,7 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
   const issueConversationHistory = buildIssueConversationHistory({
     issueAuthorUsername: issue.author_username,
     issueBody: issue.body,
+    issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
   const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -2459,6 +2807,7 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
       repo,
       issueNumber: issue.number,
       issueTitle: issue.title,
+      acceptanceCriteria: issue.acceptance_criteria,
       issueConversationHistory,
       reason: "assign",
       ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
@@ -2471,7 +2820,12 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
     requestOrigin: new URL(c.req.url).origin
   });
 
-  return c.json(execution, 202);
+  const updatedIssue =
+    (await issueService.updateIssue(repository.id, issue.number, {
+      taskStatus: "agent-working"
+    })) ?? issue;
+
+  return c.json({ ...execution, issue: updatedIssue }, 202);
 });
 
 router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, async (c) => {
@@ -2516,6 +2870,7 @@ router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, a
   const issueConversationHistory = buildIssueConversationHistory({
     issueAuthorUsername: issue.author_username,
     issueBody: issue.body,
+    issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
   const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -2533,6 +2888,7 @@ router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, a
       repo,
       issueNumber: issue.number,
       issueTitle: issue.title,
+      acceptanceCriteria: issue.acceptance_criteria,
       issueConversationHistory,
       reason: "resume",
       ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
@@ -2545,7 +2901,12 @@ router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, a
     requestOrigin: new URL(c.req.url).origin
   });
 
-  return c.json(execution, 202);
+  const updatedIssue =
+    (await issueService.updateIssue(repository.id, issue.number, {
+      taskStatus: "agent-working"
+    })) ?? issue;
+
+  return c.json({ ...execution, issue: updatedIssue }, 202);
 });
 
 router.get("/repos/:owner/:repo/pulls", optionalSession, async (c) => {
@@ -2609,6 +2970,51 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
     pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
   ]);
   return c.json({ pullRequest, reviewSummary, closingIssueNumbers });
+});
+
+router.get("/repos/:owner/:repo/pulls/:number/provenance", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const pullRequestService = new PullRequestService(c.env.DB);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(
+    repository.id,
+    number,
+    sessionUser?.id
+  );
+  if (!pullRequest) {
+    throw new HTTPException(404, { message: "Pull request not found" });
+  }
+
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const [latestSession] = await agentSessionService.listLatestSessionsBySource(
+    repository.id,
+    "pull_request",
+    [number]
+  );
+
+  if (!latestSession) {
+    return c.json({ latestSession: null });
+  }
+
+  const detail = await buildAgentSessionDetailPayload({
+    db: c.env.DB,
+    repository,
+    owner,
+    repo,
+    session: latestSession,
+    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+  });
+  return c.json({ latestSession: detail });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number/reviews", optionalSession, async (c) => {
@@ -2687,6 +3093,272 @@ router.post("/repos/:owner/:repo/pulls/:number/reviews", requireSession, async (
   return c.json({ review, reviewSummary: nextReviewSummary }, 201);
 });
 
+router.get("/repos/:owner/:repo/pulls/:number/review-threads", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const pullRequestService = new PullRequestService(c.env.DB);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(
+    repository.id,
+    number,
+    sessionUser?.id
+  );
+  if (!pullRequest) {
+    throw new HTTPException(404, { message: "Pull request not found" });
+  }
+
+  const reviewThreads = await pullRequestService.listPullRequestReviewThreads(repository.id, number);
+  return c.json({ reviewThreads });
+});
+
+router.post("/repos/:owner/:repo/pulls/:number/review-threads", requireSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const number = assertPositiveInteger(c.req.param("number"), "number");
+  const payload = await parseJsonObject(c.req.raw);
+  const input: CreatePullRequestReviewThreadInput = {
+    path: assertString(payload.path, "path"),
+    baseOid: assertCommitOid(payload.baseOid, "baseOid"),
+    headOid: assertCommitOid(payload.headOid, "headOid"),
+    startSide: assertPullRequestReviewThreadSide(payload.startSide),
+    startLine: assertPositiveIntegerInput(payload.startLine, "startLine"),
+    endSide: assertPullRequestReviewThreadSide(payload.endSide),
+    endLine: assertPositiveIntegerInput(payload.endLine, "endLine"),
+    hunkHeader: assertString(payload.hunkHeader, "hunkHeader")
+  };
+  const body = assertOptionalString(payload.body, "body");
+  if (body !== undefined && body.length > 0) {
+    input.body = body;
+  }
+  const suggestedCode = assertOptionalSuggestedCode(payload.suggestedCode);
+  if (suggestedCode !== undefined) {
+    input.suggestedCode = suggestedCode;
+  }
+  if (!input.body && !input.suggestedCode) {
+    throw new HTTPException(400, {
+      message: "Review threads require either a body or suggestedCode"
+    });
+  }
+
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = mustSessionUser(c);
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    userId: sessionUser.id
+  });
+  const canReviewPullRequest = await repositoryService.isOwnerOrCollaborator(
+    repository,
+    sessionUser.id
+  );
+  if (!canReviewPullRequest) {
+    throw new HTTPException(403, { message: "Forbidden" });
+  }
+
+  const pullRequestService = new PullRequestService(c.env.DB);
+  const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+  if (!pullRequest) {
+    throw new HTTPException(404, { message: "Pull request not found" });
+  }
+  if (pullRequest.state !== "open") {
+    throw new HTTPException(409, { message: "Pull request must be open to create a review thread" });
+  }
+  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const comparison = await browserService.compareRefs({
+    owner,
+    repo,
+    baseRef: pullRequest.base_ref,
+    headRef: pullRequest.head_ref
+  });
+  const legacyLocation = assertDiffBoundPullRequestThreadInput({
+    comparison,
+    input
+  });
+  const suggestion = buildPullRequestReviewThreadSuggestion({
+    side: input.startSide,
+    startLine: input.startLine,
+    endLine: input.endLine,
+    ...(input.suggestedCode !== undefined ? { suggestedCode: input.suggestedCode } : {})
+  });
+
+  const reviewThread = await pullRequestService.createPullRequestReviewThread({
+    repositoryId: repository.id,
+    pullRequestId: pullRequest.id,
+    pullRequestNumber: number,
+    authorId: sessionUser.id,
+    path: input.path,
+    line: legacyLocation.line,
+    side: legacyLocation.side,
+    body: input.body ?? "",
+    baseOid: input.baseOid,
+    headOid: input.headOid,
+    startSide: input.startSide,
+    startLine: input.startLine,
+    endSide: input.endSide,
+    endLine: input.endLine,
+    hunkHeader: input.hunkHeader,
+    suggestion
+  });
+  return c.json({ reviewThread }, 201);
+});
+
+router.post(
+  "/repos/:owner/:repo/pulls/:number/review-threads/:threadId/comments",
+  requireSession,
+  async (c) => {
+    const owner = c.req.param("owner");
+    const repo = c.req.param("repo");
+    const number = assertPositiveInteger(c.req.param("number"), "number");
+    const threadId = assertString(c.req.param("threadId"), "threadId");
+    const payload = await parseJsonObject(c.req.raw);
+    const input: CreatePullRequestReviewThreadCommentInput = {};
+    const body = assertOptionalString(payload.body, "body");
+    if (body !== undefined && body.length > 0) {
+      input.body = body;
+    }
+    const suggestedCode = assertOptionalSuggestedCode(payload.suggestedCode);
+    if (suggestedCode !== undefined) {
+      input.suggestedCode = suggestedCode;
+    }
+    if (!input.body && !input.suggestedCode) {
+      throw new HTTPException(400, {
+        message: "Review thread comments require either a body or suggestedCode"
+      });
+    }
+
+    const repositoryService = new RepositoryService(c.env.DB);
+    const sessionUser = mustSessionUser(c);
+    const repository = await findReadableRepositoryOr404({
+      repositoryService,
+      owner,
+      repo,
+      userId: sessionUser.id
+    });
+    const canReviewPullRequest = await repositoryService.isOwnerOrCollaborator(
+      repository,
+      sessionUser.id
+    );
+    if (!canReviewPullRequest) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    const pullRequestService = new PullRequestService(c.env.DB);
+    const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+    if (!pullRequest) {
+      throw new HTTPException(404, { message: "Pull request not found" });
+    }
+    if (pullRequest.state !== "open") {
+      throw new HTTPException(409, {
+        message: "Pull request must be open to comment on a review thread"
+      });
+    }
+
+    const existingThread = await pullRequestService.findPullRequestReviewThreadById(
+      repository.id,
+      number,
+      threadId
+    );
+    if (!existingThread) {
+      throw new HTTPException(404, { message: "Review thread not found" });
+    }
+    if (existingThread.status === "resolved") {
+      throw new HTTPException(409, { message: "Resolved review threads cannot be updated" });
+    }
+
+    const comment = await pullRequestService.createPullRequestReviewThreadComment({
+      repositoryId: repository.id,
+      pullRequestId: pullRequest.id,
+      pullRequestNumber: number,
+      threadId,
+      authorId: sessionUser.id,
+      body: input.body ?? "",
+      suggestion: buildPullRequestReviewThreadSuggestion({
+        side: existingThread.start_side,
+        startLine: existingThread.start_line,
+        endLine: existingThread.end_line,
+        ...(input.suggestedCode !== undefined ? { suggestedCode: input.suggestedCode } : {})
+      })
+    });
+    const reviewThread = await pullRequestService.findPullRequestReviewThreadById(
+      repository.id,
+      number,
+      threadId
+    );
+    if (!reviewThread) {
+      throw new HTTPException(404, { message: "Review thread not found" });
+    }
+
+    return c.json({ comment, reviewThread }, 201);
+  }
+);
+
+router.post(
+  "/repos/:owner/:repo/pulls/:number/review-threads/:threadId/resolve",
+  requireSession,
+  async (c) => {
+    const owner = c.req.param("owner");
+    const repo = c.req.param("repo");
+    const number = assertPositiveInteger(c.req.param("number"), "number");
+    const threadId = assertString(c.req.param("threadId"), "threadId");
+
+    const repositoryService = new RepositoryService(c.env.DB);
+    const sessionUser = mustSessionUser(c);
+    const repository = await findReadableRepositoryOr404({
+      repositoryService,
+      owner,
+      repo,
+      userId: sessionUser.id
+    });
+    const canReviewPullRequest = await repositoryService.isOwnerOrCollaborator(
+      repository,
+      sessionUser.id
+    );
+    if (!canReviewPullRequest) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    const pullRequestService = new PullRequestService(c.env.DB);
+    const pullRequest = await pullRequestService.findPullRequestByNumber(repository.id, number);
+    if (!pullRequest) {
+      throw new HTTPException(404, { message: "Pull request not found" });
+    }
+
+    const existingThread = await pullRequestService.findPullRequestReviewThreadById(
+      repository.id,
+      number,
+      threadId
+    );
+    if (!existingThread) {
+      throw new HTTPException(404, { message: "Review thread not found" });
+    }
+    if (existingThread.status === "resolved") {
+      return c.json({ reviewThread: existingThread });
+    }
+
+    const reviewThread = await pullRequestService.resolvePullRequestReviewThread({
+      repositoryId: repository.id,
+      pullRequestNumber: number,
+      threadId,
+      resolvedBy: sessionUser.id
+    });
+    if (!reviewThread) {
+      throw new HTTPException(404, { message: "Review thread not found" });
+    }
+
+    return c.json({ reviewThread });
+  }
+);
+
 router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, async (c) => {
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
@@ -2701,6 +3373,9 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
     if (prompt !== undefined) {
       input.prompt = prompt;
     }
+  }
+  if (payload.threadId !== undefined) {
+    input.threadId = assertString(payload.threadId, "threadId");
   }
 
   const repositoryService = new RepositoryService(c.env.DB);
@@ -2725,7 +3400,19 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
     throw new HTTPException(409, { message: "Pull request must be open to resume an agent" });
   }
 
-  const reviews = await pullRequestService.listPullRequestReviews(repository.id, number);
+  const [reviews, reviewThreads] = await Promise.all([
+    pullRequestService.listPullRequestReviews(repository.id, number),
+    pullRequestService.listPullRequestReviewThreads(repository.id, number)
+  ]);
+  const focusedThread = input.threadId
+    ? reviewThreads.find((thread) => thread.id === input.threadId) ?? null
+    : null;
+  if (input.threadId && !focusedThread) {
+    throw new HTTPException(404, { message: "Review thread not found" });
+  }
+  if (focusedThread?.status === "resolved") {
+    throw new HTTPException(409, { message: "Resolved review threads cannot resume an agent" });
+  }
   const agentType = input.agentType ?? "codex";
 
   const execution = await triggerInteractiveAgentSession({
@@ -2743,6 +3430,8 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
       baseRef: pullRequest.base_ref,
       headRef: pullRequest.head_ref,
       reviews,
+      reviewThreads,
+      ...(focusedThread ? { focusedThread } : {}),
       ...(input.prompt !== undefined ? { instruction: input.prompt } : {})
     }),
     ...(pullRequest.head_ref ? { triggerRef: pullRequest.head_ref } : {}),
@@ -3910,25 +4599,39 @@ router.get("/repos/:owner/:repo/agent-sessions/:sessionId", optionalSession, asy
   if (!session) {
     throw new HTTPException(404, { message: "Agent session not found" });
   }
+  return c.json(
+    await buildAgentSessionDetailPayload({
+      db: c.env.DB,
+      repository,
+      owner,
+      repo,
+      session,
+      ...(sessionUser ? { viewerId: sessionUser.id } : {})
+    })
+  );
+});
 
-  const actionsService = new ActionsService(c.env.DB);
-  const linkedRun = session.linked_run_id
-    ? await actionsService.findRunById(repository.id, session.linked_run_id)
-    : null;
-  const sourceContext = await buildAgentSessionSourceContext({
-    db: c.env.DB,
-    repository,
+router.get("/repos/:owner/:repo/agent-sessions/:sessionId/artifacts", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const sessionId = assertString(c.req.param("sessionId"), "sessionId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
     owner,
     repo,
-    session,
-    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+    ...(sessionUser ? { userId: sessionUser.id } : {})
   });
 
-  return c.json({
-    session,
-    linkedRun,
-    sourceContext
-  });
+  const agentSessionService = new AgentSessionService(c.env.DB);
+  const session = await agentSessionService.findSessionById(repository.id, sessionId);
+  if (!session) {
+    throw new HTTPException(404, { message: "Agent session not found" });
+  }
+
+  const artifacts = await agentSessionService.listArtifacts(repository.id, session.id);
+  return c.json({ artifacts });
 });
 
 router.get("/repos/:owner/:repo/agent-sessions/:sessionId/timeline", optionalSession, async (c) => {
@@ -3954,9 +4657,15 @@ router.get("/repos/:owner/:repo/agent-sessions/:sessionId/timeline", optionalSes
   const linkedRun = session.linked_run_id
     ? await actionsService.findRunById(repository.id, session.linked_run_id)
     : null;
+  const [steps, interventions] = await Promise.all([
+    agentSessionService.listSteps(repository.id, session.id),
+    agentSessionService.listInterventions(repository.id, session.id)
+  ]);
   const events = agentSessionService.buildTimeline({
     session,
-    run: linkedRun
+    run: linkedRun,
+    steps,
+    interventions
   });
 
   return c.json({ events });
@@ -4004,10 +4713,24 @@ router.post("/repos/:owner/:repo/agent-sessions/:sessionId/cancel", requireSessi
     if (!cancelResult.cancelled) {
       throw new HTTPException(409, { message: "Action run is no longer queued" });
     }
+    await agentSessionService.recordIntervention({
+      repositoryId: repository.id,
+      sessionId: session.id,
+      kind: "cancel_requested",
+      title: "Cancellation requested",
+      detail: `Queued session cancelled by ${sessionUser.username}.`,
+      createdBy: sessionUser.id,
+      payload: {
+        runId: run.id,
+        status: "cancelled"
+      },
+      createdAt: cancelResult.completedAt
+    });
   } else {
     await agentSessionService.cancelSession({
       repositoryId: repository.id,
-      sessionId: session.id
+      sessionId: session.id,
+      cancelledBy: sessionUser.id
     });
   }
 

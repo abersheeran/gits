@@ -246,7 +246,9 @@ export async function createLinkedAgentSessionForRun(input: {
   run: Pick<
     ActionRunRecord,
     | "id"
+    | "run_number"
     | "workflow_id"
+    | "workflow_name"
     | "trigger_source_type"
     | "trigger_source_number"
     | "trigger_source_comment_id"

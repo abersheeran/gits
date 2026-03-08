@@ -16,6 +16,9 @@ type RunnerExecuteResult = {
   stderr?: string;
   durationMs?: number;
   error?: string;
+  spawnError?: string;
+  attemptedCommand?: string;
+  mcpSetupWarning?: string;
 };
 
 type RunnerStreamEvent =
@@ -154,6 +157,24 @@ function buildRunLogs(input: {
     lines.push("");
     lines.push("[runner_error]");
     lines.push(redactLogText(input.result.error, input.redactText));
+  }
+
+  if (input.result?.spawnError) {
+    lines.push("");
+    lines.push("[runner_spawn_error]");
+    lines.push(redactLogText(input.result.spawnError, input.redactText));
+  }
+
+  if (input.result?.mcpSetupWarning) {
+    lines.push("");
+    lines.push("[mcp_setup]");
+    lines.push(redactLogText(input.result.mcpSetupWarning, input.redactText));
+  }
+
+  if (input.result?.attemptedCommand) {
+    lines.push("");
+    lines.push("[attempted]");
+    lines.push(redactLogText(input.result.attemptedCommand, input.redactText));
   }
 
   if (input.result?.stdout) {
@@ -441,7 +462,14 @@ function parseRunnerResponse(payload: unknown): RunnerExecuteResult {
     ...(typeof data.stdout === "string" ? { stdout: data.stdout } : {}),
     ...(typeof data.stderr === "string" ? { stderr: data.stderr } : {}),
     ...(typeof data.durationMs === "number" ? { durationMs: data.durationMs } : {}),
-    ...(typeof data.error === "string" ? { error: data.error } : {})
+    ...(typeof data.error === "string" ? { error: data.error } : {}),
+    ...(typeof data.spawnError === "string" ? { spawnError: data.spawnError } : {}),
+    ...(typeof data.attemptedCommand === "string"
+      ? { attemptedCommand: data.attemptedCommand }
+      : {}),
+    ...(typeof data.mcpSetupWarning === "string"
+      ? { mcpSetupWarning: data.mcpSetupWarning }
+      : {})
   };
 }
 
@@ -473,6 +501,16 @@ export async function executeActionRun(input: {
   requestOrigin: string;
 }): Promise<void> {
   const actionsService = new ActionsService(input.env.DB);
+  const agentSessionService = new AgentSessionService(input.env.DB);
+  const recordRunObservability = async (
+    args: Parameters<AgentSessionService["recordRunObservability"]>[0]
+  ): Promise<void> => {
+    try {
+      await agentSessionService.recordRunObservability(args);
+    } catch {
+      // Observability data is best-effort and should not change run outcomes.
+    }
+  };
   const containerInstance = `action-run-${input.run.id}`;
   const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
   const actionsRunner = getActionRunnerNamespace(input.env, instanceType);
@@ -492,6 +530,11 @@ export async function executeActionRun(input: {
       logs,
       exitCode: null
     });
+    await recordRunObservability({
+      repositoryId: input.repository.id,
+      runId: input.run.id,
+      logs
+    });
     return;
   }
 
@@ -505,7 +548,6 @@ export async function executeActionRun(input: {
 
   try {
     const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
-    const agentSessionService = new AgentSessionService(input.env.DB);
     let agentSession = null;
     try {
       agentSession = await agentSessionService.findSessionByRunId(input.repository.id, input.run.id);
@@ -648,6 +690,12 @@ export async function executeActionRun(input: {
         logs,
         exitCode: runnerResult.exitCode ?? null
       });
+      await recordRunObservability({
+        repositoryId: input.repository.id,
+        runId: input.run.id,
+        logs,
+        result: runnerResult
+      });
       return;
     }
 
@@ -668,6 +716,12 @@ export async function executeActionRun(input: {
       logs,
       exitCode
     });
+    await recordRunObservability({
+      repositoryId: input.repository.id,
+      runId: input.run.id,
+      logs,
+      result: runnerResult
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown runner error";
     const logs = buildRunLogs({
@@ -685,6 +739,12 @@ export async function executeActionRun(input: {
       status: "failed",
       logs,
       exitCode: runnerResult?.exitCode ?? null
+    });
+    await recordRunObservability({
+      repositoryId: input.repository.id,
+      runId: input.run.id,
+      logs,
+      ...(runnerResult ? { result: runnerResult } : {})
     });
   } finally {
     try {

@@ -69,4 +69,49 @@ describe("RepositoryBrowserService", () => {
       })
     ).rejects.toBeInstanceOf(RepositoryBrowsePathNotFoundError);
   });
+
+  it("returns structured diff hunks for commit detail", async () => {
+    const bucket = new MockR2Bucket();
+    const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const storage = new StorageService(bucket as unknown as R2Bucket);
+    const service = new RepositoryBrowserService(storage);
+
+    const detail = await service.getCommitDetail({
+      owner: "alice",
+      repo: "demo",
+      oid: seeded.latestCommit
+    });
+
+    expect(detail.filesChanged).toBeGreaterThan(0);
+    const readmeChange = detail.changes.find((change) => change.path === "README.md");
+    expect(readmeChange?.patch).toContain("@@");
+    expect(readmeChange?.hunks.length).toBeGreaterThan(0);
+    expect(readmeChange?.hunks[0]?.lines.some((line) => line.kind === "add")).toBe(true);
+    expect(readmeChange?.hunks[0]?.lines.some((line) => line.kind === "context")).toBe(true);
+  });
+
+  it("returns structured diff hunks for compare refs", async () => {
+    const bucket = new MockR2Bucket();
+    const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const storage = new StorageService(bucket as unknown as R2Bucket);
+    const service = new RepositoryBrowserService(storage);
+
+    const comparison = await service.compareRefs({
+      owner: "alice",
+      repo: "demo",
+      baseRef: seeded.initialCommit,
+      headRef: seeded.latestCommit
+    });
+
+    expect(comparison.changes).toHaveLength(2);
+    const readmeChange = comparison.changes.find((change) => change.path === "README.md");
+    expect(readmeChange?.status).toBe("modified");
+    expect(readmeChange?.hunks.length).toBeGreaterThan(0);
+    expect(readmeChange?.hunks[0]?.header).toContain("@@");
+    expect(
+      readmeChange?.hunks[0]?.lines.some(
+        (line) => line.kind === "add" && line.newLineNumber !== null && line.content.includes("Updated")
+      )
+    ).toBe(true);
+  });
 });

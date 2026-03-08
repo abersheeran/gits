@@ -382,4 +382,100 @@ describe("executeActionRun", () => {
       GITS_AGENT_SESSION_BRANCH_REF: "refs/heads/agent/session-1"
     });
   });
+
+  it("persists structured observability after a run completes", async () => {
+    vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
+    vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
+    vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
+      codexConfigFileContent: "",
+      claudeCodeConfigFileContent: "",
+      inheritsGlobalCodexConfig: true,
+      inheritsGlobalClaudeCodeConfig: true,
+      updated_at: 1
+    });
+    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
+    const recordRunObservability = vi
+      .spyOn(AgentSessionService.prototype, "recordRunObservability")
+      .mockResolvedValue();
+
+    const runnerFetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          exitCode: 0,
+          durationMs: 25,
+          stdout: "stdout payload",
+          stderr: "stderr payload",
+          attemptedCommand: "codex run",
+          mcpSetupWarning: "platform MCP missing"
+        }),
+        {
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+    const stopFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        JWT_SECRET: "test-secret",
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: (url: string, init?: RequestInit) =>
+              url.endsWith("/stop") ? stopFetch(url, init) : runnerFetch(url, init)
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      run: {
+        id: "run-5",
+        run_number: 5,
+        repository_id: "repo-1",
+        agent_type: "codex",
+        instance_type: "lite",
+        prompt: "ship it",
+        trigger_ref: "refs/heads/main",
+        trigger_sha: "abc123",
+        trigger_source_type: "issue",
+        trigger_source_number: 42
+      },
+      triggeredByUser: {
+        id: "user-1",
+        username: "alice"
+      },
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(recordRunObservability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        runId: "run-5",
+        result: expect.objectContaining({
+          durationMs: 25,
+          stdout: "stdout payload",
+          stderr: "stderr payload",
+          attemptedCommand: "codex run",
+          mcpSetupWarning: "platform MCP missing"
+        })
+      })
+    );
+  });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { ReactionStrip } from "@/components/repository/reaction-strip";
@@ -34,7 +35,9 @@ import {
   type AgentSessionRecord,
   type AuthUser,
   type IssueCommentRecord,
+  type IssueLinkedPullRequestRecord,
   type IssueRecord,
+  type IssueTaskStatus,
   type ReactionContent,
   type RepositoryLabelRecord,
   type RepositoryDetailResponse,
@@ -48,9 +51,32 @@ type IssueDetailPageProps = {
 };
 
 const FALLBACK_AGENT_TYPES: ActionAgentType[] = ["codex", "claude_code"];
+const ISSUE_TASK_STATUS_OPTIONS: IssueTaskStatus[] = [
+  "open",
+  "agent-working",
+  "waiting-human",
+  "done"
+];
 
 function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
+}
+
+function issueTaskStatusHint(status: IssueTaskStatus): string {
+  if (status === "agent-working") {
+    return "Agent 正在推进实现或整理下一次交付。";
+  }
+  if (status === "waiting-human") {
+    return "当前在等待人类补充信息、确认方案或继续评审。";
+  }
+  if (status === "done") {
+    return "任务目标已经收敛，剩余动作应当是合并或回顾。";
+  }
+  return "任务已打开，尚未进入明确的下一轮执行。";
+}
+
+function shortBranchName(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "");
 }
 
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
@@ -61,6 +87,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issue, setIssue] = useState<IssueRecord | null>(null);
+  const [linkedPullRequests, setLinkedPullRequests] = useState<IssueLinkedPullRequestRecord[]>([]);
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
   const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
   const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
@@ -70,14 +97,24 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [latestPullRequestRunByNumber, setLatestPullRequestRunByNumber] = useState<
+    Record<number, ActionRunRecord>
+  >({});
+  const [latestPullRequestSessionByNumber, setLatestPullRequestSessionByNumber] = useState<
+    Record<number, AgentSessionRecord>
+  >({});
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentSubmitAction, setAgentSubmitAction] = useState<"assign" | "resume" | null>(null);
   const [latestRunByCommentId, setLatestRunByCommentId] = useState<Record<string, ActionRunRecord>>({});
+  const [taskStatusDraft, setTaskStatusDraft] = useState<IssueTaskStatus>("open");
+  const [acceptanceCriteriaDraft, setAcceptanceCriteriaDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [taskStatusSaving, setTaskStatusSaving] = useState(false);
+  const [acceptanceCriteriaSaving, setAcceptanceCriteriaSaving] = useState(false);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
@@ -127,6 +164,42 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setLatestRunByCommentId(nextRunByCommentId);
   }
 
+  async function refreshLinkedPullRequestStatuses(
+    nextLinkedPullRequestsInput?: IssueLinkedPullRequestRecord[]
+  ): Promise<void> {
+    const nextLinkedPullRequests = nextLinkedPullRequestsInput ?? linkedPullRequests;
+    if (!owner || !repo || nextLinkedPullRequests.length === 0) {
+      setLatestPullRequestRunByNumber({});
+      setLatestPullRequestSessionByNumber({});
+      return;
+    }
+    const pullRequestNumbers = nextLinkedPullRequests.map((pullRequest) => pullRequest.number);
+    const [latestRunItems, latestSessionItems] = await Promise.all([
+      listLatestActionRunsBySource(owner, repo, {
+        sourceType: "pull_request",
+        numbers: pullRequestNumbers
+      }),
+      listLatestAgentSessionsBySource(owner, repo, {
+        sourceType: "pull_request",
+        numbers: pullRequestNumbers
+      })
+    ]);
+    const nextRunByPullRequestNumber: Record<number, ActionRunRecord> = {};
+    const nextSessionByPullRequestNumber: Record<number, AgentSessionRecord> = {};
+    for (const item of latestRunItems) {
+      if (item.run) {
+        nextRunByPullRequestNumber[item.sourceNumber] = item.run;
+      }
+    }
+    for (const item of latestSessionItems) {
+      if (item.session) {
+        nextSessionByPullRequestNumber[item.sourceNumber] = item.session;
+      }
+    }
+    setLatestPullRequestRunByNumber(nextRunByPullRequestNumber);
+    setLatestPullRequestSessionByNumber(nextSessionByPullRequestNumber);
+  }
+
   useEffect(() => {
     let canceled = false;
     async function load() {
@@ -138,7 +211,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       try {
         const [
           nextDetail,
-          nextIssue,
+          nextIssueDetail,
           nextComments,
           latestRunItems,
           latestSessionItems,
@@ -161,25 +234,57 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           listRepositoryMilestones(owner, repo),
           user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
-        const latestCommentRunItems =
+        const latestCommentRunItemsPromise =
           nextComments.length > 0
-            ? await listLatestActionRunsByCommentIds(
+            ? listLatestActionRunsByCommentIds(
                 owner,
                 repo,
                 nextComments.map((comment) => comment.id)
               )
-            : [];
+            : Promise.resolve([]);
+        const linkedPullRequestNumbers = nextIssueDetail.linkedPullRequests.map(
+          (pullRequest) => pullRequest.number
+        );
+        const [latestCommentRunItems, latestPullRequestRunItems, latestPullRequestSessionItems] =
+          await Promise.all([
+            latestCommentRunItemsPromise,
+            linkedPullRequestNumbers.length > 0
+              ? listLatestActionRunsBySource(owner, repo, {
+                  sourceType: "pull_request",
+                  numbers: linkedPullRequestNumbers
+                })
+              : Promise.resolve([]),
+            linkedPullRequestNumbers.length > 0
+              ? listLatestAgentSessionsBySource(owner, repo, {
+                  sourceType: "pull_request",
+                  numbers: linkedPullRequestNumbers
+                })
+              : Promise.resolve([])
+          ]);
         if (canceled) {
           return;
         }
         const nextRunByCommentId: Record<string, ActionRunRecord> = {};
+        const nextPullRequestRunByNumber: Record<number, ActionRunRecord> = {};
+        const nextPullRequestSessionByNumber: Record<number, AgentSessionRecord> = {};
         for (const item of latestCommentRunItems) {
           if (item.run) {
             nextRunByCommentId[item.commentId] = item.run;
           }
         }
+        for (const item of latestPullRequestRunItems) {
+          if (item.run) {
+            nextPullRequestRunByNumber[item.sourceNumber] = item.run;
+          }
+        }
+        for (const item of latestPullRequestSessionItems) {
+          if (item.session) {
+            nextPullRequestSessionByNumber[item.sourceNumber] = item.session;
+          }
+        }
         setDetail(nextDetail);
-        setIssue(nextIssue);
+        setIssue(nextIssueDetail.issue);
+        setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
         setComments(nextComments);
         setAvailableLabels(nextLabels);
         setAvailableMilestones(nextMilestones);
@@ -187,6 +292,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestAgentSession(latestSessionItems[0]?.session ?? null);
         setLatestRunByCommentId(nextRunByCommentId);
+        setLatestPullRequestRunByNumber(nextPullRequestRunByNumber);
+        setLatestPullRequestSessionByNumber(nextPullRequestSessionByNumber);
       } catch (loadError) {
         if (!canceled) {
           setLoadError(formatApiError(loadError));
@@ -210,6 +317,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setSelectedLabelIds(issue.labels.map((label) => label.id));
     setSelectedAssigneeIds(issue.assignees.map((assignee) => assignee.id));
     setSelectedMilestoneId(issue.milestone?.id ?? null);
+    setTaskStatusDraft(issue.task_status);
+    setAcceptanceCriteriaDraft(issue.acceptance_criteria);
   }, [issue]);
 
   const hasPendingRun =
@@ -220,10 +329,21 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     const run = latestRunByCommentId[comment.id];
     return run ? run.status === "queued" || run.status === "running" : false;
   });
+  const hasPendingPullRequestRun = linkedPullRequests.some((pullRequest) => {
+    const run = latestPullRequestRunByNumber[pullRequest.number];
+    return run ? run.status === "queued" || run.status === "running" : false;
+  });
+  const hasPendingPullRequestAgentSession = linkedPullRequests.some((pullRequest) =>
+    isPendingAgentSession(latestPullRequestSessionByNumber[pullRequest.number] ?? null)
+  );
 
   useEffect(() => {
     if (
-      (!hasPendingRun && !hasPendingAgentSession && !hasPendingCommentRun) ||
+      (!hasPendingRun &&
+        !hasPendingAgentSession &&
+        !hasPendingCommentRun &&
+        !hasPendingPullRequestRun &&
+        !hasPendingPullRequestAgentSession) ||
       !owner ||
       !repo ||
       !Number.isInteger(number) ||
@@ -236,7 +356,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         await Promise.all([
           refreshLatestRunStatus(),
           refreshLatestAgentSessionStatus(),
-          refreshCommentRunStatuses()
+          refreshCommentRunStatuses(),
+          refreshLinkedPullRequestStatuses()
         ]);
       } catch {
         // Ignore transient polling errors.
@@ -245,7 +366,18 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [comments, hasPendingAgentSession, hasPendingCommentRun, hasPendingRun, number, owner, repo]);
+  }, [
+    comments,
+    hasPendingAgentSession,
+    hasPendingCommentRun,
+    hasPendingPullRequestAgentSession,
+    hasPendingPullRequestRun,
+    hasPendingRun,
+    linkedPullRequests,
+    number,
+    owner,
+    repo
+  ]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (
@@ -315,6 +447,42 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       setActionError(formatApiError(updateError));
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function saveTaskStatus() {
+    if (!issue || taskStatusSaving || taskStatusDraft === issue.task_status) {
+      return;
+    }
+    setTaskStatusSaving(true);
+    setActionError(null);
+    try {
+      const updated = await updateIssue(owner, repo, number, {
+        taskStatus: taskStatusDraft
+      });
+      setIssue(updated);
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setTaskStatusSaving(false);
+    }
+  }
+
+  async function saveAcceptanceCriteria() {
+    if (!issue || acceptanceCriteriaSaving || acceptanceCriteriaDraft === issue.acceptance_criteria) {
+      return;
+    }
+    setAcceptanceCriteriaSaving(true);
+    setActionError(null);
+    try {
+      const updated = await updateIssue(owner, repo, number, {
+        acceptanceCriteria: acceptanceCriteriaDraft
+      });
+      setIssue(updated);
+    } catch (error) {
+      setActionError(formatApiError(error));
+    } finally {
+      setAcceptanceCriteriaSaving(false);
     }
   }
 
@@ -432,6 +600,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             });
       setLatestAgentSession(response.session);
       setLatestActionRun(response.run);
+      setIssue((previous) =>
+        response.issue
+          ? response.issue
+          : previous
+            ? {
+                ...previous,
+                task_status: "agent-working"
+              }
+            : previous
+      );
       setAgentInstruction("");
     } catch (error) {
       setActionError(formatApiError(error));
@@ -453,6 +631,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           {issue.title} <span className="text-muted-foreground">#{issue.number}</span>
         </h1>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <IssueTaskStatusBadge status={issue.task_status} />
           <RepositoryStateBadge state={issue.state} kind="issue" />
           <span>{issue.author_username}</span>
           <span>opened {formatRelativeTime(issue.created_at)}</span>
@@ -500,6 +679,44 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   : undefined
               }
             />
+          </section>
+
+          <section className="space-y-3 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Acceptance criteria</h2>
+              <p className="text-sm text-muted-foreground">
+                让 Issue 里始终保留一份稳定的完成定义，供 Agent 交付和人类验收对照。
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-3">
+              <MarkdownBody
+                content={issue.acceptance_criteria}
+                emptyText="(no acceptance criteria)"
+              />
+            </div>
+            {canUpdate ? (
+              <div className="space-y-3">
+                <MarkdownEditor
+                  label="Edit acceptance criteria"
+                  value={acceptanceCriteriaDraft}
+                  onChange={setAcceptanceCriteriaDraft}
+                  rows={6}
+                  previewEmptyText="暂无验收标准。"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <PendingButton
+                    pending={acceptanceCriteriaSaving}
+                    pendingText="Saving acceptance criteria..."
+                    disabled={acceptanceCriteriaDraft === issue.acceptance_criteria}
+                    onClick={() => {
+                      void saveAcceptanceCriteria();
+                    }}
+                  >
+                    保存验收标准
+                  </PendingButton>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-3 rounded-md border p-4">
@@ -580,6 +797,138 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         </div>
 
         <aside className="space-y-4">
+          <section className="space-y-4 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Task center</h2>
+              <p className="text-sm text-muted-foreground">
+                这里展示当前在等谁、最近一轮交付状态，以及 Issue 作为任务入口的最小控制面。
+              </p>
+            </div>
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <IssueTaskStatusBadge status={issue.task_status} />
+                <RepositoryStateBadge state={issue.state} kind="issue" />
+              </div>
+              <p className="text-sm text-muted-foreground">{issueTaskStatusHint(issue.task_status)}</p>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>Comments: {issue.comment_count}</p>
+                <p>Updated: {formatDateTime(issue.updated_at)}</p>
+                <p>Linked pull requests: {linkedPullRequests.length}</p>
+              </div>
+              {latestActionRun ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <ActionStatusBadge status={latestActionRun.status} />
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}>
+                      查看最新 issue run
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">当前 Issue 还没有交付 run。</p>
+              )}
+            </div>
+            {canUpdate ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="issue-task-status">Task status</Label>
+                  <select
+                    id="issue-task-status"
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={taskStatusDraft}
+                    onChange={(event) => setTaskStatusDraft(event.target.value as IssueTaskStatus)}
+                  >
+                    {ISSUE_TASK_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <PendingButton
+                  pending={taskStatusSaving}
+                  pendingText="Saving task status..."
+                  disabled={taskStatusDraft === issue.task_status}
+                  onClick={() => {
+                    void saveTaskStatus();
+                  }}
+                >
+                  保存任务状态
+                </PendingButton>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="space-y-4 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Linked pull requests</h2>
+              <p className="text-sm text-muted-foreground">
+                直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent / run 进展。
+              </p>
+            </div>
+            {linkedPullRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground">当前 Issue 还没有关联的 pull request。</p>
+            ) : (
+              <div className="space-y-3">
+                {linkedPullRequests.map((pullRequest) => {
+                  const pullRequestRun = latestPullRequestRunByNumber[pullRequest.number];
+                  const pullRequestSession =
+                    latestPullRequestSessionByNumber[pullRequest.number] ?? null;
+                  return (
+                    <div key={pullRequest.id} className="space-y-3 rounded-md border bg-muted/20 p-3">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            className="text-sm font-medium gh-link"
+                            to={`/repo/${owner}/${repo}/pulls/${pullRequest.number}`}
+                          >
+                            PR #{pullRequest.number} {pullRequest.title}
+                          </Link>
+                          <RepositoryStateBadge
+                            state={pullRequest.state}
+                            kind="pull_request"
+                            draft={pullRequest.draft}
+                          />
+                        </div>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          <p>
+                            {pullRequest.author_username} · {shortBranchName(pullRequest.head_ref)} into{" "}
+                            {shortBranchName(pullRequest.base_ref)}
+                          </p>
+                          <p>Updated: {formatDateTime(pullRequest.updated_at)}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {pullRequestSession ? (
+                          <Button variant="outline" size="sm" asChild>
+                            <Link
+                              to={`/repo/${owner}/${repo}/agent-sessions/${pullRequestSession.id}`}
+                            >
+                              Session · {pullRequestSession.status}
+                            </Link>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">暂无 PR session</span>
+                        )}
+                        {pullRequestRun ? (
+                          <Button variant="outline" size="sm" asChild>
+                            <Link
+                              to={`/repo/${owner}/${repo}/actions?runId=${pullRequestRun.id}`}
+                            >
+                              Run · {pullRequestRun.status}
+                            </Link>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">暂无 PR run</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
           <section className="space-y-4 rounded-md border p-4">
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Agent session</h2>

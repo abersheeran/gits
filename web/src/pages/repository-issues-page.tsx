@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { MessageSquareText } from "lucide-react";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
+import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
@@ -261,7 +262,10 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                         ) : null}
                       </div>
                     </div>
-                    <RepositoryStateBadge state={issue.state} kind="issue" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <IssueTaskStatusBadge status={issue.task_status} />
+                      <RepositoryStateBadge state={issue.state} kind="issue" />
+                    </div>
                   </div>
                   <p className="line-clamp-2 text-sm text-muted-foreground">
                     {issue.body.trim() ? issue.body : "(no description)"}

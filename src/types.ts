@@ -24,12 +24,22 @@ export type RepositoryRecord = {
 export type CollaboratorPermission = "read" | "write" | "admin";
 
 export type IssueState = "open" | "closed";
+export type IssueTaskStatus = "open" | "agent-working" | "waiting-human" | "done";
 
 export type PullRequestState = "open" | "closed" | "merged";
 
 export type MilestoneState = "open" | "closed";
 
 export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
+export type PullRequestReviewThreadSide = "base" | "head";
+export type PullRequestReviewThreadStatus = "open" | "resolved";
+
+export type PullRequestReviewThreadSuggestionRecord = {
+  side: PullRequestReviewThreadSide;
+  start_line: number;
+  end_line: number;
+  code: string;
+};
 
 export type ActionWorkflowTrigger =
   | "issue_created"
@@ -63,6 +73,25 @@ export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "can
 export type ActionRunSourceType = "issue" | "pull_request";
 
 export type AgentSessionStatus = ActionRunStatus;
+
+export type AgentSessionStepKind =
+  | "session_created"
+  | "run_queued"
+  | "run_claimed"
+  | "session_started"
+  | "session_completed"
+  | "session_cancelled";
+
+export type AgentSessionArtifactKind = "run_logs" | "stdout" | "stderr";
+
+export type AgentSessionUsageKind =
+  | "duration_ms"
+  | "exit_code"
+  | "run_log_chars"
+  | "stdout_chars"
+  | "stderr_chars";
+
+export type AgentSessionInterventionKind = "cancel_requested" | "mcp_setup_warning";
 
 export type ActionRunQueueMessage = {
   repositoryId: string;
@@ -128,6 +157,8 @@ export type IssueRecord = {
   title: string;
   body: string;
   state: IssueState;
+  task_status: IssueTaskStatus;
+  acceptance_criteria: string;
   comment_count: number;
   labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
@@ -136,6 +167,24 @@ export type IssueRecord = {
   created_at: number;
   updated_at: number;
   closed_at: number | null;
+};
+
+export type IssueLinkedPullRequestRecord = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  state: PullRequestState;
+  draft: boolean;
+  base_ref: string;
+  head_ref: string;
+  merge_commit_oid: string | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  merged_at: number | null;
 };
 
 export type IssueCommentRecord = {
@@ -194,6 +243,47 @@ export type PullRequestReviewRecord = {
   body: string;
   reactions: ReactionSummary[];
   created_at: number;
+};
+
+export type PullRequestReviewThreadRecord = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  author_id: string;
+  author_username: string;
+  path: string;
+  line: number;
+  side: PullRequestReviewThreadSide;
+  body: string;
+  base_oid: string | null;
+  head_oid: string | null;
+  start_side: PullRequestReviewThreadSide;
+  start_line: number;
+  end_side: PullRequestReviewThreadSide;
+  end_line: number;
+  hunk_header: string | null;
+  status: PullRequestReviewThreadStatus;
+  resolved_by: string | null;
+  resolved_by_username: string | null;
+  comments: PullRequestReviewThreadCommentRecord[];
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
+};
+
+export type PullRequestReviewThreadCommentRecord = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  thread_id: string;
+  author_id: string;
+  author_username: string;
+  body: string;
+  suggestion: PullRequestReviewThreadSuggestionRecord | null;
+  created_at: number;
+  updated_at: number;
 };
 
 export type ActionWorkflowRecord = {
@@ -278,6 +368,56 @@ export type AgentSessionRecord = {
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;
+};
+
+export type AgentSessionStepRecord = {
+  id: number;
+  session_id: string;
+  repository_id: string;
+  kind: AgentSessionStepKind;
+  title: string;
+  detail: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+};
+
+export type AgentSessionArtifactRecord = {
+  id: string;
+  session_id: string;
+  repository_id: string;
+  kind: AgentSessionArtifactKind;
+  title: string;
+  media_type: string;
+  size_bytes: number;
+  content_text: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AgentSessionUsageRecord = {
+  id: number;
+  session_id: string;
+  repository_id: string;
+  kind: AgentSessionUsageKind;
+  value: number;
+  unit: string;
+  detail: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AgentSessionInterventionRecord = {
+  id: number;
+  session_id: string;
+  repository_id: string;
+  kind: AgentSessionInterventionKind;
+  title: string;
+  detail: string | null;
+  created_by: string | null;
+  created_by_username: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: number;
 };
 
 export type AppBindings = {

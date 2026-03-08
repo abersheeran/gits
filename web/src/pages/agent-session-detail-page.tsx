@@ -14,9 +14,12 @@ import {
   getRepositoryAgentSessionDetail,
   getRepositoryAgentSessionTimeline,
   getRepositoryDetail,
+  type AgentSessionArtifactRecord,
   type AgentSessionDetail,
+  type AgentSessionInterventionRecord,
   type AgentSessionRecord,
   type AgentSessionTimelineEvent,
+  type AgentSessionUsageRecord,
   type AuthUser,
   type RepositoryDetailResponse
 } from "@/lib/api";
@@ -78,6 +81,46 @@ function buildActionsLink(owner: string, repo: string, sessionDetail: AgentSessi
     return `/repo/${owner}/${repo}/actions?sessionId=${sessionDetail.session.id}&runId=${sessionDetail.linkedRun.id}`;
   }
   return `/repo/${owner}/${repo}/actions?sessionId=${sessionDetail.session.id}`;
+}
+
+function formatArtifactSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function usageLabel(record: AgentSessionUsageRecord): string {
+  switch (record.kind) {
+    case "duration_ms":
+      return "Duration";
+    case "exit_code":
+      return "Exit code";
+    case "run_log_chars":
+      return "Run logs";
+    case "stdout_chars":
+      return "Stdout";
+    case "stderr_chars":
+      return "Stderr";
+  }
+}
+
+function formatUsageValue(record: AgentSessionUsageRecord): string {
+  switch (record.kind) {
+    case "duration_ms":
+      return `${Math.round(record.value)} ms`;
+    case "exit_code":
+      return String(Math.round(record.value));
+    default:
+      return `${Math.round(record.value).toLocaleString()} chars`;
+  }
+}
+
+function interventionActor(intervention: AgentSessionInterventionRecord): string {
+  return intervention.created_by_username ?? "system";
 }
 
 export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
@@ -196,6 +239,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
   }
 
   const { session, linkedRun, sourceContext } = sessionDetail;
+  const { artifacts, usageRecords, interventions } = sessionDetail;
 
   return (
     <div className="mx-auto flex w-[min(1200px,92vw)] flex-col gap-6 py-6">
@@ -360,47 +404,140 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               )}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Usage</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {usageRecords.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No structured usage records yet.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  {usageRecords.map((record) => (
+                    <div key={`${record.kind}-${record.id}`} className="rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">{usageLabel(record)}</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {formatUsageValue(record)}
+                      </p>
+                      {record.detail ? (
+                        <p className="mt-1 text-xs text-muted-foreground">{record.detail}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Interventions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {interventions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No interventions recorded.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {interventions.map((intervention) => (
+                    <li key={intervention.id} className="rounded-md border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{intervention.kind.replaceAll("_", " ")}</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {interventionActor(intervention)}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium">{intervention.title}</p>
+                          {intervention.detail ? (
+                            <p className="text-xs text-muted-foreground">{intervention.detail}</p>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-right text-xs text-muted-foreground">
+                          <p>{formatDateTime(intervention.created_at)}</p>
+                          <p>{formatRelativeTime(intervention.created_at)}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Timeline</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {timeline.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No timeline events yet.</p>
-            ) : (
-              <ol className="space-y-3">
-                {timeline.map((event) => (
-                  <li key={event.id} className="rounded-md border bg-muted/20 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-2">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Artifacts</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {artifacts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No structured artifacts yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {artifacts.map((artifact: AgentSessionArtifactRecord) => (
+                    <section key={artifact.id} className="rounded-md border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{eventBadgeLabel(event)}</Badge>
-                          {event.stream && event.stream !== "system" ? (
-                            <Badge variant="outline">{event.stream}</Badge>
-                          ) : null}
+                          <Badge variant="outline">{artifact.kind.replaceAll("_", " ")}</Badge>
+                          <span className="text-sm font-medium">{artifact.title}</span>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">{eventLabel(event)}</p>
-                          {event.detail ? (
-                            <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                              {event.detail}
-                            </pre>
-                          ) : null}
+                        <div className="text-xs text-muted-foreground">
+                          {formatArtifactSize(artifact.size_bytes)} · {formatDateTime(artifact.updated_at)}
                         </div>
                       </div>
-                      <div className="shrink-0 text-right text-xs text-muted-foreground">
-                        <p>{formatDateTime(event.timestamp)}</p>
-                        <p>{formatRelativeTime(event.timestamp)}</p>
+                      <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                        {artifact.content_text}
+                      </pre>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Timeline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {timeline.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No timeline events yet.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {timeline.map((event) => (
+                    <li key={event.id} className="rounded-md border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{eventBadgeLabel(event)}</Badge>
+                            {event.stream && event.stream !== "system" ? (
+                              <Badge variant="outline">{event.stream}</Badge>
+                            ) : null}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{eventLabel(event)}</p>
+                            {event.detail ? (
+                              <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                                {event.detail}
+                              </pre>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right text-xs text-muted-foreground">
+                          <p>{formatDateTime(event.timestamp)}</p>
+                          <p>{formatRelativeTime(event.timestamp)}</p>
+                        </div>
                       </div>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </CardContent>
-        </Card>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

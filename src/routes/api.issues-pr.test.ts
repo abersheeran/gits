@@ -6,6 +6,7 @@ import {
   PullRequestMergeConflictError,
   PullRequestMergeService
 } from "../services/pull-request-merge-service";
+import { RepositoryBrowserService } from "../services/repository-browser-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
@@ -102,6 +103,57 @@ function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
   };
 }
 
+function buildPullRequestReviewThreadRow(overrides?: Partial<Record<string, unknown>>) {
+  const now = Date.now();
+  return {
+    id: "thread-1",
+    repository_id: "repo-1",
+    pull_request_id: "pr-1",
+    pull_request_number: 1,
+    author_id: "user-2",
+    author_username: "bob",
+    path: "src/app.ts",
+    line: 12,
+    side: "head",
+    body: "Please handle null path.",
+    base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    start_side: "head",
+    start_line: 12,
+    end_side: "head",
+    end_line: 12,
+    hunk_header: "@@ -10,3 +10,4 @@",
+    status: "open",
+    resolved_by: null,
+    resolved_by_username: null,
+    created_at: now,
+    updated_at: now,
+    resolved_at: null,
+    ...(overrides ?? {})
+  };
+}
+
+function buildPullRequestReviewThreadCommentRow(overrides?: Partial<Record<string, unknown>>) {
+  const now = Date.now();
+  return {
+    id: "thread-comment-1",
+    repository_id: "repo-1",
+    pull_request_id: "pr-1",
+    pull_request_number: 1,
+    thread_id: "thread-1",
+    author_id: "user-2",
+    author_username: "bob",
+    body: "Please handle null path.",
+    suggested_start_line: null,
+    suggested_end_line: null,
+    suggested_side: null,
+    suggested_code: null,
+    created_at: now,
+    updated_at: now,
+    ...(overrides ?? {})
+  };
+}
+
 describe("API issues and pull requests", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -173,6 +225,8 @@ describe("API issues and pull requests", () => {
           title: "Need bugfix",
           body: "Steps to reproduce",
           state: "open",
+          task_status: "open",
+          acceptance_criteria: "- bug fixed",
           created_at: Date.now(),
           updated_at: Date.now(),
           closed_at: null
@@ -189,7 +243,8 @@ describe("API issues and pull requests", () => {
         },
         body: JSON.stringify({
           title: "Need bugfix",
-          body: "Steps to reproduce"
+          body: "Steps to reproduce",
+          acceptanceCriteria: "- bug fixed"
         })
       }),
       createBaseEnv(db)
@@ -197,11 +252,154 @@ describe("API issues and pull requests", () => {
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
-      issue: { number: number; title: string; state: string };
+      issue: {
+        number: number;
+        title: string;
+        state: string;
+        task_status: string;
+        acceptance_criteria: string;
+      };
     };
     expect(body.issue.number).toBe(1);
     expect(body.issue.title).toBe("Need bugfix");
     expect(body.issue.state).toBe("open");
+    expect(body.issue.task_status).toBe("open");
+    expect(body.issue.acceptance_criteria).toBe("- bug fixed");
+  });
+
+  it("returns issue detail with linked pull requests", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need login fix",
+          body: "body",
+          state: "open",
+          task_status: "waiting-human",
+          acceptance_criteria: "- login succeeds\n- error state is visible",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "FROM pull_request_closing_issues pci",
+        all: () => [
+          {
+            id: "pr-1",
+            repository_id: "repo-1",
+            number: 7,
+            author_id: "user-2",
+            author_username: "bob",
+            title: "Fix login retry flow",
+            state: "open",
+            draft: 0,
+            base_ref: "refs/heads/main",
+            head_ref: "refs/heads/fix-login",
+            merge_commit_oid: null,
+            created_at: now - 10_000,
+            updated_at: now - 5_000,
+            closed_at: null,
+            merged_at: null
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      issue: { task_status: string; acceptance_criteria: string };
+      linkedPullRequests: Array<{ number: number; title: string; head_ref: string }>;
+    };
+    expect(body.issue.task_status).toBe("waiting-human");
+    expect(body.issue.acceptance_criteria).toContain("login succeeds");
+    expect(body.linkedPullRequests).toHaveLength(1);
+    expect(body.linkedPullRequests[0]?.number).toBe(7);
+    expect(body.linkedPullRequests[0]?.title).toBe("Fix login retry flow");
+    expect(body.linkedPullRequests[0]?.head_ref).toBe("refs/heads/fix-login");
+  });
+
+  it("allows collaborators to update issue task status and acceptance criteria", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const now = Date.now();
+    const issueRow = {
+      id: "issue-1",
+      repository_id: "repo-1",
+      number: 1,
+      author_id: "owner-1",
+      author_username: "alice",
+      title: "Need login fix",
+      body: "body",
+      state: "open",
+      task_status: "open",
+      acceptance_criteria: "",
+      created_at: now,
+      updated_at: now,
+      closed_at: null
+    };
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "write" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => issueRow
+      },
+      {
+        when: "UPDATE issues",
+        run: (params) => {
+          issueRow.task_status = String(params[0]);
+          issueRow.acceptance_criteria = String(params[1]);
+          issueRow.updated_at = Number(params[2]);
+          return { success: true };
+        }
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          taskStatus: "agent-working",
+          acceptanceCriteria: "- login succeeds"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      issue: { task_status: string; acceptance_criteria: string };
+    };
+    expect(body.issue.task_status).toBe("agent-working");
+    expect(body.issue.acceptance_criteria).toBe("- login succeeds");
   });
 
   it("lists issue comments for readable repositories", async () => {
@@ -1083,6 +1281,763 @@ describe("API issues and pull requests", () => {
     expect(body.reviewSummary.comments).toBe(0);
   });
 
+  it("lists pull request review threads for readable repositories", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "ORDER BY\n           CASE WHEN t.status = 'open' THEN 0 ELSE 1 END",
+        all: () => [buildPullRequestReviewThreadRow()]
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [buildPullRequestReviewThreadCommentRow()]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      reviewThreads: Array<{
+        id: string;
+        path: string;
+        line: number;
+        status: string;
+        comments: Array<{ id: string }>;
+      }>;
+    };
+    expect(body.reviewThreads).toHaveLength(1);
+    expect(body.reviewThreads[0]?.id).toBe("thread-1");
+    expect(body.reviewThreads[0]?.path).toBe("src/app.ts");
+    expect(body.reviewThreads[0]?.line).toBe(12);
+    expect(body.reviewThreads[0]?.status).toBe("open");
+    expect(body.reviewThreads[0]?.comments).toHaveLength(1);
+  });
+
+  it("allows collaborators to create pull request review threads", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const compareRefs = vi.spyOn(RepositoryBrowserService.prototype, "compareRefs").mockResolvedValue({
+      baseRef: "refs/heads/main",
+      headRef: "refs/heads/feature",
+      baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      headOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      mergeBaseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      mergeable: "mergeable",
+      aheadBy: 1,
+      behindBy: 0,
+      filesChanged: 1,
+      additions: 1,
+      deletions: 0,
+      commits: [],
+      changes: [
+        {
+          path: "src/app.ts",
+          previousPath: null,
+          status: "modified",
+          mode: "100644",
+          previousMode: "100644",
+          oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          previousOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          additions: 1,
+          deletions: 0,
+          isBinary: false,
+          patch: "@@ -12,1 +12,1 @@\n const value = path;",
+          hunks: [
+            {
+              header: "@@ -12,1 +12,1 @@",
+              oldStart: 12,
+              oldLines: 1,
+              newStart: 12,
+              newLines: 1,
+              lines: [
+                {
+                  kind: "context",
+                  content: "const value = path;",
+                  oldLineNumber: 12,
+                  newLineNumber: 12
+                }
+              ]
+            }
+          ],
+          oldContent: "const value = path;",
+          newContent: "const value = path;"
+        }
+      ]
+    });
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "INSERT INTO pull_request_review_threads",
+        run: () => ({ success: true })
+      },
+      {
+        when: "INSERT INTO pull_request_review_thread_comments",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE t.repository_id = ? AND t.pull_request_number = ? AND t.id = ?",
+        first: () =>
+          buildPullRequestReviewThreadRow({
+            body: "Please handle null path.",
+            start_side: "head",
+            start_line: 12,
+            end_side: "head",
+            end_line: 12,
+            hunk_header: "@@ -12,1 +12,1 @@"
+          })
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [
+          buildPullRequestReviewThreadCommentRow({
+            body: "Please handle null path.",
+            suggested_start_line: 12,
+            suggested_end_line: 12,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);"
+          })
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          path: "src/app.ts",
+          baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          headOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          startSide: "head",
+          startLine: 12,
+          endSide: "head",
+          endLine: 12,
+          hunkHeader: "@@ -12,1 +12,1 @@",
+          body: "Please handle null path.",
+          suggestedCode: "const value = normalizePath(path);"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      reviewThread: {
+        path: string;
+        line: number;
+        side: string;
+        author_username: string;
+        comments: Array<{ suggestion: { code: string } | null }>;
+      };
+    };
+    expect(body.reviewThread.path).toBe("src/app.ts");
+    expect(body.reviewThread.line).toBe(12);
+    expect(body.reviewThread.side).toBe("head");
+    expect(body.reviewThread.author_username).toBe("bob");
+    expect(body.reviewThread.comments[0]?.suggestion?.code).toBe(
+      "const value = normalizePath(path);"
+    );
+    expect(compareRefs).toHaveBeenCalledWith({
+      owner: "alice",
+      repo: "demo",
+      baseRef: "refs/heads/main",
+      headRef: "refs/heads/feature"
+    });
+  });
+
+  it("allows collaborators to resolve pull request review threads", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const now = Date.now();
+    let threadReadCount = 0;
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "WHERE t.repository_id = ? AND t.pull_request_number = ? AND t.id = ?",
+        first: () => {
+          threadReadCount += 1;
+          return buildPullRequestReviewThreadRow({
+            status: threadReadCount >= 2 ? "resolved" : "open",
+            resolved_by: threadReadCount >= 2 ? "user-2" : null,
+            resolved_by_username: threadReadCount >= 2 ? "bob" : null,
+            resolved_at: threadReadCount >= 2 ? now + 1_000 : null,
+            updated_at: threadReadCount >= 2 ? now + 1_000 : now
+          });
+        }
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [buildPullRequestReviewThreadCommentRow()]
+      },
+      {
+        when: "UPDATE pull_request_review_threads",
+        run: () => ({ success: true })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads/thread-1/resolve", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      reviewThread: { id: string; status: string; resolved_by_username: string | null };
+    };
+    expect(body.reviewThread.id).toBe("thread-1");
+    expect(body.reviewThread.status).toBe("resolved");
+    expect(body.reviewThread.resolved_by_username).toBe("bob");
+  });
+
+  it("allows collaborators to reply to pull request review threads with suggested changes", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "WHERE t.repository_id = ? AND t.pull_request_number = ? AND t.id = ?",
+        first: () =>
+          buildPullRequestReviewThreadRow({
+            start_side: "head",
+            start_line: 12,
+            end_side: "head",
+            end_line: 12
+          })
+      },
+      {
+        when: "INSERT INTO pull_request_review_thread_comments",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE c.repository_id = ? AND c.pull_request_number = ? AND c.thread_id = ? AND c.id = ?",
+        first: () =>
+          buildPullRequestReviewThreadCommentRow({
+            id: "thread-comment-2",
+            body: "Use normalizePath here.",
+            suggested_start_line: 12,
+            suggested_end_line: 12,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);"
+          })
+      },
+      {
+        when: "UPDATE pull_request_review_threads",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [
+          buildPullRequestReviewThreadCommentRow(),
+          buildPullRequestReviewThreadCommentRow({
+            id: "thread-comment-2",
+            body: "Use normalizePath here.",
+            suggested_start_line: 12,
+            suggested_end_line: 12,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);",
+            created_at: now + 1_000,
+            updated_at: now + 1_000
+          })
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads/thread-1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "Use normalizePath here.",
+          suggestedCode: "const value = normalizePath(path);"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      reviewThread: {
+        id: string;
+        comments: Array<{ id: string; suggestion: { code: string } | null }>;
+      };
+      comment: {
+        id: string;
+        suggestion: { code: string } | null;
+      };
+    };
+    expect(body.comment.id).toBe("thread-comment-2");
+    expect(body.comment.suggestion?.code).toBe("const value = normalizePath(path);");
+    expect(body.reviewThread.id).toBe("thread-1");
+    expect(body.reviewThread.comments).toHaveLength(2);
+  });
+
+  it("resumes a pull request agent from an open review thread", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("workflow-interactive")
+      .mockReturnValueOnce("run-thread-resume")
+      .mockReturnValueOnce("session-thread-resume");
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    let insertedPrompt = "";
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "Please update the implementation safely.",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "FROM pull_request_reviews r",
+        all: () => []
+      },
+      {
+        when: "ORDER BY\n           CASE WHEN t.status = 'open' THEN 0 ELSE 1 END",
+        all: () => [buildPullRequestReviewThreadRow()]
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [
+          buildPullRequestReviewThreadCommentRow({
+            body: "Please handle null path.",
+            suggested_start_line: 12,
+            suggested_end_line: 12,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);"
+          })
+        ]
+      },
+      {
+        when: "FROM action_workflows\n         WHERE repository_id = ? AND id = ?",
+        first: () => ({
+          id: "workflow-interactive",
+          repository_id: "repo-1",
+          name: "__agent_session_internal__codex",
+          trigger_event: "mention_actions",
+          agent_type: "codex",
+          prompt: "internal interactive agent session workflow",
+          push_branch_regex: null,
+          push_tag_regex: null,
+          enabled: 1,
+          created_by: "owner-1",
+          created_at: now,
+          updated_at: now
+        })
+      },
+      {
+        when: "FROM global_settings",
+        all: () => []
+      },
+      {
+        when: "FROM repository_actions_configs",
+        first: () => null
+      },
+      {
+        when: "FROM action_workflows\n         WHERE repository_id = ?\n         ORDER BY updated_at DESC, created_at DESC",
+        all: () => []
+      },
+      {
+        when: "INSERT INTO action_workflows",
+        run: () => ({ success: true })
+      },
+      {
+        when: "RETURNING action_run_seq AS run_number",
+        first: () => ({ run_number: 7 })
+      },
+      {
+        when: "INSERT INTO action_runs",
+        run: (params) => {
+          insertedPrompt = String(params[15] ?? "");
+          return { success: true };
+        }
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-thread-resume",
+            run_number: 7,
+            workflow_id: "workflow-interactive",
+            workflow_name: "__agent_session_internal__codex",
+            trigger_event: "mention_actions",
+            trigger_ref: "refs/heads/feature",
+            trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 1,
+            triggered_by: "user-2",
+            triggered_by_username: "bob",
+            prompt: insertedPrompt || "placeholder",
+            created_at: now,
+            updated_at: now
+          })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
+        first: () => null
+      },
+      {
+        when: "INSERT INTO agent_sessions",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-thread-resume",
+            source_number: 1,
+            origin: "pull_request_resume",
+            linked_run_id: "run-thread-resume",
+            prompt: insertedPrompt || "placeholder",
+            created_at: now,
+            updated_at: now
+          })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/resume-agent", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          agentType: "codex",
+          threadId: "thread-1",
+          prompt: "Only address this thread."
+        })
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as {
+      run: { id: string; run_number: number; status: string };
+      session: { id: string; status: string; origin: string };
+    };
+    expect(body.run.id).toBe("run-thread-resume");
+    expect(body.run.run_number).toBe(7);
+    expect(body.run.status).toBe("queued");
+    expect(body.session.id).toBe("session-thread-resume");
+    expect(body.session.status).toBe("queued");
+    expect(body.session.origin).toBe("pull_request_resume");
+    expect(enqueueRun).toHaveBeenCalledTimes(1);
+    expect(insertedPrompt).toContain("[Focused Review Thread]");
+    expect(insertedPrompt).toContain("location: src/app.ts:12 (head)");
+    expect(insertedPrompt).toContain("Please handle null path.");
+    expect(insertedPrompt).toContain("suggestion (head 12-12):");
+    expect(insertedPrompt).toContain("const value = normalizePath(path);");
+    expect(insertedPrompt).toContain("Only address this thread.");
+  });
+
+  it("returns pull request provenance from the latest agent session", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "Please update the implementation safely.",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "AND s.source_type = ?\n           AND s.source_number IN",
+        all: () => [
+          buildAgentSessionRow({
+            id: "session-pr-provenance",
+            source_number: 1,
+            origin: "pull_request_resume",
+            linked_run_id: "run-pr-provenance",
+            created_at: now - 10_000,
+            updated_at: now - 5_000
+          })
+        ]
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-pr-provenance",
+            run_number: 9,
+            workflow_name: "__agent_session_internal__codex",
+            trigger_event: "mention_actions",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 1,
+            status: "running",
+            created_at: now - 10_000,
+            updated_at: now - 5_000
+          })
+      },
+      {
+        when: "FROM agent_session_artifacts",
+        all: () => [
+          {
+            id: "artifact-pr-1",
+            session_id: "session-pr-provenance",
+            repository_id: "repo-1",
+            kind: "stdout",
+            title: "Runner stdout",
+            media_type: "text/plain",
+            size_bytes: 18,
+            content_text: "artifact payload",
+            created_at: now - 4_000,
+            updated_at: now - 4_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_usage_records",
+        all: () => [
+          {
+            id: 1,
+            session_id: "session-pr-provenance",
+            repository_id: "repo-1",
+            kind: "duration_ms",
+            value: 900,
+            unit: "ms",
+            detail: "Container execution duration",
+            payload_json: "{\"runId\":\"run-pr-provenance\"}",
+            created_at: now - 4_000,
+            updated_at: now - 4_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_interventions",
+        all: () => [
+          {
+            id: 2,
+            session_id: "session-pr-provenance",
+            repository_id: "repo-1",
+            kind: "mcp_setup_warning",
+            title: "MCP setup warning",
+            detail: "platform MCP missing",
+            created_by: null,
+            created_by_username: null,
+            payload_json: "{\"runId\":\"run-pr-provenance\"}",
+            created_at: now - 3_000
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/provenance"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      latestSession: {
+        session: { id: string; origin: string };
+        linkedRun: { id: string; status: string } | null;
+        sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
+        artifacts: Array<{ kind: string; title: string }>;
+        usageRecords: Array<{ kind: string; value: number }>;
+        interventions: Array<{ kind: string; title: string }>;
+      } | null;
+    };
+    expect(body.latestSession?.session.id).toBe("session-pr-provenance");
+    expect(body.latestSession?.session.origin).toBe("pull_request_resume");
+    expect(body.latestSession?.linkedRun?.id).toBe("run-pr-provenance");
+    expect(body.latestSession?.linkedRun?.status).toBe("running");
+    expect(body.latestSession?.sourceContext.type).toBe("pull_request");
+    expect(body.latestSession?.sourceContext.number).toBe(1);
+    expect(body.latestSession?.sourceContext.title).toBe("Improve README");
+    expect(body.latestSession?.sourceContext.url).toBe("/repo/alice/demo/pulls/1");
+    expect(body.latestSession?.artifacts[0]?.kind).toBe("stdout");
+    expect(body.latestSession?.usageRecords[0]?.kind).toBe("duration_ms");
+    expect(body.latestSession?.interventions[0]?.kind).toBe("mcp_setup_warning");
+  });
+
   it("allows marking closing issues when creating pull requests", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",
@@ -1231,7 +2186,7 @@ describe("API issues and pull requests", () => {
       {
         when: "UPDATE issues",
         run: (params) => {
-          closedIssueNumbers.push(Number(params[4]));
+          closedIssueNumbers.push(Number(params[5]));
           return { success: true };
         }
       }
@@ -2196,6 +3151,57 @@ describe("API issues and pull requests", () => {
           updated_at: now - 30_000,
           closed_at: null
         })
+      },
+      {
+        when: "FROM agent_session_artifacts",
+        all: () => [
+          {
+            id: "artifact-1",
+            session_id: "session-detail",
+            repository_id: "repo-1",
+            kind: "stdout",
+            title: "Runner stdout",
+            media_type: "text/plain",
+            size_bytes: 14,
+            content_text: "stdout payload",
+            created_at: now - 9_000,
+            updated_at: now - 9_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_usage_records",
+        all: () => [
+          {
+            id: 1,
+            session_id: "session-detail",
+            repository_id: "repo-1",
+            kind: "duration_ms",
+            value: 250,
+            unit: "ms",
+            detail: "Container execution duration",
+            payload_json: "{\"runId\":\"run-detail\"}",
+            created_at: now - 9_000,
+            updated_at: now - 9_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_interventions",
+        all: () => [
+          {
+            id: 2,
+            session_id: "session-detail",
+            repository_id: "repo-1",
+            kind: "mcp_setup_warning",
+            title: "MCP setup warning",
+            detail: "platform MCP missing",
+            created_by: null,
+            created_by_username: null,
+            payload_json: "{\"runId\":\"run-detail\"}",
+            created_at: now - 8_000
+          }
+        ]
       }
     ]);
 
@@ -2209,6 +3215,9 @@ describe("API issues and pull requests", () => {
       session: { id: string; source_type: string; source_number: number };
       linkedRun: { id: string; workflow_name: string; status: string } | null;
       sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
+      artifacts: Array<{ kind: string; title: string }>;
+      usageRecords: Array<{ kind: string; value: number }>;
+      interventions: Array<{ kind: string; title: string }>;
     };
     expect(body.session.id).toBe("session-detail");
     expect(body.session.source_type).toBe("issue");
@@ -2220,6 +3229,9 @@ describe("API issues and pull requests", () => {
     expect(body.sourceContext.number).toBe(42);
     expect(body.sourceContext.title).toBe("Need login fix");
     expect(body.sourceContext.url).toBe("/repo/alice/demo/issues/42");
+    expect(body.artifacts[0]?.kind).toBe("stdout");
+    expect(body.usageRecords[0]?.kind).toBe("duration_ms");
+    expect(body.interventions[0]?.kind).toBe("mcp_setup_warning");
   });
 
   it("builds agent session timeline events from linked run logs", async () => {
@@ -2277,6 +3289,10 @@ Tests still failing`,
             completed_at: now - 1_000,
             updated_at: now - 1_000
           })
+      },
+      {
+        when: "FROM agent_session_interventions",
+        all: () => []
       }
     ]);
 
@@ -2310,6 +3326,143 @@ Tests still failing`,
     ).toBe(true);
     expect(
       body.events.some((event) => event.type === "session_completed" && event.title === "Session failed")
+    ).toBe(true);
+  });
+
+  it("uses structured agent session steps in timeline when available", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-structured",
+            source_type: "issue",
+            source_number: 5,
+            origin: "issue_assign",
+            status: "success",
+            linked_run_id: "run-structured",
+            created_at: now - 12_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
+          })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-structured",
+            run_number: 11,
+            workflow_name: "Issue Bot",
+            trigger_event: "issue_created",
+            trigger_source_type: "issue",
+            trigger_source_number: 5,
+            status: "success",
+            logs: "[stdout]\nAnalyzing repository",
+            exit_code: 0,
+            created_at: now - 12_000,
+            claimed_at: now - 11_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
+          })
+      },
+      {
+        when: "FROM agent_session_steps",
+        all: () => [
+          {
+            id: 1,
+            session_id: "session-structured",
+            repository_id: "repo-1",
+            kind: "session_created",
+            title: "Session created",
+            detail: "issue #5 · issue_assign · bob",
+            payload_json: "{\"status\":\"queued\"}",
+            created_at: now - 12_000
+          },
+          {
+            id: 2,
+            session_id: "session-structured",
+            repository_id: "repo-1",
+            kind: "session_started",
+            title: "Session started",
+            detail: "refs/heads/agent/session-structured",
+            payload_json: "{\"status\":\"running\"}",
+            created_at: now - 10_000
+          },
+          {
+            id: 3,
+            session_id: "session-structured",
+            repository_id: "repo-1",
+            kind: "session_completed",
+            title: "Session completed",
+            detail: "success",
+            payload_json: "{\"status\":\"success\"}",
+            created_at: now - 1_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_interventions",
+        all: () => [
+          {
+            id: 4,
+            session_id: "session-structured",
+            repository_id: "repo-1",
+            kind: "cancel_requested",
+            title: "Cancellation requested",
+            detail: "Queued session cancelled by bob.",
+            created_by: "user-2",
+            created_by_username: "bob",
+            payload_json: "{\"status\":\"cancelled\"}",
+            created_at: now - 500
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/session-structured/timeline"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      events: Array<{
+        id: string;
+        type: string;
+        title: string;
+        detail: string | null;
+      }>;
+    };
+    expect(body.events.some((event) => event.id === "step-1" && event.type === "session_created")).toBe(
+      true
+    );
+    expect(
+      body.events.some(
+        (event) =>
+          event.id === "step-2" &&
+          event.type === "session_started" &&
+          event.detail === "refs/heads/agent/session-structured"
+      )
+    ).toBe(true);
+    expect(
+      body.events.some(
+        (event) => event.id === "step-3" && event.type === "session_completed" && event.title === "Session completed"
+      )
+    ).toBe(true);
+    expect(
+      body.events.some((event) => event.type === "log" && event.detail === "Analyzing repository")
+    ).toBe(true);
+    expect(
+      body.events.some(
+        (event) => event.type === "intervention" && event.title === "Cancellation requested"
+      )
     ).toBe(true);
   });
 
@@ -2362,6 +3515,10 @@ Tests still failing`,
             changes: 1
           }
         })
+      },
+      {
+        when: "INSERT INTO agent_session_interventions",
+        run: () => ({ success: true })
       }
     ]);
 

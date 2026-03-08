@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS issues (
   title TEXT NOT NULL,
   body TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL CHECK (state IN ("open", "closed")),
+  task_status TEXT NOT NULL DEFAULT 'open' CHECK (task_status IN ('open', 'agent-working', 'waiting-human', 'done')),
+  acceptance_criteria TEXT NOT NULL DEFAULT '',
   milestone_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -122,6 +124,56 @@ CREATE TABLE IF NOT EXISTS pull_request_reviews (
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
   FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
   FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pull_request_review_threads (
+  id TEXT PRIMARY KEY,
+  repository_id TEXT NOT NULL,
+  pull_request_id TEXT NOT NULL,
+  pull_request_number INTEGER NOT NULL,
+  author_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  side TEXT NOT NULL CHECK (side IN ('base', 'head')),
+  body TEXT NOT NULL,
+  base_oid TEXT,
+  head_oid TEXT,
+  start_side TEXT CHECK (start_side IN ('base', 'head')),
+  start_line INTEGER,
+  end_side TEXT CHECK (end_side IN ('base', 'head')),
+  end_line INTEGER,
+  hunk_header TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+  resolved_by TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id, pull_request_number) REFERENCES pull_requests(repository_id, number) ON DELETE CASCADE,
+  FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS pull_request_review_thread_comments (
+  id TEXT PRIMARY KEY,
+  repository_id TEXT NOT NULL,
+  pull_request_id TEXT NOT NULL,
+  pull_request_number INTEGER NOT NULL,
+  thread_id TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  suggested_start_line INTEGER,
+  suggested_end_line INTEGER,
+  suggested_side TEXT CHECK (suggested_side IN ('base', 'head')),
+  suggested_code TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id, pull_request_number) REFERENCES pull_requests(repository_id, number) ON DELETE CASCADE,
+  FOREIGN KEY (thread_id) REFERENCES pull_request_review_threads(id) ON DELETE CASCADE,
+  FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS pull_request_closing_issues (
@@ -326,6 +378,94 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   FOREIGN KEY (delegated_from_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_session_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'session_created',
+      'run_queued',
+      'run_claimed',
+      'session_started',
+      'session_completed',
+      'session_cancelled'
+    )
+  ),
+  title TEXT NOT NULL,
+  detail TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_artifacts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'run_logs',
+      'stdout',
+      'stderr'
+    )
+  ),
+  title TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  content_text TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  UNIQUE(session_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_usage_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'duration_ms',
+      'exit_code',
+      'run_log_chars',
+      'stdout_chars',
+      'stderr_chars'
+    )
+  ),
+  value REAL NOT NULL,
+  unit TEXT NOT NULL,
+  detail TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  UNIQUE(session_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_interventions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'cancel_requested',
+      'mcp_setup_warning'
+    )
+  ),
+  title TEXT NOT NULL,
+  detail TEXT,
+  created_by TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_repositories_owner ON repositories(owner_id);
 CREATE INDEX IF NOT EXISTS idx_repositories_visibility ON repositories(is_private, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_access_tokens_user ON access_tokens(user_id, created_at DESC);
@@ -344,6 +484,12 @@ CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_lookup
   ON pull_request_reviews(repository_id, pull_request_number, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_reviewer
   ON pull_request_reviews(repository_id, reviewer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_review_threads_lookup
+  ON pull_request_review_threads(repository_id, pull_request_number, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_review_threads_status
+  ON pull_request_review_threads(repository_id, pull_request_number, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pull_request_review_thread_comments_lookup
+  ON pull_request_review_thread_comments(repository_id, pull_request_number, thread_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_repository_labels_lookup
   ON repository_labels(repository_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_repository_milestones_lookup
@@ -376,6 +522,14 @@ CREATE INDEX IF NOT EXISTS idx_agent_sessions_source_lookup
   ON agent_sessions(repository_id, source_type, source_number, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_linked_run_lookup
   ON agent_sessions(repository_id, linked_run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_session_steps_lookup
+  ON agent_session_steps(repository_id, session_id, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_agent_session_artifacts_lookup
+  ON agent_session_artifacts(repository_id, session_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_session_usage_lookup
+  ON agent_session_usage_records(repository_id, session_id, updated_at DESC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_agent_session_interventions_lookup
+  ON agent_session_interventions(repository_id, session_id, created_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS idx_reactions_subject_lookup
   ON reactions(repository_id, subject_type, subject_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_reactions_user_lookup

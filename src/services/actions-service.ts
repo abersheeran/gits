@@ -636,7 +636,17 @@ export class ActionsService {
         };
       }).meta?.changes ?? 0;
 
-    return changes > 0 ? now : null;
+    if (changes > 0) {
+      await this.agentSessionService.recordRunClaimed({
+        repositoryId,
+        runId,
+        containerInstance,
+        claimedAt: now
+      });
+      return now;
+    }
+
+    return null;
   }
 
   async updateRunToRunning(

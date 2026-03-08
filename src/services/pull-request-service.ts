@@ -3,6 +3,10 @@ import type {
   PullRequestRecord,
   PullRequestReviewDecision,
   PullRequestReviewRecord,
+  PullRequestReviewThreadCommentRecord,
+  PullRequestReviewThreadRecord,
+  PullRequestReviewThreadSide,
+  PullRequestReviewThreadSuggestionRecord,
   PullRequestState
 } from "../types";
 
@@ -40,6 +44,49 @@ type BasePullRequestReviewRow = {
   decision: PullRequestReviewDecision;
   body: string;
   created_at: number;
+};
+
+type BasePullRequestReviewThreadRow = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  author_id: string;
+  author_username: string;
+  path: string;
+  line: number;
+  side: PullRequestReviewThreadSide;
+  body: string;
+  base_oid: string | null;
+  head_oid: string | null;
+  start_side: PullRequestReviewThreadSide | null;
+  start_line: number | null;
+  end_side: PullRequestReviewThreadSide | null;
+  end_line: number | null;
+  hunk_header: string | null;
+  status: "open" | "resolved";
+  resolved_by: string | null;
+  resolved_by_username: string | null;
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
+};
+
+type BasePullRequestReviewThreadCommentRow = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  thread_id: string;
+  author_id: string;
+  author_username: string;
+  body: string;
+  suggested_start_line: number | null;
+  suggested_end_line: number | null;
+  suggested_side: PullRequestReviewThreadSide | null;
+  suggested_code: string | null;
+  created_at: number;
+  updated_at: number;
 };
 
 export type PaginatedPullRequestResult = {
@@ -145,6 +192,103 @@ export class PullRequestService {
       reactions: reactionsByReviewId[row.id] ?? [],
       created_at: row.created_at
     }));
+  }
+
+  private buildPullRequestReviewThreadSuggestion(
+    row: Pick<
+      BasePullRequestReviewThreadCommentRow,
+      "suggested_start_line" | "suggested_end_line" | "suggested_side" | "suggested_code"
+    >
+  ): PullRequestReviewThreadSuggestionRecord | null {
+    if (
+      row.suggested_start_line === null ||
+      row.suggested_end_line === null ||
+      row.suggested_side === null ||
+      row.suggested_code === null
+    ) {
+      return null;
+    }
+
+    return {
+      side: row.suggested_side,
+      start_line: row.suggested_start_line,
+      end_line: row.suggested_end_line,
+      code: row.suggested_code
+    };
+  }
+
+  private hydratePullRequestReviewThreadComments(
+    rows: BasePullRequestReviewThreadCommentRow[]
+  ): PullRequestReviewThreadCommentRecord[] {
+    return rows.map((row) => ({
+      id: row.id,
+      repository_id: row.repository_id,
+      pull_request_id: row.pull_request_id,
+      pull_request_number: row.pull_request_number,
+      thread_id: row.thread_id,
+      author_id: row.author_id,
+      author_username: row.author_username,
+      body: row.body,
+      suggestion: this.buildPullRequestReviewThreadSuggestion(row),
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }));
+  }
+
+  private buildLegacyPullRequestReviewThreadComment(
+    row: BasePullRequestReviewThreadRow
+  ): PullRequestReviewThreadCommentRecord {
+    return {
+      id: `legacy-${row.id}`,
+      repository_id: row.repository_id,
+      pull_request_id: row.pull_request_id,
+      pull_request_number: row.pull_request_number,
+      thread_id: row.id,
+      author_id: row.author_id,
+      author_username: row.author_username,
+      body: row.body,
+      suggestion: null,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  }
+
+  private hydratePullRequestReviewThreads(
+    rows: BasePullRequestReviewThreadRow[],
+    commentsByThreadId = new Map<string, PullRequestReviewThreadCommentRecord[]>()
+  ): PullRequestReviewThreadRecord[] {
+    return rows.map((row) => {
+      const comments = commentsByThreadId.get(row.id);
+      return {
+        id: row.id,
+        repository_id: row.repository_id,
+        pull_request_id: row.pull_request_id,
+        pull_request_number: row.pull_request_number,
+        author_id: row.author_id,
+        author_username: row.author_username,
+        path: row.path,
+        line: row.line,
+        side: row.side,
+        body: row.body,
+        base_oid: row.base_oid,
+        head_oid: row.head_oid,
+        start_side: row.start_side ?? row.side,
+        start_line: row.start_line ?? row.line,
+        end_side: row.end_side ?? row.side,
+        end_line: row.end_line ?? row.line,
+        hunk_header: row.hunk_header,
+        status: row.status,
+        resolved_by: row.resolved_by,
+        resolved_by_username: row.resolved_by_username,
+        comments:
+          comments && comments.length > 0
+            ? comments
+            : [this.buildLegacyPullRequestReviewThreadComment(row)],
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        resolved_at: row.resolved_at
+      };
+    });
   }
 
   private async nextPullRequestNumber(repositoryId: string): Promise<number> {
@@ -595,6 +739,423 @@ export class PullRequestService {
       throw new Error("Created pull request review not found");
     }
     return created;
+  }
+
+  private async listPullRequestReviewThreadCommentRows(
+    repositoryId: string,
+    pullRequestNumber: number,
+    threadIds: readonly string[]
+  ): Promise<BasePullRequestReviewThreadCommentRow[]> {
+    if (threadIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = Array.from(new Set(threadIds))
+      .map(() => "?")
+      .join(", ");
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          c.id,
+          c.repository_id,
+          c.pull_request_id,
+          c.pull_request_number,
+          c.thread_id,
+          c.author_id,
+          author.username AS author_username,
+          c.body,
+          c.suggested_start_line,
+          c.suggested_end_line,
+          c.suggested_side,
+          c.suggested_code,
+          c.created_at,
+          c.updated_at
+         FROM pull_request_review_thread_comments c
+         JOIN users author ON author.id = c.author_id
+         WHERE c.repository_id = ? AND c.pull_request_number = ? AND c.thread_id IN (${placeholders})
+         ORDER BY c.created_at ASC`
+      )
+      .bind(repositoryId, pullRequestNumber, ...Array.from(new Set(threadIds)))
+      .all<BasePullRequestReviewThreadCommentRow>();
+
+    return rows.results;
+  }
+
+  private async loadCommentsByThreadId(
+    repositoryId: string,
+    pullRequestNumber: number,
+    threadIds: readonly string[]
+  ): Promise<Map<string, PullRequestReviewThreadCommentRecord[]>> {
+    const rows = await this.listPullRequestReviewThreadCommentRows(
+      repositoryId,
+      pullRequestNumber,
+      threadIds
+    );
+    const comments = this.hydratePullRequestReviewThreadComments(rows);
+    const byThreadId = new Map<string, PullRequestReviewThreadCommentRecord[]>();
+
+    for (const comment of comments) {
+      const existing = byThreadId.get(comment.thread_id) ?? [];
+      existing.push(comment);
+      byThreadId.set(comment.thread_id, existing);
+    }
+
+    return byThreadId;
+  }
+
+  async findPullRequestReviewThreadCommentById(input: {
+    repositoryId: string;
+    pullRequestNumber: number;
+    threadId: string;
+    commentId: string;
+  }): Promise<PullRequestReviewThreadCommentRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+          c.id,
+          c.repository_id,
+          c.pull_request_id,
+          c.pull_request_number,
+          c.thread_id,
+          c.author_id,
+          author.username AS author_username,
+          c.body,
+          c.suggested_start_line,
+          c.suggested_end_line,
+          c.suggested_side,
+          c.suggested_code,
+          c.created_at,
+          c.updated_at
+         FROM pull_request_review_thread_comments c
+         JOIN users author ON author.id = c.author_id
+         WHERE c.repository_id = ? AND c.pull_request_number = ? AND c.thread_id = ? AND c.id = ?
+         LIMIT 1`
+      )
+      .bind(input.repositoryId, input.pullRequestNumber, input.threadId, input.commentId)
+      .first<BasePullRequestReviewThreadCommentRow>();
+
+    if (!row) {
+      return null;
+    }
+
+    const [comment] = this.hydratePullRequestReviewThreadComments([row]);
+    return comment ?? null;
+  }
+
+  async listPullRequestReviewThreads(
+    repositoryId: string,
+    pullRequestNumber: number
+  ): Promise<PullRequestReviewThreadRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          t.id,
+          t.repository_id,
+          t.pull_request_id,
+          t.pull_request_number,
+          t.author_id,
+          author.username AS author_username,
+          t.path,
+          t.line,
+          t.side,
+          t.body,
+          t.base_oid,
+          t.head_oid,
+          t.start_side,
+          t.start_line,
+          t.end_side,
+          t.end_line,
+          t.hunk_header,
+          t.status,
+          t.resolved_by,
+          resolver.username AS resolved_by_username,
+          t.created_at,
+          t.updated_at,
+          t.resolved_at
+         FROM pull_request_review_threads t
+         JOIN users author ON author.id = t.author_id
+         LEFT JOIN users resolver ON resolver.id = t.resolved_by
+         WHERE t.repository_id = ? AND t.pull_request_number = ?
+         ORDER BY
+           CASE WHEN t.status = 'open' THEN 0 ELSE 1 END,
+           t.created_at ASC`
+      )
+      .bind(repositoryId, pullRequestNumber)
+      .all<BasePullRequestReviewThreadRow>();
+
+    const commentsByThreadId = await this.loadCommentsByThreadId(
+      repositoryId,
+      pullRequestNumber,
+      rows.results.map((row) => row.id)
+    );
+
+    return this.hydratePullRequestReviewThreads(rows.results, commentsByThreadId);
+  }
+
+  async findPullRequestReviewThreadById(
+    repositoryId: string,
+    pullRequestNumber: number,
+    threadId: string
+  ): Promise<PullRequestReviewThreadRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+          t.id,
+          t.repository_id,
+          t.pull_request_id,
+          t.pull_request_number,
+          t.author_id,
+          author.username AS author_username,
+          t.path,
+          t.line,
+          t.side,
+          t.body,
+          t.base_oid,
+          t.head_oid,
+          t.start_side,
+          t.start_line,
+          t.end_side,
+          t.end_line,
+          t.hunk_header,
+          t.status,
+          t.resolved_by,
+          resolver.username AS resolved_by_username,
+          t.created_at,
+          t.updated_at,
+          t.resolved_at
+         FROM pull_request_review_threads t
+         JOIN users author ON author.id = t.author_id
+         LEFT JOIN users resolver ON resolver.id = t.resolved_by
+         WHERE t.repository_id = ? AND t.pull_request_number = ? AND t.id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, pullRequestNumber, threadId)
+      .first<BasePullRequestReviewThreadRow>();
+
+    if (!row) {
+      return null;
+    }
+    const commentsByThreadId = await this.loadCommentsByThreadId(repositoryId, pullRequestNumber, [row.id]);
+    const [thread] = this.hydratePullRequestReviewThreads([row], commentsByThreadId);
+    return thread ?? null;
+  }
+
+  async createPullRequestReviewThread(input: {
+    repositoryId: string;
+    pullRequestId: string;
+    pullRequestNumber: number;
+    authorId: string;
+    path: string;
+    line: number;
+    side: PullRequestReviewThreadSide;
+    body: string;
+    baseOid?: string | null;
+    headOid?: string | null;
+    startSide?: PullRequestReviewThreadSide;
+    startLine?: number;
+    endSide?: PullRequestReviewThreadSide;
+    endLine?: number;
+    hunkHeader?: string | null;
+    suggestion?: PullRequestReviewThreadSuggestionRecord | null;
+  }): Promise<PullRequestReviewThreadRecord> {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const startSide = input.startSide ?? input.side;
+    const startLine = input.startLine ?? input.line;
+    const endSide = input.endSide ?? input.side;
+    const endLine = input.endLine ?? input.line;
+    await this.db
+      .prepare(
+        `INSERT INTO pull_request_review_threads (
+          id,
+          repository_id,
+          pull_request_id,
+          pull_request_number,
+          author_id,
+          path,
+          line,
+          side,
+          body,
+          base_oid,
+          head_oid,
+          start_side,
+          start_line,
+          end_side,
+          end_line,
+          hunk_header,
+          status,
+          resolved_by,
+          created_at,
+          updated_at,
+          resolved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        input.repositoryId,
+        input.pullRequestId,
+        input.pullRequestNumber,
+        input.authorId,
+        input.path,
+        input.line,
+        input.side,
+        input.body,
+        input.baseOid ?? null,
+        input.headOid ?? null,
+        startSide,
+        startLine,
+        endSide,
+        endLine,
+        input.hunkHeader ?? null,
+        null,
+        now,
+        now,
+        null
+      )
+      .run();
+
+    await this.insertPullRequestReviewThreadComment({
+      repositoryId: input.repositoryId,
+      pullRequestId: input.pullRequestId,
+      pullRequestNumber: input.pullRequestNumber,
+      threadId: id,
+      authorId: input.authorId,
+      body: input.body,
+      suggestion: input.suggestion ?? null,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const created = await this.findPullRequestReviewThreadById(
+      input.repositoryId,
+      input.pullRequestNumber,
+      id
+    );
+    if (!created) {
+      throw new Error("Created pull request review thread not found");
+    }
+    return created;
+  }
+
+  private async insertPullRequestReviewThreadComment(input: {
+    repositoryId: string;
+    pullRequestId: string;
+    pullRequestNumber: number;
+    threadId: string;
+    authorId: string;
+    body: string;
+    suggestion?: PullRequestReviewThreadSuggestionRecord | null;
+    createdAt?: number;
+    updatedAt?: number;
+    commentId?: string;
+  }): Promise<string> {
+    const now = input.createdAt ?? Date.now();
+    const updatedAt = input.updatedAt ?? now;
+    const id = input.commentId ?? crypto.randomUUID();
+
+    await this.db
+      .prepare(
+        `INSERT INTO pull_request_review_thread_comments (
+          id,
+          repository_id,
+          pull_request_id,
+          pull_request_number,
+          thread_id,
+          author_id,
+          body,
+          suggested_start_line,
+          suggested_end_line,
+          suggested_side,
+          suggested_code,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        input.repositoryId,
+        input.pullRequestId,
+        input.pullRequestNumber,
+        input.threadId,
+        input.authorId,
+        input.body,
+        input.suggestion?.start_line ?? null,
+        input.suggestion?.end_line ?? null,
+        input.suggestion?.side ?? null,
+        input.suggestion?.code ?? null,
+        now,
+        updatedAt
+      )
+      .run();
+
+    await this.db
+      .prepare(
+        `UPDATE pull_request_review_threads
+         SET updated_at = ?
+         WHERE repository_id = ? AND pull_request_number = ? AND id = ?`
+      )
+      .bind(updatedAt, input.repositoryId, input.pullRequestNumber, input.threadId)
+      .run();
+
+    return id;
+  }
+
+  async createPullRequestReviewThreadComment(input: {
+    repositoryId: string;
+    pullRequestId: string;
+    pullRequestNumber: number;
+    threadId: string;
+    authorId: string;
+    body: string;
+    suggestion?: PullRequestReviewThreadSuggestionRecord | null;
+    createdAt?: number;
+    updatedAt?: number;
+  }): Promise<PullRequestReviewThreadCommentRecord> {
+    const id = await this.insertPullRequestReviewThreadComment(input);
+
+    const comment = await this.findPullRequestReviewThreadCommentById({
+      repositoryId: input.repositoryId,
+      pullRequestNumber: input.pullRequestNumber,
+      threadId: input.threadId,
+      commentId: id
+    });
+    if (!comment) {
+      throw new Error("Created pull request review thread comment not found");
+    }
+    return comment;
+  }
+
+  async resolvePullRequestReviewThread(input: {
+    repositoryId: string;
+    pullRequestNumber: number;
+    threadId: string;
+    resolvedBy: string;
+  }): Promise<PullRequestReviewThreadRecord | null> {
+    const now = Date.now();
+    await this.db
+      .prepare(
+        `UPDATE pull_request_review_threads
+         SET status = 'resolved',
+             resolved_by = ?,
+             resolved_at = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND pull_request_number = ? AND id = ?`
+      )
+      .bind(
+        input.resolvedBy,
+        now,
+        now,
+        input.repositoryId,
+        input.pullRequestNumber,
+        input.threadId
+      )
+      .run();
+
+    return this.findPullRequestReviewThreadById(
+      input.repositoryId,
+      input.pullRequestNumber,
+      input.threadId
+    );
   }
 
   async listPullRequestClosingIssueNumbers(

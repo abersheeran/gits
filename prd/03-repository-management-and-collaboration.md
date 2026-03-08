@@ -2,100 +2,73 @@
 
 ## 1. 模块目标
 
-让用户能够创建、维护、治理和协作使用仓库，并把“人类协作者规则”与“Agent 执行规则”统一到同一套仓库模型里。
+仓库模块只需要承担最小职责：
 
-对于 Agent 原生平台，仓库管理不只是“创建一个 repo”，还必须定义：
+- 提供代码容器。
+- 定义谁能协作。
+- 为 `Issue -> PR -> Merge` 工作流提供基础边界。
 
-- 谁能在这个仓库里运行 Agent
-- Agent 能写哪些分支
-- 哪些检查、评审和仓库规则是强制的
-- 团队与组织如何复用治理策略
+它不应该扩展成复杂的治理控制台。
 
 ## 2. 当前能力基线
 
-- 公共仓库发现：
-  - 首页展示公开仓库列表
-  - `GET /api/public/repos`
-- 个人仓库视图：
-  - Dashboard 展示“我拥有的仓库 + 我协作的仓库”
-  - `GET /api/repos`
-- 仓库创建：
-  - 名称校验
-  - 私有仓库默认开启
-  - 创建成功后初始化 `HEAD -> refs/heads/main`
-- 仓库设置：
-  - 修改名称
-  - 修改描述
-  - 修改公开/私有状态
-  - 删除仓库
+- 公开仓库发现。
+- Dashboard 展示拥有的仓库和参与协作的仓库。
+- 创建仓库。
+- 修改仓库名称、描述、公开/私有状态。
+- 删除仓库。
 - 协作者管理：
   - 查询协作者
-  - 新增或更新协作者权限
+  - 新增或更新权限
   - 删除协作者
-- 参与者列表：
-  - 返回 owner + collaborators，用于 Issue/PR 指派与评审人选择
+- 参与者列表可用于 Issue/PR 指派与评审人选择。
 
-## 3. 面向 Agent 原生目标需要补足
+## 3. 当前协作模型
 
-### 3.1 仓库治理能力
+- owner 拥有仓库最高权限。
+- collaborator 具备 `read / write / admin` 三档权限。
+- Agent Session 直接继承触发用户的仓库权限。
+- `canRunAgents` 与 `canManageActions` 已进入仓库权限视图。
 
-- 分支保护与 Ruleset：
-  - 受保护分支
-  - required checks
-  - required reviews
-  - 推送限制
-  - 强制通过 PR 合并
-- 默认分支切换
-- 仓库归档
-- 模板仓库
-- Fork 与上游同步策略
-- CODEOWNERS / Review Ownership 规则
+## 4. 面向主工作流仍需补足
 
-### 3.2 Agent 与仓库规则
+### 4.1 仓库页面还没有把任务流展示清楚
 
-仓库层不再单独维护一张 Agent Policy 表，而是直接复用现有仓库权限与未来的 Ruleset：
+当前仓库更多还是代码入口，接下来要更清楚地承载：
 
-- 谁能运行 Agent：
-  - owner
-  - collaborator
-  - 后续可扩展到 team / org role
-- Agent 执行范围：
-  - 直接继承触发用户的仓库权限
-  - 可创建新分支或更新已有工作分支
-  - 可推送分支、创建 PR、回写 Issue / PR 评论
-  - 具体限制由受保护分支、required checks、required reviews 等仓库规则决定
-- 仓库页面需要展示的重点不再是“允许 Agent 做什么”，而是：
-  - 当前仓库有哪些治理规则
-  - Agent Session 产物会落到哪些分支和 PR
-  - 哪些关键分支受保护
+- 当前有哪些活跃 Issue
+- 当前有哪些 Agent 正在推进的 PR
+- 最近 Session 产物落到了哪些分支和 PR
 
-### 3.3 协作角色
+### 4.2 默认协作路径还需要更顺
 
-现有 `read / write / admin / owner` 仍可保留，但需要扩展出与 Agent 相关的能力位，例如：
+当前已经有协作者模型，但从仓库进入主工作流时，还缺少更强的入口串联：
 
-- `run_agents`
-- `view_audit_logs`
-- `cancel_agent_sessions`
+- 从仓库快速进入活跃 Issue
+- 从 Issue 快速看到交付中的 PR
+- 从 PR 快速回到来源 Issue
 
-## 4. 关键流程
+### 4.3 默认分支管理仍然偏死
+
+当前创建仓库时默认就是 `main`，但还没有默认分支切换能力。这个不是复杂治理能力，而是一个基础仓库能力。
+
+## 5. 关键流程
 
 ### 当前已实现流程
 
-1. 新建仓库时先写 D1，再初始化 R2 中的仓库结构；如果任一环节失败，会回滚。
-2. 仓库重命名时会先迁移 R2 对象键，再更新 D1；数据库更新失败时再把 R2 名称迁回去。
-3. Dashboard 查询同时覆盖 owner 关系和 collaborator 关系。
-4. 参与者集合由 owner 和协作者合并去重后生成。
+1. 创建仓库时写入 D1 并初始化 R2 中的 Git 仓库结构。
+2. 重命名仓库时会同步迁移 R2 对象前缀。
+3. Dashboard 同时按 owner 和 collaborator 关系列出仓库。
+4. Issue/PR 可复用 owner + collaborators 作为参与者集合。
 
 ### 目标流程
 
-1. 创建仓库时，同时选择仓库模板与默认治理规则。
-2. 为仓库配置分支保护、required checks、默认 reviewer 规则。
-3. 当用户把任务交给 Agent 时，系统直接继承触发用户在仓库内的权限，并生成可追溯的 Session。
-4. Agent 产出的分支、PR、评论与 artifact 都带有完整的溯源信息，且仍受仓库治理规则约束。
+1. 用户创建仓库并邀请协作者。
+2. 协作者在仓库中提交 Issue。
+3. Agent 基于 Issue 工作并发起 PR。
+4. 人类在同一仓库内继续评审和合并。
 
-## 5. 核心接口
-
-### 当前接口
+## 6. 当前接口
 
 - `GET /api/public/repos`
 - `GET /api/repos`
@@ -107,30 +80,13 @@
 - `DELETE /api/repos/:owner/:repo/collaborators/:username`
 - `GET /api/repos/:owner/:repo/participants`
 
-### 建议新增接口
-
-- `POST /api/repos/:owner/:repo/rulesets`
-- `GET /api/repos/:owner/:repo/rulesets`
-- `PATCH /api/repos/:owner/:repo/rulesets/:rulesetId`
-- `POST /api/repos/:owner/:repo/archive`
-- `POST /api/repos/:owner/:repo/fork`
-
-## 6. 数据模型
-
-### 当前数据
+## 7. 当前数据
 
 - `repositories`
 - `repository_collaborators`
 - `repository_counters`
 
-### 建议新增数据
-
-- `repository_rulesets`
-- `repository_branch_policies`
-- `repository_templates`
-- `repository_forks`
-
-## 7. 关键代码文件
+## 8. 关键代码文件
 
 - `src/services/repository-service.ts`
 - `src/services/storage-service.ts`
@@ -140,34 +96,16 @@
 - `web/src/pages/new-repository-page.tsx`
 - `web/src/pages/repository-settings-page.tsx`
 - `web/src/pages/repository-collaborators-page.tsx`
-- `web/src/components/repository/repository-header.tsx`
 
-后续预计新增：
+## 9. 当前边界与下一步
 
-- `src/services/repository-policy-service.ts`
-- `web/src/pages/repository-rulesets-page.tsx`
-
-## 8. 当前边界与下一步
-
-### 近期已落地（2026-03）
-
-- 已移除 `repository_agent_policies`，不再为仓库单独维护 Agent 能力白名单
-- Agent Session 现在直接继承触发用户在仓库内的权限
-- 仓库详情权限已收口为：
-  - `canRunAgents`
-  - `canManageActions`
-- 仓库 Actions 页面保留：
-  - 最近 Agent Session 可观测性
-  - session 取消入口
-  - runner / container 配置入口
-
-- 当前只有”用户个人仓库”模型
-- 分支保护、默认分支切换、归档、模板仓库等仓库治理能力尚未实现
-- 协作者权限是仓库级，不支持目录级或分支级权限
-- 仓库删除为硬删除，D1 与 R2 数据都会移除
+- 当前只有个人仓库模型。
+- 协作者权限仍然是仓库级。
+- 仓库删除仍是硬删除。
+- 仓库页对“当前任务链”展示还不够强。
 
 下一步优先级：
 
-1. 增加 Ruleset、分支保护、required checks
-2. 增加模板仓库、归档与 fork 策略
-3. 把仓库治理规则与 Agent Session 溯源打通
+1. 增加默认分支切换。
+2. 提升仓库页对活跃 Issue / PR / Session 的入口组织。
+3. 把 Issue、PR、Session 之间的导航关系做得更明显。

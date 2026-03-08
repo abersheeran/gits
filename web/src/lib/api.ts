@@ -4,6 +4,7 @@ export type AuthUser = {
 };
 
 export type CollaboratorPermission = "read" | "write" | "admin";
+export type IssueTaskStatus = "open" | "agent-working" | "waiting-human" | "done";
 
 export type RepositoryRecord = {
   id: string;
@@ -103,8 +104,25 @@ export type RepositoryCompareChange = {
   deletions: number;
   isBinary: boolean;
   patch: string | null;
+  hunks: RepositoryDiffHunk[];
   oldContent: string | null;
   newContent: string | null;
+};
+
+export type RepositoryDiffLine = {
+  kind: "context" | "add" | "delete" | "meta";
+  content: string;
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
+};
+
+export type RepositoryDiffHunk = {
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: RepositoryDiffLine[];
 };
 
 export type RepositoryCommitDetailResponse = {
@@ -235,6 +253,8 @@ export type IssueRecord = {
   title: string;
   body: string;
   state: IssueState;
+  task_status: IssueTaskStatus;
+  acceptance_criteria: string;
   comment_count: number;
   labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
@@ -243,6 +263,29 @@ export type IssueRecord = {
   created_at: number;
   updated_at: number;
   closed_at: number | null;
+};
+
+export type IssueLinkedPullRequestRecord = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  state: PullRequestState;
+  draft: boolean;
+  base_ref: string;
+  head_ref: string;
+  merge_commit_oid: string | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  merged_at: number | null;
+};
+
+export type IssueDetailResponse = {
+  issue: IssueRecord;
+  linkedPullRequests: IssueLinkedPullRequestRecord[];
 };
 
 export type IssueCommentRecord = {
@@ -296,6 +339,10 @@ export type PullRequestDetailResponse = {
   closingIssueNumbers: number[];
 };
 
+export type PullRequestProvenanceResponse = {
+  latestSession: AgentSessionDetail | null;
+};
+
 export type PullRequestReviewRecord = {
   id: string;
   repository_id: string;
@@ -307,6 +354,58 @@ export type PullRequestReviewRecord = {
   body: string;
   reactions: ReactionSummary[];
   created_at: number;
+};
+
+export type PullRequestReviewThreadSide = "base" | "head";
+
+export type PullRequestReviewThreadStatus = "open" | "resolved";
+
+export type PullRequestReviewThreadSuggestionRecord = {
+  side: PullRequestReviewThreadSide;
+  start_line: number;
+  end_line: number;
+  code: string;
+};
+
+export type PullRequestReviewThreadCommentRecord = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  thread_id: string;
+  author_id: string;
+  author_username: string;
+  body: string;
+  suggestion: PullRequestReviewThreadSuggestionRecord | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type PullRequestReviewThreadRecord = {
+  id: string;
+  repository_id: string;
+  pull_request_id: string;
+  pull_request_number: number;
+  author_id: string;
+  author_username: string;
+  path: string;
+  line: number;
+  side: PullRequestReviewThreadSide;
+  body: string;
+  base_oid: string | null;
+  head_oid: string | null;
+  start_side: PullRequestReviewThreadSide;
+  start_line: number;
+  end_side: PullRequestReviewThreadSide;
+  end_line: number;
+  hunk_header: string | null;
+  status: PullRequestReviewThreadStatus;
+  resolved_by: string | null;
+  resolved_by_username: string | null;
+  comments: PullRequestReviewThreadCommentRecord[];
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
 };
 
 export type PullRequestReviewSummary = {
@@ -482,6 +581,45 @@ export type AgentSessionRecord = {
   updated_at: number;
 };
 
+export type AgentSessionArtifactRecord = {
+  id: string;
+  session_id: string;
+  repository_id: string;
+  kind: "run_logs" | "stdout" | "stderr";
+  title: string;
+  media_type: string;
+  size_bytes: number;
+  content_text: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AgentSessionUsageRecord = {
+  id: number;
+  session_id: string;
+  repository_id: string;
+  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars";
+  value: number;
+  unit: string;
+  detail: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type AgentSessionInterventionRecord = {
+  id: number;
+  session_id: string;
+  repository_id: string;
+  kind: "cancel_requested" | "mcp_setup_warning";
+  title: string;
+  detail: string | null;
+  created_by: string | null;
+  created_by_username: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+};
+
 export type AgentSessionSourceContext = {
   type: AgentSessionSourceType;
   number: number | null;
@@ -494,6 +632,9 @@ export type AgentSessionDetail = {
   session: AgentSessionRecord;
   linkedRun: ActionRunRecord | null;
   sourceContext: AgentSessionSourceContext;
+  artifacts: AgentSessionArtifactRecord[];
+  usageRecords: AgentSessionUsageRecord[];
+  interventions: AgentSessionInterventionRecord[];
 };
 
 export type AgentSessionTimelineEvent = {
@@ -505,7 +646,8 @@ export type AgentSessionTimelineEvent = {
     | "session_started"
     | "log"
     | "session_completed"
-    | "session_cancelled";
+    | "session_cancelled"
+    | "intervention";
   title: string;
   detail: string | null;
   timestamp: number | null;
@@ -521,11 +663,13 @@ export type AgentSessionLatestBySourceItem = {
 export type TriggerRepositoryAgentInput = {
   agentType?: ActionAgentType;
   prompt?: string;
+  threadId?: string;
 };
 
 export type TriggerRepositoryAgentResponse = {
   run: ActionRunRecord;
   session: AgentSessionRecord;
+  issue?: IssueRecord;
 };
 
 export type AgentSessionLifecycleResponse = {
@@ -773,11 +917,10 @@ export async function getIssue(
   owner: string,
   repo: string,
   number: number
-): Promise<IssueRecord> {
-  const response = await requestJson<{ issue: IssueRecord }>(
+): Promise<IssueDetailResponse> {
+  return requestJson<IssueDetailResponse>(
     `/api/repos/${owner}/${repo}/issues/${number}`
   );
-  return response.issue;
 }
 
 export async function createIssue(
@@ -786,6 +929,7 @@ export async function createIssue(
   input: {
     title: string;
     body?: string;
+    acceptanceCriteria?: string;
     labelIds?: string[];
     assigneeUserIds?: string[];
     milestoneId?: string | null;
@@ -806,6 +950,8 @@ export async function updateIssue(
     title?: string;
     body?: string;
     state?: IssueState;
+    taskStatus?: IssueTaskStatus;
+    acceptanceCriteria?: string;
     labelIds?: string[];
     assigneeUserIds?: string[];
     milestoneId?: string | null;
@@ -876,6 +1022,16 @@ export async function getPullRequest(
 ): Promise<PullRequestDetailResponse> {
   return requestJson<PullRequestDetailResponse>(
     `/api/repos/${owner}/${repo}/pulls/${number}`
+  );
+}
+
+export async function getPullRequestProvenance(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<PullRequestProvenanceResponse> {
+  return requestJson<PullRequestProvenanceResponse>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/provenance`
   );
 }
 
@@ -954,6 +1110,79 @@ export async function createPullRequestReview(
       bodyJson: input
     }
   );
+}
+
+export async function listPullRequestReviewThreads(
+  owner: string,
+  repo: string,
+  number: number
+): Promise<PullRequestReviewThreadRecord[]> {
+  const response = await requestJson<{ reviewThreads: PullRequestReviewThreadRecord[] }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/review-threads`
+  );
+  return response.reviewThreads;
+}
+
+export async function createPullRequestReviewThread(
+  owner: string,
+  repo: string,
+  number: number,
+  input: {
+    path: string;
+    baseOid: string;
+    headOid: string;
+    startSide: PullRequestReviewThreadSide;
+    startLine: number;
+    endSide: PullRequestReviewThreadSide;
+    endLine: number;
+    hunkHeader: string;
+    body?: string;
+    suggestedCode?: string;
+  }
+): Promise<PullRequestReviewThreadRecord> {
+  const response = await requestJson<{ reviewThread: PullRequestReviewThreadRecord }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/review-threads`,
+    {
+      method: "POST",
+      bodyJson: input
+    }
+  );
+  return response.reviewThread;
+}
+
+export async function createPullRequestReviewThreadComment(
+  owner: string,
+  repo: string,
+  number: number,
+  threadId: string,
+  input: {
+    body?: string;
+    suggestedCode?: string;
+  }
+): Promise<PullRequestReviewThreadRecord> {
+  const response = await requestJson<{
+    reviewThread: PullRequestReviewThreadRecord;
+    comment: PullRequestReviewThreadCommentRecord;
+  }>(`/api/repos/${owner}/${repo}/pulls/${number}/review-threads/${threadId}/comments`, {
+    method: "POST",
+    bodyJson: input
+  });
+  return response.reviewThread;
+}
+
+export async function resolvePullRequestReviewThread(
+  owner: string,
+  repo: string,
+  number: number,
+  threadId: string
+): Promise<PullRequestReviewThreadRecord> {
+  const response = await requestJson<{ reviewThread: PullRequestReviewThreadRecord }>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/review-threads/${threadId}/resolve`,
+    {
+      method: "POST"
+    }
+  );
+  return response.reviewThread;
 }
 
 export async function getActionsGlobalConfig(): Promise<ActionsGlobalConfig> {
@@ -1212,6 +1441,17 @@ export async function getRepositoryAgentSessionTimeline(
     `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/timeline`
   );
   return response.events;
+}
+
+export async function listRepositoryAgentSessionArtifacts(
+  owner: string,
+  repo: string,
+  sessionId: string
+): Promise<AgentSessionArtifactRecord[]> {
+  const response = await requestJson<{ artifacts: AgentSessionArtifactRecord[] }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/artifacts`
+  );
+  return response.artifacts;
 }
 
 export async function cancelRepositoryAgentSession(

@@ -1,5 +1,11 @@
 import { RepositoryMetadataService } from "./repository-metadata-service";
-import type { IssueCommentRecord, IssueRecord, IssueState } from "../types";
+import type {
+  IssueCommentRecord,
+  IssueLinkedPullRequestRecord,
+  IssueRecord,
+  IssueState,
+  IssueTaskStatus
+} from "../types";
 
 export type IssueListState = IssueState | "all";
 
@@ -12,6 +18,8 @@ type BaseIssueRow = {
   title: string;
   body: string;
   state: IssueState;
+  task_status: IssueTaskStatus;
+  acceptance_criteria: string;
   milestone_id: string | null;
   created_at: number;
   updated_at: number;
@@ -28,6 +36,24 @@ type BaseIssueCommentRow = {
   body: string;
   created_at: number;
   updated_at: number;
+};
+
+type IssueLinkedPullRequestRow = {
+  id: string;
+  repository_id: string;
+  number: number;
+  author_id: string;
+  author_username: string;
+  title: string;
+  state: "open" | "closed" | "merged";
+  draft: number;
+  base_ref: string;
+  head_ref: string;
+  merge_commit_oid: string | null;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  merged_at: number | null;
 };
 
 export type PaginatedIssueResult = {
@@ -86,6 +112,8 @@ export class IssueService {
       title: row.title,
       body: row.body,
       state: row.state,
+      task_status: row.task_status,
+      acceptance_criteria: row.acceptance_criteria,
       comment_count: metadata.commentCountByIssueId[row.id] ?? 0,
       labels: metadata.labelsByIssueId[row.id] ?? [],
       assignees: metadata.assigneesByIssueId[row.id] ?? [],
@@ -178,6 +206,8 @@ export class IssueService {
                 i.title,
                 i.body,
                 i.state,
+                i.task_status,
+                i.acceptance_criteria,
                 i.milestone_id,
                 i.created_at,
                 i.updated_at,
@@ -201,6 +231,8 @@ export class IssueService {
                 i.title,
                 i.body,
                 i.state,
+                i.task_status,
+                i.acceptance_criteria,
                 i.milestone_id,
                 i.created_at,
                 i.updated_at,
@@ -241,6 +273,8 @@ export class IssueService {
           i.title,
           i.body,
           i.state,
+          i.task_status,
+          i.acceptance_criteria,
           i.milestone_id,
           i.created_at,
           i.updated_at,
@@ -291,6 +325,7 @@ export class IssueService {
     authorId: string;
     title: string;
     body?: string;
+    acceptanceCriteria?: string;
     milestoneId?: string | null;
   }): Promise<IssueRecord> {
     const number = await this.nextIssueNumber(input.repositoryId);
@@ -305,11 +340,13 @@ export class IssueService {
           title,
           body,
           state,
+          task_status,
+          acceptance_criteria,
           milestone_id,
           created_at,
           updated_at,
           closed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         crypto.randomUUID(),
@@ -319,6 +356,8 @@ export class IssueService {
         input.title,
         input.body ?? "",
         "open",
+        "open",
+        input.acceptanceCriteria ?? "",
         input.milestoneId ?? null,
         now,
         now,
@@ -403,6 +442,8 @@ export class IssueService {
       title?: string;
       body?: string;
       state?: IssueState;
+      taskStatus?: IssueTaskStatus;
+      acceptanceCriteria?: string;
       milestoneId?: string | null;
     }
   ): Promise<IssueRecord | null> {
@@ -421,6 +462,18 @@ export class IssueService {
       params.push(patch.state);
       updates.push("closed_at = ?");
       params.push(patch.state === "closed" ? Date.now() : null);
+      if (patch.taskStatus === undefined) {
+        updates.push("task_status = ?");
+        params.push(patch.state === "closed" ? "done" : "open");
+      }
+    }
+    if (patch.taskStatus !== undefined) {
+      updates.push("task_status = ?");
+      params.push(patch.taskStatus);
+    }
+    if (patch.acceptanceCriteria !== undefined) {
+      updates.push("acceptance_criteria = ?");
+      params.push(patch.acceptanceCriteria);
     }
     if (patch.milestoneId !== undefined) {
       updates.push("milestone_id = ?");
@@ -443,6 +496,63 @@ export class IssueService {
       .run();
 
     return this.findIssueByNumber(repositoryId, number);
+  }
+
+  async listLinkedPullRequestsForIssue(
+    repositoryId: string,
+    issueNumber: number
+  ): Promise<IssueLinkedPullRequestRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          pr.id,
+          pr.repository_id,
+          pr.number,
+          pr.author_id,
+          u.username AS author_username,
+          pr.title,
+          pr.state,
+          pr.draft,
+          pr.base_ref,
+          pr.head_ref,
+          pr.merge_commit_oid,
+          pr.created_at,
+          pr.updated_at,
+          pr.closed_at,
+          pr.merged_at
+         FROM pull_request_closing_issues pci
+         JOIN pull_requests pr ON pr.id = pci.pull_request_id
+         JOIN users u ON u.id = pr.author_id
+         WHERE pci.repository_id = ? AND pci.issue_number = ?
+         ORDER BY
+           CASE pr.state
+             WHEN 'open' THEN 0
+             WHEN 'merged' THEN 1
+             ELSE 2
+           END,
+           pr.updated_at DESC,
+           pr.number DESC`
+      )
+      .bind(repositoryId, issueNumber)
+      .all<IssueLinkedPullRequestRow>();
+
+    return rows.results.map((row) => ({
+      id: row.id,
+      repository_id: row.repository_id,
+      number: row.number,
+      author_id: row.author_id,
+      author_username: row.author_username,
+      title: row.title,
+      state: row.state,
+      draft: Number(row.draft) === 1,
+      base_ref: row.base_ref,
+      head_ref: row.head_ref,
+      merge_commit_oid: row.merge_commit_oid,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      closed_at: row.closed_at,
+      merged_at: row.merged_at
+    }));
   }
 
   async countOpenIssues(repositoryId: string): Promise<number> {
