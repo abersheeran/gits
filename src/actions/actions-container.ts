@@ -5,6 +5,7 @@ import {
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "../services/action-runner-prompt-tokens";
 import { AuthService } from "../services/auth-service";
+import { appendValidationReportPrompt } from "../services/agent-session-validation-report";
 import { createSecretRedactor } from "../utils/secret-redaction";
 
 type ExecuteRequest = {
@@ -141,7 +142,7 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
       ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
       prCreateToken ?? PR_CREATE_TOKEN_UNAVAILABLE
     );
-    return runtimePrompt;
+    return appendValidationReportPrompt(runtimePrompt);
   }
 
   private buildRuntimeEnv(env: Record<string, string> | undefined): Record<string, string> {

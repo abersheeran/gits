@@ -1,4 +1,4 @@
-import type { AuthUser, RepositoryRecord } from "../types";
+import type { AuthUser, AgentSessionValidationReport, RepositoryRecord } from "../types";
 import { AgentSessionService } from "./agent-session-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
@@ -8,6 +8,10 @@ import { getActionRunnerNamespace } from "./action-container-instance-types";
 import { buildActionRunLifecycleLines } from "./action-run-log-format";
 import { ACTIONS_SYSTEM_EMAIL, ACTIONS_SYSTEM_USERNAME } from "./auth-service";
 import { ActionsService } from "./actions-service";
+import {
+  extractValidationReportFromText,
+  parseAgentSessionValidationReport
+} from "./agent-session-validation-report";
 import { createSecretRedactor } from "../utils/secret-redaction";
 
 type RunnerExecuteResult = {
@@ -19,6 +23,7 @@ type RunnerExecuteResult = {
   spawnError?: string;
   attemptedCommand?: string;
   mcpSetupWarning?: string;
+  validationReport?: AgentSessionValidationReport;
 };
 
 type RunnerStreamEvent =
@@ -456,6 +461,7 @@ function parseRunnerResponse(payload: unknown): RunnerExecuteResult {
     return {};
   }
   const data = payload as Record<string, unknown>;
+  const validationReport = parseAgentSessionValidationReport(data.validationReport);
 
   return {
     ...(typeof data.exitCode === "number" ? { exitCode: data.exitCode } : {}),
@@ -469,7 +475,33 @@ function parseRunnerResponse(payload: unknown): RunnerExecuteResult {
       : {}),
     ...(typeof data.mcpSetupWarning === "string"
       ? { mcpSetupWarning: data.mcpSetupWarning }
-      : {})
+      : {}),
+    ...(validationReport ? { validationReport } : {})
+  };
+}
+
+function extractValidationReport(result: RunnerExecuteResult): RunnerExecuteResult {
+  let validationReport = result.validationReport ?? null;
+  let stdout = result.stdout;
+  let stderr = result.stderr;
+
+  if (stdout) {
+    const extracted = extractValidationReportFromText(stdout);
+    stdout = extracted.cleanedText;
+    validationReport = extracted.report ?? validationReport;
+  }
+
+  if (stderr) {
+    const extracted = extractValidationReportFromText(stderr);
+    stderr = extracted.cleanedText;
+    validationReport = extracted.report ?? validationReport;
+  }
+
+  return {
+    ...result,
+    ...(stdout !== undefined ? { stdout } : {}),
+    ...(stderr !== undefined ? { stderr } : {}),
+    ...(validationReport ? { validationReport } : {})
   };
 }
 
@@ -544,7 +576,7 @@ export async function executeActionRun(input: {
   }
 
   let startedAt: number | null = null;
-  let runnerResult: RunnerExecuteResult | undefined;
+  let runnerResult: RunnerExecuteResult = {};
 
   try {
     const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
@@ -672,6 +704,8 @@ export async function executeActionRun(input: {
 
       runnerResult = parseRunnerResponse(responsePayload);
     }
+
+    runnerResult = extractValidationReport(runnerResult);
 
     if (!runnerResponse.ok) {
       const logs = buildRunLogs({

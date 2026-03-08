@@ -12,7 +12,8 @@ import type {
   AgentSessionSourceType,
   AgentSessionStatus,
   AgentSessionUsageKind,
-  AgentSessionUsageRecord
+  AgentSessionUsageRecord,
+  AgentSessionValidationReport
 } from "../types";
 
 export type AgentSessionTimelineEvent = {
@@ -986,6 +987,7 @@ export class AgentSessionService {
       error?: string;
       attemptedCommand?: string;
       mcpSetupWarning?: string;
+      validationReport?: AgentSessionValidationReport;
     };
     recordedAt?: number;
   }): Promise<void> {
@@ -995,7 +997,10 @@ export class AgentSessionService {
     }
 
     const recordedAt = input.recordedAt ?? Date.now();
-    const payloadBase = { runId: input.runId };
+    const payloadBase = {
+      runId: input.runId,
+      ...(input.result?.validationReport ? { validationReport: input.result.validationReport } : {})
+    };
     const runLogs = input.logs.trim();
     if (runLogs) {
       await this.upsertArtifact({

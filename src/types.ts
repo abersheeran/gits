@@ -453,6 +453,12 @@ export type AgentSessionValidationCheckRecord = {
   summary: string;
 };
 
+export type AgentSessionValidationReport = {
+  headline: string;
+  detail: string;
+  checks: AgentSessionValidationCheckRecord[];
+};
+
 export type AgentSessionValidationSummary = {
   status: ActionRunStatus | null;
   headline: string;

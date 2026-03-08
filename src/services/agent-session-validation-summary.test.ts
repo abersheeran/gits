@@ -187,4 +187,67 @@ describe("buildAgentSessionValidationSummary", () => {
     expect(summary.checks[0]?.status).toBe("failed");
     expect(summary.highlighted_artifact_ids[0]).toBe("artifact-stderr");
   });
+
+  it("prefers a structured validation report over log heuristics", () => {
+    const summary = buildAgentSessionValidationSummary({
+      status: "success",
+      artifacts: [
+        {
+          id: "artifact-stdout",
+          session_id: "session-3",
+          repository_id: "repo-1",
+          kind: "stdout",
+          title: "Runner stdout",
+          media_type: "text/plain",
+          size_bytes: 128,
+          content_text: "$ npm run lint\neslint .\n$ npm test\nvitest run",
+          created_at: 10,
+          updated_at: 20
+        }
+      ],
+      usageRecords: [
+        {
+          id: 6,
+          session_id: "session-3",
+          repository_id: "repo-1",
+          kind: "run_log_chars",
+          value: 512,
+          unit: "chars",
+          detail: null,
+          payload: {
+            runId: "run-3",
+            validationReport: {
+              headline: "Tests passed; build still needs a manual run.",
+              detail: "Ran npm test successfully and left the build step for a follow-up pass.",
+              checks: [
+                {
+                  kind: "tests",
+                  status: "passed",
+                  command: "npm test",
+                  summary: "Vitest completed successfully."
+                }
+              ]
+            }
+          },
+          created_at: 1,
+          updated_at: 2
+        }
+      ],
+      interventions: []
+    });
+
+    expect(summary.headline).toBe("Tests passed; build still needs a manual run.");
+    expect(summary.detail).toBe(
+      "Ran npm test successfully and left the build step for a follow-up pass."
+    );
+    expect(summary.checks).toEqual([
+      {
+        kind: "tests",
+        label: "Tests",
+        status: "passed",
+        command: "npm test",
+        summary: "Vitest completed successfully."
+      }
+    ]);
+  });
 });

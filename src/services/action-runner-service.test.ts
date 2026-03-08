@@ -405,7 +405,10 @@ describe("executeActionRun", () => {
         JSON.stringify({
           exitCode: 0,
           durationMs: 25,
-          stdout: "stdout payload",
+          stdout: `stdout payload
+[GITS_VALIDATION_REPORT_BEGIN]
+{"headline":"Tests passed.","detail":"Ran npm test successfully.","checks":[{"kind":"tests","status":"passed","command":"npm test","summary":"Vitest completed successfully."}]}
+[GITS_VALIDATION_REPORT_END]`,
           stderr: "stderr payload",
           attemptedCommand: "codex run",
           mcpSetupWarning: "platform MCP missing"
@@ -473,7 +476,20 @@ describe("executeActionRun", () => {
           stdout: "stdout payload",
           stderr: "stderr payload",
           attemptedCommand: "codex run",
-          mcpSetupWarning: "platform MCP missing"
+          mcpSetupWarning: "platform MCP missing",
+          validationReport: {
+            headline: "Tests passed.",
+            detail: "Ran npm test successfully.",
+            checks: [
+              {
+                kind: "tests",
+                label: "Tests",
+                status: "passed",
+                command: "npm test",
+                summary: "Vitest completed successfully."
+              }
+            ]
+          }
         })
       })
     );

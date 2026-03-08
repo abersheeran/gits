@@ -9,6 +9,7 @@ import type {
   AgentSessionValidationCheckStatus,
   AgentSessionValidationSummary
 } from "../types";
+import { findValidationReportInUsageRecords } from "./agent-session-validation-report";
 
 type ValidationCheckDefinition = {
   kind: AgentSessionValidationCheckKind;
@@ -281,26 +282,33 @@ export function buildAgentSessionValidationSummary(input: {
   usageRecords: AgentSessionUsageRecord[];
   interventions: AgentSessionInterventionRecord[];
 }): AgentSessionValidationSummary {
+  const structuredReport = findValidationReportInUsageRecords(input.usageRecords);
   const lines = collectLogLines(input.artifacts);
-  const checks = VALIDATION_CHECK_DEFINITIONS.flatMap((definition) => {
-    const check = detectValidationCheck(definition, lines, input.status);
-    return check ? [check] : [];
-  });
+  const checks =
+    structuredReport?.checks ??
+    VALIDATION_CHECK_DEFINITIONS.flatMap((definition) => {
+      const check = detectValidationCheck(definition, lines, input.status);
+      return check ? [check] : [];
+    });
 
   const exitCode = usageRecordValue(input.usageRecords, "exit_code");
   const summary: AgentSessionValidationSummary = {
     status: input.status,
-    headline: buildHeadline({
-      status: input.status,
-      checks,
-      exitCode
-    }),
-    detail: buildDetail({
-      status: input.status,
-      checks,
-      exitCode,
-      interventions: input.interventions
-    }),
+    headline:
+      structuredReport?.headline ??
+      buildHeadline({
+        status: input.status,
+        checks,
+        exitCode
+      }),
+    detail:
+      structuredReport?.detail ??
+      buildDetail({
+        status: input.status,
+        checks,
+        exitCode,
+        interventions: input.interventions
+      }),
     duration_ms: usageRecordValue(input.usageRecords, "duration_ms"),
     exit_code: exitCode,
     stdout_chars: usageRecordValue(input.usageRecords, "stdout_chars"),

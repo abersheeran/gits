@@ -30,8 +30,9 @@ PR 是这款产品的交付中心。
   - validation summary
   - merge summary
   - 关联 closing Issue 的任务完成度摘要
-  - 最新 Agent provenance 摘要
+- 最新 Agent provenance 摘要
 - PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
+- PR validation summary 现在会优先消费 Agent runtime 主动输出的 machine-readable validation report，并在缺失时回退到 rule-based 检测。
 - Review：
   - `comment`
   - `approve`
@@ -77,13 +78,14 @@ PR 是这款产品的交付中心。
 - 跨非连续行变更的更智能 range 映射
 - 更明确的“本次 Agent 修改消化了哪些 thread”回流
 
-### 4.2 验证摘要已经有第一版，但仍偏轻量
+### 4.2 验证摘要已经进入结构化阶段，但仍可继续增强
 
 现在 PR 页面已经能直接展示最近验证状态、关键 artifact 摘要、最近一次 Agent 修改摘要和 merge summary。
+runtime 也开始要求 Agent 在退出前输出 machine-readable validation report，后端会抽取并优先用于 tests / build / lint 摘要。
 
-但验证摘要还缺更稳的结构化视角，例如：
+但这套结构化验证结果还缺更完整的覆盖，例如：
 
-- 更高置信度地区分“测试结果”和“构建结果”
+- skipped / partial / multi-step validation 的一致表示
 - 对 artifact 做更稳定的优先级排序
 - 自动提炼更明确的人类审校摘要
 
@@ -158,12 +160,12 @@ PR 是这款产品的交付中心。
 ## 9. 当前边界与下一步
 
 - 当前只有 squash merge。
-- PR 页面已具备 rule-based tests / build / lint validation summary 和 merge summary。
+- PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report。
 - PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：
 
 1. 把 PR 和来源 Issue 之间的状态回流做得更明显。
-2. 把验证摘要从规则识别升级成更稳定的结构化测试/构建结果。
+2. 继续扩展结构化验证结果的覆盖面和 artifact 优先级提炼。
 3. 提升 review thread 在 rename / 复杂 patch-set 下的锚点映射质量。

@@ -3,6 +3,10 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "../services/action-runner-prompt-tokens";
+import {
+  GITS_VALIDATION_REPORT_BEGIN,
+  GITS_VALIDATION_REPORT_END
+} from "../services/agent-session-validation-report";
 import { AuthService } from "../services/auth-service";
 
 vi.mock("@cloudflare/containers", () => {
@@ -134,6 +138,8 @@ describe("ActionsContainer", () => {
       expect(payload.gitToken).toBe("gts_11111111111111111111111111111111");
       expect(payload.prompt).toContain("gts_22222222222222222222222222222222");
       expect(payload.prompt).toContain("gts_33333333333333333333333333333333");
+      expect(payload.prompt).toContain(GITS_VALIDATION_REPORT_BEGIN);
+      expect(payload.prompt).toContain(GITS_VALIDATION_REPORT_END);
       expect(payload.gitCommitName).toBe("actions");
       expect(payload.gitCommitEmail).toBe("actions@system.local");
       expect(payload.env).toMatchObject({

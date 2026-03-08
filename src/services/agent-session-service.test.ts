@@ -219,6 +219,7 @@ describe("AgentSessionService structured steps", () => {
     const artifactKinds: string[] = [];
     const usageKinds: string[] = [];
     const interventionKinds: string[] = [];
+    const usagePayloads = new Map<string, string | null>();
     const db = createMockD1Database([
       {
         when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
@@ -239,6 +240,7 @@ describe("AgentSessionService structured steps", () => {
         when: "INSERT INTO agent_session_usage_records",
         run: (params) => {
           usageKinds.push(String(params[2] ?? ""));
+          usagePayloads.set(String(params[2] ?? ""), (params[6] as string | null) ?? null);
           return { success: true };
         }
       },
@@ -263,7 +265,20 @@ describe("AgentSessionService structured steps", () => {
         exitCode: 1,
         error: "runner failed",
         attemptedCommand: "codex run",
-        mcpSetupWarning: "platform MCP missing"
+        mcpSetupWarning: "platform MCP missing",
+        validationReport: {
+          headline: "Tests failed before build.",
+          detail: "Ran npm test and stopped after the first failing suite.",
+          checks: [
+            {
+              kind: "tests",
+              label: "Tests",
+              status: "failed",
+              command: "npm test",
+              summary: "The login retry suite failed."
+            }
+          ]
+        }
       },
       recordedAt: 999
     });
@@ -277,6 +292,13 @@ describe("AgentSessionService structured steps", () => {
       "exit_code"
     ]);
     expect(interventionKinds).toEqual(["mcp_setup_warning"]);
+    expect(JSON.parse(usagePayloads.get("run_log_chars") ?? "null")).toMatchObject({
+      runId: "run-observe",
+      validationReport: {
+        headline: "Tests failed before build.",
+        detail: "Ran npm test and stopped after the first failing suite."
+      }
+    });
   });
 
   it("lists structured artifacts, usage records, and interventions", async () => {
