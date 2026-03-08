@@ -141,7 +141,12 @@ PR 页面已经直接消费 run/session 的验证信息：
 - `src/services/repository-browser-service.ts`
 - `src/services/agent-session-validation-summary.ts`
 - `src/services/workflow-task-flow-service.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/pull-request-routes.ts`
+- `src/routes/api/pull-request-query-routes.ts`
+- `src/routes/api/pull-request-review-routes.ts`
+- `src/routes/api/pull-request-command-routes.ts`
+- `src/routes/api/pull-request-routes.test.ts`
 - `web/src/pages/pull-request-detail-page.tsx`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`

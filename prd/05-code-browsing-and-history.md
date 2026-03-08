@@ -82,7 +82,11 @@
 
 - `src/services/repository-browser-service.ts`
 - `src/services/repository-object.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/repository-browser-routes.ts`
+- `src/routes/api/repository-browser-routes.test.ts`
+- `src/routes/api/repository-browser-routes.integration.test.ts`
+- `src/routes/api/pull-request-routes.ts`
 - `web/src/pages/repository-page.tsx`
 - `web/src/pages/repository-commits-page.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`

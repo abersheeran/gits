@@ -80,7 +80,10 @@
 
 - `src/services/repository-service.ts`
 - `src/services/storage-service.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/repository-admin-routes.ts`
+- `src/routes/api/repository-admin-routes.test.ts`
+- `src/routes/api/repository-metadata-routes.ts`
 - `web/src/pages/home-page.tsx`
 - `web/src/pages/dashboard-page.tsx`
 - `web/src/pages/new-repository-page.tsx`

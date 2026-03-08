@@ -1,47 +1,49 @@
-import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { errorHandler } from "../middleware/error-handler";
-import { AuthService } from "../services/auth-service";
-import { RepositoryObjectClient } from "../services/repository-object";
-import { createMockD1Database } from "../test-utils/mock-d1";
-import type { AppEnv } from "../types";
-import apiRoutes from "./api";
+import { AuthService } from "../../services/auth-service";
+import { RepositoryObjectClient } from "../../services/repository-object";
+import { createMockD1Database } from "../../test-utils/mock-d1";
+import { buildRepositoryRow, createApp, createBaseEnv } from "./test-helpers";
 
-function createApp() {
-  const app = new Hono<AppEnv>();
-  app.onError(errorHandler);
-  app.route("/api", apiRoutes);
-  return app;
-}
-
-function createBaseEnv(db: D1Database): AppEnv["Bindings"] {
-  return {
-    DB: db,
-    GIT_BUCKET: {} as R2Bucket,
-    REPOSITORY_OBJECTS: {
-      getByName: vi.fn()
-    } as unknown as DurableObjectNamespace,
-    JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787"
-  };
-}
-
-function buildRepositoryRow(overrides?: Partial<Record<string, unknown>>) {
-  return {
-    id: "repo-1",
-    owner_id: "owner-1",
-    owner_username: "alice",
-    name: "demo",
-    description: "demo repo",
-    is_private: 1,
-    created_at: Date.now(),
-    ...(overrides ?? {})
-  };
-}
-
-describe("API repository lifecycle and permission matrix", () => {
+describe("API repository admin routes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("initializes Git storage when creating repository", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-1",
+      username: "alice"
+    });
+    const initializeSpy = vi
+      .spyOn(RepositoryObjectClient.prototype, "initializeRepository")
+      .mockResolvedValue(undefined);
+    const db = createMockD1Database([
+      {
+        when: "INSERT INTO repositories",
+        run: () => ({ success: true })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "demo"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    expect(initializeSpy).toHaveBeenCalledWith({
+      repositoryId: expect.any(String),
+      owner: "alice",
+      repo: "demo"
+    });
   });
 
   it("rolls back storage rename when metadata update hits unique conflict", async () => {

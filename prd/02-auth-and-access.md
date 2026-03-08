@@ -102,7 +102,10 @@
 - `src/middleware/auth.ts`
 - `src/services/auth-service.ts`
 - `src/services/agent-session-service.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/platform-routes.ts`
+- `src/routes/api/platform-routes.test.ts`
+- `src/routes/api/actions-routes.ts`
 - `src/routes/git.ts`
 - `web/src/pages/login-page.tsx`
 - `web/src/pages/register-page.tsx`

@@ -117,7 +117,10 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `src/services/repository-metadata-service.ts`
 - `src/services/workflow-task-flow-service.ts`
 - `src/services/action-trigger-service.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/issue-routes.ts`
+- `src/routes/api/repository-metadata-routes.ts`
+- `src/routes/api/issue-routes.test.ts`
 - `web/src/pages/repository-issues-page.tsx`
 - `web/src/pages/new-issue-page.tsx`
 - `web/src/pages/issue-detail-page.tsx`

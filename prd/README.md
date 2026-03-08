@@ -21,6 +21,7 @@
 ## 2. 当前系统事实
 
 - 后端是 Cloudflare Workers + Hono API。
+- `/api` 路由现在由 `src/routes/api/index.ts` 统一装配，并按 platform / repository / issue / pull request / actions 拆分到 `src/routes/api/*.ts`。
 - 前端是 React SPA，核心页面包括首页、Dashboard、仓库页、Issue、PR、Actions 和 Session detail。
 - 元数据存储在 D1。
 - Git 对象与引用存储在 `GIT_BUCKET` R2。

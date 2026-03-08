@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import * as git from "isomorphic-git";
 import { Volume, createFsFromVolume } from "memfs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
 import { StorageService } from "../services/storage-service";
@@ -181,179 +181,54 @@ function createIsomorphicGitHttpClient(env: AppEnv["Bindings"]) {
   };
 }
 
-describe("API + Git integration", () => {
+describe("Git smart-http integration", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("returns repository details with branches and README", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      defaultBranch: string;
-      branches: Array<{ name: string; oid: string }>;
-      readme: { path: string; content: string } | null;
-    };
-    expect(body.defaultBranch).toBe("main");
-    expect(body.branches.some((item) => item.name === "main")).toBe(true);
-    expect(body.readme?.content).toContain("# Demo");
-  });
-
-  it("returns commit history from newest to oldest", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo/commits?limit=2"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      commits: Array<{ message: string }>;
-    };
-    expect(body.commits).toHaveLength(2);
-    expect(body.commits[0]?.message).toContain("second commit");
-    expect(body.commits[1]?.message).toContain("initial commit");
-  });
-
-  it("returns repository contents for root tree", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo/contents"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      kind: "tree" | "blob";
-      path: string;
-      entries: Array<{ name: string; path: string; type: string }>;
-      readme: { path: string; content: string } | null;
-    };
-    expect(body.kind).toBe("tree");
-    expect(body.path).toBe("");
-    expect(body.entries.some((entry) => entry.type === "tree" && entry.path === "src")).toBe(true);
-    expect(body.entries.some((entry) => entry.type === "blob" && entry.path === "README.md")).toBe(true);
-    expect(body.readme?.path).toBe("README.md");
-    expect(body.readme?.content).toContain("# Demo");
-  });
-
-  it("returns file preview for blob path", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo/contents?path=src%2Fapp.txt"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      kind: "tree" | "blob";
-      path: string;
-      file: {
-        path: string;
-        size: number;
-        isBinary: boolean;
-        truncated: boolean;
-        content: string | null;
-      } | null;
-    };
-    expect(body.kind).toBe("blob");
-    expect(body.path).toBe("src/app.txt");
-    expect(body.file?.path).toBe("src/app.txt");
-    expect(body.file?.isBinary).toBe(false);
-    expect(body.file?.truncated).toBe(false);
-    expect(body.file?.size).toBeGreaterThan(0);
-    expect(body.file?.content).toContain("console.log('hello')");
-  });
-
-  it("returns 400 for invalid repository content path", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo/contents?path=..%2Fsecret.txt"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(400);
-    const body = await response.text();
-    expect(body).toContain("Invalid path");
-  });
-
-  it("returns 404 for missing repository content path", async () => {
-    const bucket = new MockR2Bucket();
-    await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const response = await app.fetch(
-      new Request("http://localhost/api/repos/alice/demo/contents?path=missing.ts"),
-      createEnv(db, bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(404);
-    const body = await response.text();
-    expect(body).toContain("Path not found");
   });
 
   it("returns upload-pack result with packfile payload", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/x-git-upload-pack-result");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const prefix = new TextDecoder().decode(bytes.subarray(0, 8));
-    expect(prefix).toBe("0008NAK\n");
+    expect(new TextDecoder().decode(bytes.subarray(0, 8))).toBe("0008NAK\n");
     expect(containsPackSignature(bytes)).toBe(true);
   });
 
-  it("returns negotiation ACK/NAK only when done is missing", async () => {
+  it("returns negotiation ACK or NAK only when done is missing", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine(`have ${seeded.initialCommit}\n`),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine(`have ${seeded.initialCommit}\n`),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
@@ -366,28 +241,28 @@ describe("API + Git integration", () => {
   it("returns only the first ACK without a trailing flush during negotiation", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine(`have ${seeded.initialCommit}\n`),
-      pktLine(`have ${seeded.latestCommit}\n`),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine(`have ${seeded.initialCommit}\n`),
+          pktLine(`have ${seeded.latestCommit}\n`),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
     const lines = parsePktTextPrefix(new Uint8Array(await response.arrayBuffer()));
-    expect(lines.filter((line) => line.startsWith("ACK "))).toEqual([`ACK ${seeded.initialCommit}\n`]);
+    expect(lines.filter((line) => line.startsWith("ACK "))).toEqual([
+      `ACK ${seeded.initialCommit}\n`
+    ]);
     expect(lines).not.toContain("FLUSH");
     expect(lines.some((line) => line.includes("PACK"))).toBe(false);
   });
@@ -395,81 +270,75 @@ describe("API + Git integration", () => {
   it("returns a single ACK before packfile when common commits are present", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine(`have ${seeded.initialCommit}\n`),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine(`have ${seeded.initialCommit}\n`),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const prefix = new TextDecoder().decode(bytes.subarray(0, 49));
-    expect(prefix).toBe(`0031ACK ${seeded.initialCommit}\n`);
+    expect(new TextDecoder().decode(bytes.subarray(0, 49))).toBe(
+      `0031ACK ${seeded.initialCommit}\n`
+    );
     expect(containsPackSignature(bytes)).toBe(true);
   });
 
   it("returns shallow lines when deepen is requested", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("deepen 1\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("deepen 1\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const lines = parsePktTextPrefix(bytes);
-    expect(lines).toContain(`shallow ${seeded.latestCommit}\n`);
+    expect(parsePktTextPrefix(bytes)).toContain(`shallow ${seeded.latestCommit}\n`);
     expect(containsPackSignature(bytes)).toBe(true);
   });
 
   it("supports deepen-since requests", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("deepen-since 0\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("deepen-since 0\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
@@ -481,23 +350,21 @@ describe("API + Git integration", () => {
   it("supports deepen-not requests", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("deepen-not refs/heads/feature\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("deepen-not refs/heads/feature\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
@@ -509,119 +376,112 @@ describe("API + Git integration", () => {
   it("supports blob:none filter requests", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("filter blob:none\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("filter blob:none\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/x-git-upload-pack-result");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const text = new TextDecoder().decode(bytes);
-    expect(text.includes("ERR")).toBe(false);
+    expect(new TextDecoder().decode(bytes).includes("ERR")).toBe(false);
     expect(containsPackSignature(bytes)).toBe(true);
   });
 
   it("returns protocol ERR for unknown filter spec", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("filter tree:0\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("filter tree:0\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
-    const text = new TextDecoder().decode(await response.arrayBuffer());
-    expect(text).toContain("ERR filter unsupported");
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toContain(
+      "ERR filter unsupported"
+    );
   });
 
   it("returns protocol ERR when requested want object is missing", async () => {
     const bucket = new MockR2Bucket();
     await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
     const missingOid = "ffffffffffffffffffffffffffffffffffffffff";
 
-    const body = concat(
-      pktLine(`want ${missingOid}\n`),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${missingOid}\n`),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
-    const text = new TextDecoder().decode(await response.arrayBuffer());
-    expect(text).toContain("ERR want object not found");
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toContain(
+      "ERR want object not found"
+    );
   });
 
   it("returns protocol ERR when deepen exceeds server limit", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
 
-    const body = concat(
-      pktLine(`want ${seeded.latestCommit}\n`),
-      pktLine("deepen 20000\n"),
-      pktLine("done\n"),
-      new TextEncoder().encode("0000")
-    );
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/git-upload-pack", {
         method: "POST",
         headers: {
           "content-type": "application/x-git-upload-pack-request"
         },
-        body
+        body: concat(
+          pktLine(`want ${seeded.latestCommit}\n`),
+          pktLine("deepen 20000\n"),
+          pktLine("done\n"),
+          new TextEncoder().encode("0000")
+        )
       }),
-      createEnv(db, bucket as unknown as R2Bucket)
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 
     expect(response.status).toBe(200);
-    const text = new TextDecoder().decode(await response.arrayBuffer());
-    expect(text).toContain("ERR deepen exceeds maximum");
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toContain(
+      "ERR deepen exceeds maximum"
+    );
   });
 
   it("is compatible with isomorphic-git fetch client", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const db = createPublicRepositoryDb("alice", "demo");
-    const env = createEnv(db, bucket as unknown as R2Bucket);
+    const env = createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket);
 
     const volume = new Volume();
     const fs = createFsFromVolume(volume) as unknown as {
@@ -660,8 +520,10 @@ describe("API + Git integration", () => {
     const bucket = new MockR2Bucket();
     const storage = new StorageService(bucket as unknown as R2Bucket);
     await storage.initializeRepository("alice", "private-demo");
-    const db = createPrivateOwnedRepositoryDb("alice", "private-demo");
-    const env = createEnv(db, bucket as unknown as R2Bucket);
+    const env = createEnv(
+      createPrivateOwnedRepositoryDb("alice", "private-demo"),
+      bucket as unknown as R2Bucket
+    );
 
     vi.spyOn(AuthService.prototype, "verifyAccessToken").mockImplementation(async (token) => {
       if (token === "pat-ok") {
@@ -725,7 +587,6 @@ describe("API + Git integration", () => {
     expect(refs).toHaveLength(1);
     expect(refs[0]?.name).toBe("refs/heads/main");
     expect(refs[0]?.oid).toBe(localCommit);
-    const objectKeys = await storage.listObjectKeys("alice", "private-demo");
-    expect(objectKeys.length).toBeGreaterThan(0);
+    expect((await storage.listObjectKeys("alice", "private-demo")).length).toBeGreaterThan(0);
   });
 });

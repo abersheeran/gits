@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import apiRoutes from "./routes/api";
+import apiRoutes from "./routes/api/index";
 import gitRoutes from "./routes/git";
 import { errorHandler } from "./middleware/error-handler";
 import type { AppEnv } from "./types";

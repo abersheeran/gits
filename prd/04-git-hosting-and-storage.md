@@ -119,6 +119,8 @@ Git 托管与存储层是整个平台的底座，职责是：
 ## 7. 关键代码文件
 
 - `src/routes/git.ts`
+- `src/routes/git.integration.test.ts`
+- `src/routes/git.cli.integration.test.ts`
 - `src/services/repository-object.ts`
 - `src/services/git-service.ts`
 - `src/services/git-protocol.ts`

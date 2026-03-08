@@ -215,7 +215,14 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `src/services/platform-mcp-service.ts`
 - `src/actions/actions-container.ts`
 - `containers/actions-runner/server.ts`
-- `src/routes/api.ts`
+- `src/routes/api/index.ts`
+- `src/routes/api/platform-routes.ts`
+- `src/routes/api/actions-routes.ts`
+- `src/routes/api/actions-workflow-routes.ts`
+- `src/routes/api/actions-run-routes.ts`
+- `src/routes/api/actions-session-routes.ts`
+- `src/routes/api/shared.ts`
+- `src/routes/api/actions-routes.test.ts`
 - `docs/MCP.zh-CN.md`
 - `web/src/pages/repository-actions-page.tsx`
 - `web/src/pages/agent-session-detail-page.tsx`
