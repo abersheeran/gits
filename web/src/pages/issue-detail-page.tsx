@@ -38,14 +38,17 @@ import {
   type AgentSessionRecord,
   type AuthUser,
   type IssueCommentRecord,
+  type IssueDetailResponse,
   type IssueLinkedPullRequestRecord,
   type IssueRecord,
+  type IssueTaskFlowRecord,
   type IssueTaskStatus,
   type ReactionContent,
   type RepositoryLabelRecord,
   type RepositoryDetailResponse,
   type RepositoryMilestoneRecord,
-  type RepositoryUserSummary
+  type RepositoryUserSummary,
+  type TaskFlowWaitingOn
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import {
@@ -90,6 +93,16 @@ function shortBranchName(ref: string): string {
   return ref.replace(/^refs\/heads\//, "");
 }
 
+function taskFlowWaitingLabel(waitingOn: TaskFlowWaitingOn): string {
+  if (waitingOn === "agent") {
+    return "Waiting on Agent";
+  }
+  if (waitingOn === "human") {
+    return "Waiting on Human";
+  }
+  return "No active blocker";
+}
+
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
   const owner = params.owner ?? "";
@@ -99,6 +112,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issue, setIssue] = useState<IssueRecord | null>(null);
   const [linkedPullRequests, setLinkedPullRequests] = useState<IssueLinkedPullRequestRecord[]>([]);
+  const [taskFlow, setTaskFlow] = useState<IssueTaskFlowRecord | null>(null);
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
   const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
   const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
@@ -147,6 +161,17 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       numbers: [number]
     });
     setLatestAgentSession(latestSessionItems[0]?.session ?? null);
+  }
+
+  async function refreshIssueDetail(): Promise<IssueDetailResponse | null> {
+    if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
+      return null;
+    }
+    const nextIssueDetail = await getIssue(owner, repo, number);
+    setIssue(nextIssueDetail.issue);
+    setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
+    setTaskFlow(nextIssueDetail.taskFlow);
+    return nextIssueDetail;
   }
 
   async function refreshCommentRunStatuses(
@@ -262,6 +287,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setDetail(nextDetail);
         setIssue(nextIssueDetail.issue);
         setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
+        setTaskFlow(nextIssueDetail.taskFlow);
         setComments(nextComments);
         setAvailableLabels(nextLabels);
         setAvailableMilestones(nextMilestones);
@@ -330,11 +356,12 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     }
     const timer = window.setInterval(async () => {
       try {
+        const nextIssueDetail = await refreshIssueDetail();
         await Promise.all([
           refreshLatestRunStatus(),
           refreshLatestAgentSessionStatus(),
           refreshCommentRunStatuses(),
-          refreshLinkedPullRequestProvenance()
+          refreshLinkedPullRequestProvenance(nextIssueDetail?.linkedPullRequests)
         ]);
       } catch {
         // Ignore transient polling errors.
@@ -387,6 +414,13 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
+  const currentTaskFlow: IssueTaskFlowRecord = taskFlow ?? {
+    status: issue.task_status,
+    waiting_on: "none",
+    headline: "任务链摘要暂不可用。",
+    detail: issueTaskStatusHint(issue.task_status),
+    driver_pull_request_number: null
+  };
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -419,6 +453,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         state: nextState
       });
       setIssue(updated);
+      await refreshIssueDetail();
     } catch (updateError) {
       setActionError(formatApiError(updateError));
     } finally {
@@ -437,6 +472,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         taskStatus: taskStatusDraft
       });
       setIssue(updated);
+      await refreshIssueDetail();
     } catch (error) {
       setActionError(formatApiError(error));
     } finally {
@@ -576,16 +612,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             });
       setLatestAgentSession(response.session);
       setLatestActionRun(response.run);
-      setIssue((previous) =>
-        response.issue
-          ? response.issue
-          : previous
-            ? {
-                ...previous,
-                task_status: "agent-working"
-              }
-            : previous
-      );
+      if (response.issue) {
+        setIssue(response.issue);
+      }
+      const nextIssueDetail = await refreshIssueDetail();
+      await refreshLinkedPullRequestProvenance(nextIssueDetail?.linkedPullRequests);
       setAgentInstruction("");
     } catch (error) {
       setActionError(formatApiError(error));
@@ -782,15 +813,30 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             </div>
             <div className="space-y-3 rounded-md border bg-muted/20 p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <IssueTaskStatusBadge status={issue.task_status} />
+                <IssueTaskStatusBadge status={currentTaskFlow.status} />
                 <RepositoryStateBadge state={issue.state} kind="issue" />
+                <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
               </div>
-              <p className="text-sm text-muted-foreground">{issueTaskStatusHint(issue.task_status)}</p>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{currentTaskFlow.headline}</p>
+                <p className="text-sm text-muted-foreground">{currentTaskFlow.detail}</p>
+              </div>
               <div className="space-y-1 text-xs text-muted-foreground">
                 <p>Comments: {issue.comment_count}</p>
                 <p>Updated: {formatDateTime(issue.updated_at)}</p>
                 <p>Linked pull requests: {linkedPullRequests.length}</p>
                 <p>PRs with validation summary: {linkedPullRequestsWithValidation}</p>
+                {currentTaskFlow.driver_pull_request_number !== null ? (
+                  <p>
+                    Driver pull request:{" "}
+                    <Link
+                      className="gh-link"
+                      to={`/repo/${owner}/${repo}/pulls/${currentTaskFlow.driver_pull_request_number}`}
+                    >
+                      #{currentTaskFlow.driver_pull_request_number}
+                    </Link>
+                  </p>
+                ) : null}
               </div>
               {latestActionRun ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -804,6 +850,10 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               ) : (
                 <p className="text-xs text-muted-foreground">当前 Issue 还没有交付 run。</p>
               )}
+              <p className="text-xs text-muted-foreground">
+                手动修改 task status 仅作为临时覆盖；后续 assign/resume、PR review、thread
+                处理、merge 与 action run 完成都会按主流程自动回写。
+              </p>
             </div>
             {canUpdate ? (
               <div className="space-y-3">

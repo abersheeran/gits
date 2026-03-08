@@ -11,6 +11,7 @@ import {
   ACTIONS_SYSTEM_USERNAME,
   AuthService
 } from "./auth-service";
+import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 
 describe("executeActionRun", () => {
   afterEach(() => {
@@ -58,6 +59,7 @@ describe("executeActionRun", () => {
     await executeActionRun({
       env: {
         DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
@@ -127,6 +129,7 @@ describe("executeActionRun", () => {
     await executeActionRun({
       env: {
         DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
@@ -233,6 +236,7 @@ describe("executeActionRun", () => {
     await executeActionRun({
       env: {
         DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
@@ -331,6 +335,7 @@ describe("executeActionRun", () => {
     await executeActionRun({
       env: {
         DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
@@ -383,6 +388,83 @@ describe("executeActionRun", () => {
     });
   });
 
+  it("reconciles source task status after source-backed runs complete", async () => {
+    vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
+    vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
+    vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
+      codexConfigFileContent: "",
+      claudeCodeConfigFileContent: "",
+      inheritsGlobalCodexConfig: true,
+      inheritsGlobalClaudeCodeConfig: true,
+      updated_at: 1
+    });
+    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
+    const reconcileSourceTaskStatus = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus")
+      .mockResolvedValue([]);
+
+    const runnerFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+    const stopFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
+        JWT_SECRET: "test-secret",
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: (url: string, init?: RequestInit) =>
+              url.endsWith("/stop") ? stopFetch(url, init) : runnerFetch(url, init)
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      run: {
+        id: "run-5",
+        run_number: 5,
+        repository_id: "repo-1",
+        agent_type: "codex",
+        instance_type: "lite",
+        prompt: "ship it",
+        trigger_ref: "refs/heads/feature",
+        trigger_sha: "abc123",
+        trigger_source_type: "pull_request",
+        trigger_source_number: 7
+      },
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(reconcileSourceTaskStatus).toHaveBeenCalledWith({
+      repository: expect.objectContaining({
+        id: "repo-1"
+      }),
+      sourceType: "pull_request",
+      sourceNumber: 7
+    });
+  });
+
   it("persists structured observability after a run completes", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
     vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
@@ -431,6 +513,7 @@ describe("executeActionRun", () => {
     await executeActionRun({
       env: {
         DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({

@@ -94,6 +94,7 @@ export async function scheduleActionRunExecution(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -275,6 +276,7 @@ export async function triggerMentionActionRun(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -341,6 +343,7 @@ export async function triggerActionWorkflows(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -426,6 +429,7 @@ export async function triggerInteractiveAgentSession(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"

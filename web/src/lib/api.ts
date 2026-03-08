@@ -5,6 +5,7 @@ export type AuthUser = {
 
 export type CollaboratorPermission = "read" | "write" | "admin";
 export type IssueTaskStatus = "open" | "agent-working" | "waiting-human" | "done";
+export type TaskFlowWaitingOn = "agent" | "human" | "none";
 
 export type RepositoryRecord = {
   id: string;
@@ -265,6 +266,14 @@ export type IssueRecord = {
   closed_at: number | null;
 };
 
+export type IssueTaskFlowRecord = {
+  status: IssueTaskStatus;
+  waiting_on: TaskFlowWaitingOn;
+  headline: string;
+  detail: string;
+  driver_pull_request_number: number | null;
+};
+
 export type IssueLinkedPullRequestRecord = {
   id: string;
   repository_id: string;
@@ -286,6 +295,7 @@ export type IssueLinkedPullRequestRecord = {
 export type IssueDetailResponse = {
   issue: IssueRecord;
   linkedPullRequests: IssueLinkedPullRequestRecord[];
+  taskFlow: IssueTaskFlowRecord;
 };
 
 export type IssueCommentRecord = {
@@ -338,6 +348,15 @@ export type PullRequestDetailResponse = {
   reviewSummary: PullRequestReviewSummary;
   closingIssueNumbers: number[];
   closingIssues: IssueRecord[];
+  taskFlow: PullRequestTaskFlowRecord;
+};
+
+export type PullRequestTaskFlowRecord = {
+  waiting_on: TaskFlowWaitingOn;
+  headline: string;
+  detail: string;
+  primary_issue_number: number | null;
+  suggested_review_thread_id: string | null;
 };
 
 export type PullRequestProvenanceResponse = {

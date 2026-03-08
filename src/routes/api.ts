@@ -46,6 +46,7 @@ import {
 import { enrichPullRequestReviewThreads } from "../services/pull-request-review-thread-anchor-service";
 import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
+import { WorkflowTaskFlowService } from "../services/workflow-task-flow-service";
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
@@ -1775,6 +1776,33 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 const router = new Hono<AppEnv>();
 
+function createWorkflowTaskFlowService(
+  env: Pick<AppEnv["Bindings"], "DB" | "GIT_BUCKET">
+): WorkflowTaskFlowService {
+  return new WorkflowTaskFlowService(env.DB, new StorageService(env.GIT_BUCKET));
+}
+
+async function reconcileIssueNumbers(args: {
+  workflowTaskFlowService: WorkflowTaskFlowService;
+  repository: RepositoryRecord;
+  issueNumbers: readonly number[];
+  viewerId?: string;
+}): Promise<void> {
+  const issueNumbers = Array.from(new Set(args.issueNumbers)).sort((left, right) => left - right);
+  if (issueNumbers.length === 0) {
+    return;
+  }
+  await Promise.all(
+    issueNumbers.map((issueNumber) =>
+      args.workflowTaskFlowService.reconcileIssueTaskStatus({
+        repository: args.repository,
+        issueNumber,
+        ...(args.viewerId ? { viewerId: args.viewerId } : {})
+      })
+    )
+  );
+}
+
 function sessionCookieSecure(url: string): boolean {
   return new URL(url).protocol === "https:";
 }
@@ -2388,7 +2416,13 @@ router.get("/repos/:owner/:repo/issues/:number", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Issue not found" });
   }
   const linkedPullRequests = await issueService.listLinkedPullRequestsForIssue(repository.id, number);
-  return c.json({ issue, linkedPullRequests });
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  const taskFlow = await workflowTaskFlowService.buildIssueTaskFlow({
+    repository,
+    issue,
+    linkedPullRequests
+  });
+  return c.json({ issue, linkedPullRequests, taskFlow });
 });
 
 router.get("/repos/:owner/:repo/issues/:number/comments", optionalSession, async (c) => {
@@ -2679,8 +2713,17 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
   if (patch.assigneeUserIds !== undefined) {
     await metadataService.replaceIssueAssignees(existingIssue.id, patch.assigneeUserIds);
   }
-  const issue =
+  let issue =
     (await issueService.findIssueByNumber(repository.id, number, sessionUser.id)) ?? updatedIssue;
+  if (patch.state !== undefined) {
+    const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+    issue =
+      (await workflowTaskFlowService.reconcileIssueTaskStatus({
+        repository,
+        issueNumber: issue.number,
+        viewerId: sessionUser.id
+      })) ?? issue;
+  }
   const hasActionsMention = containsActionsMention({ title: issue.title, body: issue.body });
   if (!hadActionsMention && hasActionsMention) {
     const storageService = new StorageService(c.env.GIT_BUCKET);
@@ -2895,9 +2938,12 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
     requestOrigin: new URL(c.req.url).origin
   });
 
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
   const updatedIssue =
-    (await issueService.updateIssue(repository.id, issue.number, {
-      taskStatus: "agent-working"
+    (await workflowTaskFlowService.reconcileIssueTaskStatus({
+      repository,
+      issueNumber: issue.number,
+      viewerId: sessionUser.id
     })) ?? issue;
 
   return c.json({ ...execution, issue: updatedIssue }, 202);
@@ -2976,9 +3022,12 @@ router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, a
     requestOrigin: new URL(c.req.url).origin
   });
 
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
   const updatedIssue =
-    (await issueService.updateIssue(repository.id, issue.number, {
-      taskStatus: "agent-working"
+    (await workflowTaskFlowService.reconcileIssueTaskStatus({
+      repository,
+      issueNumber: issue.number,
+      viewerId: sessionUser.id
     })) ?? issue;
 
   return c.json({ ...execution, issue: updatedIssue }, 202);
@@ -3069,13 +3118,26 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
     pullRequestService.summarizePullRequestReviews(repository.id, number),
     pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
   ]);
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  const taskFlow = await workflowTaskFlowService.buildPullRequestTaskFlow({
+    repository,
+    pullRequest,
+    closingIssueNumbers,
+    reviewSummary
+  });
   const issueService = new IssueService(c.env.DB);
   const closingIssues = await issueService.listIssuesByNumbers(
     repository.id,
     closingIssueNumbers,
     sessionUser?.id
   );
-  return c.json({ pullRequest, reviewSummary, closingIssueNumbers, closingIssues });
+  return c.json({
+    pullRequest,
+    reviewSummary,
+    closingIssueNumbers,
+    closingIssues,
+    taskFlow
+  });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number/provenance", optionalSession, async (c) => {
@@ -3185,6 +3247,12 @@ router.post("/repos/:owner/:repo/pulls/:number/reviews", requireSession, async (
     ...(input.body !== undefined ? { body: input.body } : {})
   });
   const nextReviewSummary = await pullRequestService.summarizePullRequestReviews(repository.id, number);
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  await workflowTaskFlowService.reconcileIssuesForPullRequest({
+    repository,
+    pullRequestNumber: number,
+    viewerId: sessionUser.id
+  });
   return c.json({ review, reviewSummary: nextReviewSummary }, 201);
 });
 
@@ -3317,6 +3385,12 @@ router.post("/repos/:owner/:repo/pulls/:number/review-threads", requireSession, 
     pullRequest,
     threads: [reviewThread]
   });
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  await workflowTaskFlowService.reconcileIssuesForPullRequest({
+    repository,
+    pullRequestNumber: number,
+    viewerId: sessionUser.id
+  });
   return c.json({ reviewThread: enrichedReviewThread ?? reviewThread }, 201);
 });
 
@@ -3438,6 +3512,13 @@ router.post(
       threads: [reviewThread]
     });
 
+    const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+    await workflowTaskFlowService.reconcileIssuesForPullRequest({
+      repository,
+      pullRequestNumber: number,
+      viewerId: sessionUser.id
+    });
+
     return c.json({ comment, reviewThread: enrichedReviewThread ?? reviewThread }, 201);
   }
 );
@@ -3508,6 +3589,13 @@ router.post(
       repo,
       pullRequest,
       threads: [reviewThread]
+    });
+
+    const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+    await workflowTaskFlowService.reconcileIssuesForPullRequest({
+      repository,
+      pullRequestNumber: number,
+      viewerId: sessionUser.id
     });
 
     return c.json({ reviewThread: enrichedReviewThread ?? reviewThread });
@@ -3602,6 +3690,13 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
     triggerSourceNumber: pullRequest.number,
     triggeredByUser: sessionUser,
     requestOrigin: new URL(c.req.url).origin
+  });
+
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  await workflowTaskFlowService.reconcileIssuesForPullRequest({
+    repository,
+    pullRequestNumber: pullRequest.number,
+    viewerId: sessionUser.id
   });
 
   return c.json(execution, 202);
@@ -3804,6 +3899,13 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
       }
     }
 
+    const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+    await workflowTaskFlowService.reconcileIssuesForPullRequest({
+      repository,
+      pullRequestNumber: pullRequest.number,
+      viewerId: sessionUser.id
+    });
+
     return c.json({ pullRequest, closingIssueNumbers, actionRuns }, 201);
   } catch (error) {
     if (error instanceof DuplicateOpenPullRequestError) {
@@ -3938,6 +4040,10 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     title: existingPullRequest.title,
     body: existingPullRequest.body
   });
+  const previousClosingIssueNumbers =
+    patch.closeIssueNumbers !== undefined || patch.state !== undefined
+      ? await pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
+      : [];
   const requestOrigin = new URL(c.req.url).origin;
   if (patch.closeIssueNumbers !== undefined) {
     const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, patch.closeIssueNumbers);
@@ -4052,6 +4158,18 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
       triggerSourceNumber: pullRequest.number,
       triggeredByUser: sessionUser,
       requestOrigin
+    });
+  }
+  if (patch.state !== undefined || patch.closeIssueNumbers !== undefined) {
+    const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+    await reconcileIssueNumbers({
+      workflowTaskFlowService,
+      repository,
+      issueNumbers:
+        patch.closeIssueNumbers !== undefined
+          ? [...previousClosingIssueNumbers, ...closingIssueNumbers]
+          : closingIssueNumbers,
+      viewerId: sessionUser.id
     });
   }
 

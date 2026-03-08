@@ -12,6 +12,8 @@ import {
   extractValidationReportFromText,
   parseAgentSessionValidationReport
 } from "./agent-session-validation-report";
+import { StorageService } from "./storage-service";
+import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 import { createSecretRedactor } from "../utils/secret-redaction";
 
 type RunnerExecuteResult = {
@@ -508,6 +510,7 @@ function extractValidationReport(result: RunnerExecuteResult): RunnerExecuteResu
 export async function executeActionRun(input: {
   env: {
     DB: D1Database;
+    GIT_BUCKET: R2Bucket;
     JWT_SECRET: string;
     ACTIONS_RUNNER?: DurableObjectNamespace;
     ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
@@ -534,6 +537,10 @@ export async function executeActionRun(input: {
 }): Promise<void> {
   const actionsService = new ActionsService(input.env.DB);
   const agentSessionService = new AgentSessionService(input.env.DB);
+  const workflowTaskFlowService = new WorkflowTaskFlowService(
+    input.env.DB,
+    new StorageService(input.env.GIT_BUCKET)
+  );
   const recordRunObservability = async (
     args: Parameters<AgentSessionService["recordRunObservability"]>[0]
   ): Promise<void> => {
@@ -542,6 +549,43 @@ export async function executeActionRun(input: {
     } catch {
       // Observability data is best-effort and should not change run outcomes.
     }
+  };
+  const reconcileSourceTaskStatus = async (): Promise<void> => {
+    if (
+      (input.run.trigger_source_type !== "issue" &&
+        input.run.trigger_source_type !== "pull_request") ||
+      input.run.trigger_source_number === null
+    ) {
+      return;
+    }
+    try {
+      await workflowTaskFlowService.reconcileSourceTaskStatus({
+        repository: input.repository,
+        sourceType: input.run.trigger_source_type,
+        sourceNumber: input.run.trigger_source_number
+      });
+    } catch {
+      // Status reconciliation is best-effort and should not change run outcomes.
+    }
+  };
+  const finalizeRun = async (args: {
+    status: "success" | "failed" | "cancelled";
+    logs: string;
+    exitCode?: number | null;
+    result?: RunnerExecuteResult;
+  }): Promise<void> => {
+    await actionsService.completeRun(input.repository.id, input.run.id, {
+      status: args.status,
+      logs: args.logs,
+      exitCode: args.exitCode ?? null
+    });
+    await recordRunObservability({
+      repositoryId: input.repository.id,
+      runId: input.run.id,
+      logs: args.logs,
+      ...(args.result ? { result: args.result } : {})
+    });
+    await reconcileSourceTaskStatus();
   };
   const containerInstance = `action-run-${input.run.id}`;
   const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
@@ -557,14 +601,8 @@ export async function executeActionRun(input: {
       errorMessage: `Actions runner binding is not configured for instance type '${instanceType}'`,
       redactText: redactLogs
     });
-    await actionsService.completeRun(input.repository.id, input.run.id, {
+    await finalizeRun({
       status: "failed",
-      logs,
-      exitCode: null
-    });
-    await recordRunObservability({
-      repositoryId: input.repository.id,
-      runId: input.run.id,
       logs
     });
     return;
@@ -719,15 +757,10 @@ export async function executeActionRun(input: {
         errorMessage: `Container runner responded with HTTP ${runnerResponse.status}`,
         redactText: redactLogs
       });
-      await actionsService.completeRun(input.repository.id, input.run.id, {
+      await finalizeRun({
         status: "failed",
         logs,
-        exitCode: runnerResult.exitCode ?? null
-      });
-      await recordRunObservability({
-        repositoryId: input.repository.id,
-        runId: input.run.id,
-        logs,
+        exitCode: runnerResult.exitCode ?? null,
         result: runnerResult
       });
       return;
@@ -745,15 +778,10 @@ export async function executeActionRun(input: {
       redactText: redactLogs
     });
 
-    await actionsService.completeRun(input.repository.id, input.run.id, {
+    await finalizeRun({
       status: exitCode === 0 ? "success" : "failed",
       logs,
-      exitCode
-    });
-    await recordRunObservability({
-      repositoryId: input.repository.id,
-      runId: input.run.id,
-      logs,
+      exitCode,
       result: runnerResult
     });
   } catch (error) {
@@ -769,15 +797,10 @@ export async function executeActionRun(input: {
       errorMessage: message,
       redactText: redactLogs
     });
-    await actionsService.completeRun(input.repository.id, input.run.id, {
+    await finalizeRun({
       status: "failed",
       logs,
-      exitCode: runnerResult?.exitCode ?? null
-    });
-    await recordRunObservability({
-      repositoryId: input.repository.id,
-      runId: input.run.id,
-      logs,
+      exitCode: runnerResult?.exitCode ?? null,
       ...(runnerResult ? { result: runnerResult } : {})
     });
   } finally {

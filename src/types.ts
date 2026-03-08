@@ -174,6 +174,24 @@ export type ReactionSummary = {
   viewer_reacted: boolean;
 };
 
+export type TaskFlowWaitingOn = "agent" | "human" | "none";
+
+export type IssueTaskFlowRecord = {
+  status: IssueTaskStatus;
+  waiting_on: TaskFlowWaitingOn;
+  headline: string;
+  detail: string;
+  driver_pull_request_number: number | null;
+};
+
+export type PullRequestTaskFlowRecord = {
+  waiting_on: TaskFlowWaitingOn;
+  headline: string;
+  detail: string;
+  primary_issue_number: number | null;
+  suggested_review_thread_id: string | null;
+};
+
 export type IssueRecord = {
   id: string;
   repository_id: string;

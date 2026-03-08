@@ -29,11 +29,11 @@
 - 已支持仓库、协作者、公开/私有仓库和基础 Git 托管。
 - 已支持 Issue 列表、详情、评论、标签、里程碑、Reaction。
 - 已支持从 Issue assign/resume Agent，并在 Issue 页展示最近 Session。
-- 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图。
+- 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图；`issues.task_status` 会在主流程事件后自动回流。
 - 已支持 PR 创建、比较、Review、Reaction、squash merge。
 - 已支持 anchored review thread、多轮 thread comments、suggested changes。
 - 已支持 review thread 在新 commit 后 re-anchor、stale 标记和 patch-set changed 展示。
-- 已支持在 PR 页面直接展示 validation summary、merge summary 和关联 Issue 完成度。
+- 已支持在 PR 页面直接展示 validation summary、merge summary、Task chain / Handoff 和关联 Issue 完成度。
 - 已支持从单条 unresolved review thread focused resume Agent。
 - 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
 - 已支持从 Issue、PR、workflow、mention、rerun、dispatch 创建 Session。
@@ -58,8 +58,8 @@
 
 ### 4.4 Session 连续性还不够强
 
-- Issue 对话、PR Review、Agent 修改记录还没有被组织成单一任务链。
-- 用户仍需要在多个页面对象间跳转理解状态。
+- Issue 对话、PR Review、Agent 修改记录已经有了第一版统一任务链与 handoff 摘要。
+- 但用户仍需要更稳定的“上一轮 Agent 实际交付了什么”压缩视图，以及更强的上下文 bundle。
 
 ## 5. 模块划分
 

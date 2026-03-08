@@ -46,18 +46,21 @@ import {
   type AgentSessionRecord,
   type AuthUser,
   type IssueRecord,
+  type PullRequestDetailResponse,
   type PullRequestReviewDecision,
   type PullRequestReviewRecord,
   type PullRequestReviewSummary,
   type PullRequestReviewThreadRecord,
   type PullRequestReviewThreadSide,
   type PullRequestRecord,
+  type PullRequestTaskFlowRecord,
   type ReactionContent,
   type RepositoryCompareResponse,
   type RepositoryDetailResponse,
   type RepositoryLabelRecord,
   type RepositoryMilestoneRecord,
-  type RepositoryUserSummary
+  type RepositoryUserSummary,
+  type TaskFlowWaitingOn
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import {
@@ -114,6 +117,16 @@ function mergeabilityLabel(mergeable: RepositoryCompareResponse["mergeable"]): s
     return "Conflicting";
   }
   return "Mergeability unknown";
+}
+
+function taskFlowWaitingLabel(waitingOn: TaskFlowWaitingOn): string {
+  if (waitingOn === "agent") {
+    return "Waiting on Agent";
+  }
+  if (waitingOn === "human") {
+    return "Waiting on Human";
+  }
+  return "No active blocker";
 }
 
 function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
@@ -235,6 +248,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
   const [provenanceDetail, setProvenanceDetail] = useState<AgentSessionDetail | null>(null);
+  const [taskFlow, setTaskFlow] = useState<PullRequestTaskFlowRecord | null>(null);
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -265,6 +279,22 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [replySubmittingThreadId, setReplySubmittingThreadId] = useState<string | null>(null);
   const [resolvingThreadId, setResolvingThreadId] = useState<string | null>(null);
   const [agentResumeThreadId, setAgentResumeThreadId] = useState<string | null>(null);
+
+  async function refreshPullRequestDetail(): Promise<PullRequestDetailResponse | null> {
+    if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
+      return null;
+    }
+    const nextPullRequestDetail = await getPullRequest(owner, repo, number);
+    const nextComparison = await compareRepositoryRefs(owner, repo, {
+      baseRef: nextPullRequestDetail.pullRequest.base_ref,
+      headRef: nextPullRequestDetail.pullRequest.head_ref
+    }).catch(() => null);
+    setPullRequest(applyComparisonToPullRequest(nextPullRequestDetail.pullRequest, nextComparison));
+    setClosingIssues(nextPullRequestDetail.closingIssues);
+    setTaskFlow(nextPullRequestDetail.taskFlow);
+    setComparison(nextComparison);
+    return nextPullRequestDetail;
+  }
 
   useEffect(() => {
     let canceled = false;
@@ -314,6 +344,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setDetail(nextDetail);
         setPullRequest(applyComparisonToPullRequest(nextPullRequestDetail.pullRequest, nextComparison));
         setClosingIssues(nextPullRequestDetail.closingIssues);
+        setTaskFlow(nextPullRequestDetail.taskFlow);
         setProvenanceDetail(nextProvenance.latestSession);
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
@@ -389,6 +420,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           }),
           getPullRequestProvenance(owner, repo, number).catch(() => null)
         ]);
+        await refreshPullRequestDetail();
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestAgentSession(latestSessionItems[0]?.session ?? null);
         setProvenanceDetail(nextProvenance?.latestSession ?? null);
@@ -433,6 +465,14 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
+  const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow ?? {
+    waiting_on: "none",
+    headline: "任务链摘要暂不可用。",
+    detail: "请直接检查 review thread、验证状态与 linked issues。",
+    primary_issue_number: closingIssues[0]?.number ?? null,
+    suggested_review_thread_id:
+      sortReviewThreads(reviewThreads).find((thread) => thread.status === "open")?.id ?? null
+  };
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -478,10 +518,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       }).catch(() => null);
       setPullRequest(applyComparisonToPullRequest(updated, nextComparison));
       setComparison(nextComparison);
-      if (nextState === "merged") {
-        const next = await getPullRequest(owner, repo, number);
-        setClosingIssues(next.closingIssues);
-      }
+      await refreshPullRequestDetail();
     } catch (updateError) {
       setError(formatApiError(updateError));
     } finally {
@@ -505,6 +542,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setReviewSummary(created.reviewSummary);
       setReviewBody("");
       setReviewDecision("comment");
+      await refreshPullRequestDetail();
     } catch (submitError) {
       setError(formatApiError(submitError));
     } finally {
@@ -550,6 +588,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setSelectedReviewRange(null);
       setReviewThreadBody("");
       setReviewThreadSuggestedCode("");
+      await refreshPullRequestDetail();
     } catch (submitError) {
       setError(formatApiError(submitError));
     } finally {
@@ -654,6 +693,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       );
       setThreadReplyBodies((previous) => ({ ...previous, [thread.id]: "" }));
       setThreadReplySuggestedCodes((previous) => ({ ...previous, [thread.id]: "" }));
+      await refreshPullRequestDetail();
     } catch (replyError) {
       setError(formatApiError(replyError));
     } finally {
@@ -711,6 +751,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           previous.map((thread) => (thread.id === threadId ? resolved : thread))
         )
       );
+      await refreshPullRequestDetail();
     } catch (resolveError) {
       setError(formatApiError(resolveError));
     } finally {
@@ -798,6 +839,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       if (nextProvenance) {
         setProvenanceDetail(nextProvenance.latestSession);
       }
+      await refreshPullRequestDetail();
       setAgentInstruction("");
     } catch (resumeError) {
       setError(formatApiError(resumeError));
@@ -825,6 +867,14 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const validationStderrChars = validationSummary?.stderr_chars ?? null;
   const highlightedArtifacts = highlightedValidationArtifacts(provenanceDetail);
   const unresolvedClosingIssues = closingIssues.filter((issue) => issue.task_status !== "done");
+  const suggestedReviewThread =
+    currentTaskFlow.suggested_review_thread_id !== null
+      ? reviewThreads.find((thread) => thread.id === currentTaskFlow.suggested_review_thread_id) ??
+        null
+      : null;
+  const primaryResumeThreadId = suggestedReviewThread?.id ?? null;
+  const primaryResumeLabel =
+    primaryResumeThreadId !== null ? "继续 Agent 处理 review thread" : "继续 Agent 处理当前 PR";
   const mergeReady =
     pullRequest.state === "open" &&
     comparison?.mergeable === "mergeable" &&
@@ -1323,7 +1373,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             ) : (
               <ul className="space-y-3">
                 {reviewThreads.map((thread) => (
-                  <li key={thread.id} className="rounded-md border bg-muted/20 p-3">
+                  <li
+                    key={thread.id}
+                    id={`review-thread-${thread.id}`}
+                    className="rounded-md border bg-muted/20 p-3"
+                  >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant={thread.status === "open" ? "secondary" : "outline"}>
                         {thread.status}
@@ -1450,7 +1504,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                     void handleResumeAgent(thread.id);
                                   }}
                                 >
-                                  继续 Agent 处理此线程
+                                  继续 Agent 处理 review thread
                                 </PendingButton>
                               ) : null}
                               <PendingButton
@@ -1480,7 +1534,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                   void handleResumeAgent(thread.id);
                                 }}
                               >
-                                继续 Agent 处理此线程
+                                继续 Agent 处理 review thread
                               </PendingButton>
                             ) : null}
                           </div>
@@ -1534,6 +1588,70 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         </div>
 
         <aside className="space-y-4">
+          <section className="space-y-4 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Task chain / Handoff</h2>
+              <p className="text-sm text-muted-foreground">
+                将 linked issue、review/validation 状态和下一步 handoff 收拢到同一处。
+              </p>
+            </div>
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
+                {comparison ? (
+                  <Badge variant={mergeabilityBadgeVariant(comparison.mergeable)}>
+                    {mergeabilityLabel(comparison.mergeable)}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Mergeability unknown</Badge>
+                )}
+                <Badge variant="outline">Open threads: {openReviewThreadCount}</Badge>
+                <Badge variant="outline">Change requests: {reviewSummary.changeRequests}</Badge>
+                <Badge variant="outline">Validation: {latestValidationState ?? "missing"}</Badge>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{currentTaskFlow.headline}</p>
+                <p className="text-sm text-muted-foreground">{currentTaskFlow.detail}</p>
+              </div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {currentTaskFlow.primary_issue_number !== null ? (
+                  <p>
+                    Primary issue:{" "}
+                    <Link
+                      className="gh-link"
+                      to={`/repo/${owner}/${repo}/issues/${currentTaskFlow.primary_issue_number}`}
+                    >
+                      #{currentTaskFlow.primary_issue_number}
+                    </Link>
+                  </p>
+                ) : null}
+                {suggestedReviewThread ? (
+                  <p>
+                    Default handoff thread:{" "}
+                    <button
+                      type="button"
+                      className="gh-link text-left"
+                      onClick={() => {
+                        const element = document.getElementById(
+                          `review-thread-${suggestedReviewThread.id}`
+                        );
+                        element?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}
+                    >
+                      {formatReviewThreadAnchor(suggestedReviewThread)}
+                    </button>
+                  </p>
+                ) : null}
+                <p>
+                  Main CTA:{" "}
+                  {primaryResumeThreadId !== null
+                    ? "默认继续最早的未解决 review thread。"
+                    : "继续整个 PR 的下一轮 Agent 交付。"}
+                </p>
+              </div>
+            </div>
+          </section>
+
           <section className="space-y-4 rounded-md border p-4">
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Agent session</h2>
@@ -1610,14 +1728,14 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   />
                 </div>
                 <PendingButton
-                  pending={agentSubmitting && agentResumeThreadId === null}
+                  pending={agentSubmitting && agentResumeThreadId === primaryResumeThreadId}
                   disabled={agentSubmitting || pullRequest.state !== "open"}
                   pendingText="Resuming agent..."
                   onClick={() => {
-                    void handleResumeAgent();
+                    void handleResumeAgent(primaryResumeThreadId ?? undefined);
                   }}
                 >
-                  继续 Agent
+                  {primaryResumeLabel}
                 </PendingButton>
                 <p className="text-xs text-muted-foreground">
                   新 session 会继承当前 PR 标题、描述、Review 历史和 head 分支上下文。

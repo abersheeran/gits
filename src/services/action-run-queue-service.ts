@@ -34,6 +34,7 @@ export async function consumeActionRunQueueMessage(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -85,6 +86,7 @@ export async function consumeActionRunQueueBatch(input: {
   env: Pick<
     AppBindings,
     | "DB"
+    | "GIT_BUCKET"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"

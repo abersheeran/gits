@@ -8,6 +8,7 @@ import {
 } from "../services/pull-request-merge-service";
 import { RepositoryBrowserService } from "../services/repository-browser-service";
 import { StorageService } from "../services/storage-service";
+import { WorkflowTaskFlowService } from "../services/workflow-task-flow-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
 import apiRoutes from "./api";
@@ -269,6 +270,13 @@ describe("API issues and pull requests", () => {
 
   it("returns issue detail with linked pull requests", async () => {
     const now = Date.now();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "buildIssueTaskFlow").mockResolvedValue({
+      status: "agent-working",
+      waiting_on: "agent",
+      headline: "PR #7 正在推进当前 Issue。",
+      detail: "先等待当前 PR 的下一轮 Agent 交付。",
+      driver_pull_request_number: 7
+    });
     const db = createMockD1Database([
       {
         when: "WHERE u.username = ? AND r.name = ?",
@@ -325,6 +333,11 @@ describe("API issues and pull requests", () => {
     const body = (await response.json()) as {
       issue: { task_status: string; acceptance_criteria: string };
       linkedPullRequests: Array<{ number: number; title: string; head_ref: string }>;
+      taskFlow: {
+        status: string;
+        waiting_on: string;
+        driver_pull_request_number: number | null;
+      };
     };
     expect(body.issue.task_status).toBe("waiting-human");
     expect(body.issue.acceptance_criteria).toContain("login succeeds");
@@ -332,6 +345,9 @@ describe("API issues and pull requests", () => {
     expect(body.linkedPullRequests[0]?.number).toBe(7);
     expect(body.linkedPullRequests[0]?.title).toBe("Fix login retry flow");
     expect(body.linkedPullRequests[0]?.head_ref).toBe("refs/heads/fix-login");
+    expect(body.taskFlow.status).toBe("agent-working");
+    expect(body.taskFlow.waiting_on).toBe("agent");
+    expect(body.taskFlow.driver_pull_request_number).toBe(7);
   });
 
   it("allows collaborators to update issue task status and acceptance criteria", async () => {
@@ -911,6 +927,205 @@ describe("API issues and pull requests", () => {
     expect(createdRunPrompt).toContain("summarize/compress");
   });
 
+  it("reconciles issue task status after assigning an issue agent", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const reconciledIssue = {
+      id: "issue-1",
+      repository_id: "repo-1",
+      number: 1,
+      author_id: "owner-1",
+      author_username: "alice",
+      title: "Need bugfix",
+      body: "Initial issue details",
+      state: "open",
+      task_status: "agent-working",
+      acceptance_criteria: "- bug fixed",
+      comment_count: 0,
+      labels: [],
+      assignees: [],
+      milestone: null,
+      reactions: [],
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      closed_at: null
+    };
+    const reconcileIssueTaskStatus = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
+      .mockResolvedValue(reconciledIssue);
+    vi.spyOn(StorageService.prototype, "readHead").mockResolvedValue("ref: refs/heads/main\n");
+    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    ]);
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("workflow-interactive")
+      .mockReturnValueOnce("run-issue-assign")
+      .mockReturnValueOnce("session-issue-assign");
+    const enqueueRun = vi.fn(async () => undefined);
+    const now = Date.now();
+    let insertedPrompt = "";
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "FROM issues i",
+        first: () => ({
+          id: "issue-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Need bugfix",
+          body: "Initial issue details",
+          state: "open",
+          task_status: "open",
+          acceptance_criteria: "- bug fixed",
+          created_at: now,
+          updated_at: now,
+          closed_at: null
+        })
+      },
+      {
+        when: "FROM issue_comments c",
+        all: () => []
+      },
+      {
+        when: "FROM action_workflows\n         WHERE repository_id = ? AND id = ?",
+        first: () => ({
+          id: "workflow-interactive",
+          repository_id: "repo-1",
+          name: "__agent_session_internal__codex",
+          trigger_event: "mention_actions",
+          agent_type: "codex",
+          prompt: "internal interactive agent session workflow",
+          push_branch_regex: null,
+          push_tag_regex: null,
+          enabled: 1,
+          created_by: "owner-1",
+          created_at: now,
+          updated_at: now
+        })
+      },
+      {
+        when: "FROM global_settings",
+        all: () => []
+      },
+      {
+        when: "FROM repository_actions_configs",
+        first: () => null
+      },
+      {
+        when: "FROM action_workflows\n         WHERE repository_id = ?\n         ORDER BY updated_at DESC, created_at DESC",
+        all: () => []
+      },
+      {
+        when: "INSERT INTO action_workflows",
+        run: () => ({ success: true })
+      },
+      {
+        when: "RETURNING action_run_seq AS run_number",
+        first: () => ({ run_number: 7 })
+      },
+      {
+        when: "INSERT INTO action_runs",
+        run: (params) => {
+          insertedPrompt = String(params[15] ?? "");
+          return { success: true };
+        }
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-issue-assign",
+            run_number: 7,
+            workflow_id: "workflow-interactive",
+            workflow_name: "__agent_session_internal__codex",
+            trigger_event: "mention_actions",
+            trigger_ref: "refs/heads/main",
+            trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            trigger_source_type: "issue",
+            trigger_source_number: 1,
+            triggered_by: "user-2",
+            triggered_by_username: "bob",
+            prompt: insertedPrompt || "placeholder",
+            created_at: now,
+            updated_at: now
+          })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
+        first: () => null
+      },
+      {
+        when: "INSERT INTO agent_sessions",
+        run: () => ({ success: true })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-issue-assign",
+            source_type: "issue",
+            source_number: 1,
+            origin: "issue_assign",
+            linked_run_id: "run-issue-assign",
+            prompt: insertedPrompt || "placeholder",
+            created_at: now,
+            updated_at: now
+          })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues/1/assign-agent", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          agentType: "codex",
+          prompt: "Please start with the failing path."
+        })
+      }),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_QUEUE: {
+          send: enqueueRun
+        } as unknown as Queue<unknown>
+      }
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as {
+      issue: { task_status: string };
+      run: { id: string; status: string };
+      session: { id: string; status: string };
+    };
+    expect(body.issue.task_status).toBe("agent-working");
+    expect(body.run.id).toBe("run-issue-assign");
+    expect(body.run.status).toBe("queued");
+    expect(body.session.id).toBe("session-issue-assign");
+    expect(body.session.status).toBe("queued");
+    expect(reconcileIssueTaskStatus).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      issueNumber: 1,
+      viewerId: "user-2"
+    });
+    expect(enqueueRun).toHaveBeenCalledTimes(1);
+    expect(insertedPrompt).toContain("Issue #1");
+    expect(insertedPrompt).toContain("Please start with the failing path.");
+  });
+
   it("rejects pull request creation for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",
@@ -1028,6 +1243,13 @@ describe("API issues and pull requests", () => {
 
   it("returns pull request detail with linked closing issues", async () => {
     const now = Date.now();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "buildPullRequestTaskFlow").mockResolvedValue({
+      waiting_on: "human",
+      headline: "当前 PR 已进入待人工审校/合并阶段。",
+      detail: "等待人工最终决定是否合并。",
+      primary_issue_number: 3,
+      suggested_review_thread_id: "thread-1"
+    });
     const db = createMockD1Database([
       {
         when: "WHERE u.username = ? AND r.name = ?",
@@ -1098,12 +1320,20 @@ describe("API issues and pull requests", () => {
     const body = (await response.json()) as {
       closingIssueNumbers: number[];
       closingIssues: Array<{ number: number; task_status: string; acceptance_criteria: string }>;
+      taskFlow: {
+        waiting_on: string;
+        primary_issue_number: number | null;
+        suggested_review_thread_id: string | null;
+      };
     };
     expect(body.closingIssueNumbers).toEqual([3]);
     expect(body.closingIssues).toHaveLength(1);
     expect(body.closingIssues[0]?.number).toBe(3);
     expect(body.closingIssues[0]?.task_status).toBe("waiting-human");
     expect(body.closingIssues[0]?.acceptance_criteria).toContain("login succeeds");
+    expect(body.taskFlow.waiting_on).toBe("human");
+    expect(body.taskFlow.primary_issue_number).toBe(3);
+    expect(body.taskFlow.suggested_review_thread_id).toBe("thread-1");
   });
 
   it("lists issues for readable repositories", async () => {
@@ -1274,6 +1504,9 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
+    const reconcileIssuesForPullRequest = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
+      .mockResolvedValue([]);
     const now = Date.now();
     const db = createMockD1Database([
       {
@@ -1359,6 +1592,11 @@ describe("API issues and pull requests", () => {
     expect(body.reviewSummary.approvals).toBe(1);
     expect(body.reviewSummary.changeRequests).toBe(0);
     expect(body.reviewSummary.comments).toBe(0);
+    expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      pullRequestNumber: 1,
+      viewerId: "user-2"
+    });
   });
 
   it("lists pull request review threads for readable repositories", async () => {
@@ -1781,6 +2019,9 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
+    const reconcileIssuesForPullRequest = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
+      .mockResolvedValue([]);
     const compareRefs = vi.spyOn(RepositoryBrowserService.prototype, "compareRefs").mockResolvedValue({
       baseRef: "refs/heads/main",
       headRef: "refs/heads/feature",
@@ -1941,6 +2182,11 @@ describe("API issues and pull requests", () => {
       baseRef: "refs/heads/main",
       headRef: "refs/heads/feature"
     });
+    expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      pullRequestNumber: 1,
+      viewerId: "user-2"
+    });
   });
 
   it("allows collaborators to resolve pull request review threads", async () => {
@@ -1948,6 +2194,9 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
+    const reconcileIssuesForPullRequest = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
+      .mockResolvedValue([]);
     const now = Date.now();
     let threadReadCount = 0;
     const db = createMockD1Database([
@@ -2021,6 +2270,11 @@ describe("API issues and pull requests", () => {
     expect(body.reviewThread.id).toBe("thread-1");
     expect(body.reviewThread.status).toBe("resolved");
     expect(body.reviewThread.resolved_by_username).toBe("bob");
+    expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      pullRequestNumber: 1,
+      viewerId: "user-2"
+    });
   });
 
   it("allows collaborators to reply to pull request review threads with suggested changes", async () => {
@@ -2028,6 +2282,9 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
+    const reconcileIssuesForPullRequest = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
+      .mockResolvedValue([]);
     const now = Date.now();
     const db = createMockD1Database([
       {
@@ -2138,6 +2395,11 @@ describe("API issues and pull requests", () => {
     expect(body.comment.suggestion?.code).toBe("const value = normalizePath(path);");
     expect(body.reviewThread.id).toBe("thread-1");
     expect(body.reviewThread.comments).toHaveLength(2);
+    expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      pullRequestNumber: 1,
+      viewerId: "user-2"
+    });
   });
 
   it("re-anchors suggested changes when replying after newer pull request commits", async () => {
@@ -2483,6 +2745,9 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
+    const reconcileIssuesForPullRequest = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
+      .mockResolvedValue([]);
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("workflow-interactive")
       .mockReturnValueOnce("run-thread-resume")
@@ -2661,6 +2926,11 @@ describe("API issues and pull requests", () => {
     expect(body.session.id).toBe("session-thread-resume");
     expect(body.session.status).toBe("queued");
     expect(body.session.origin).toBe("pull_request_resume");
+    expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      pullRequestNumber: 1,
+      viewerId: "user-2"
+    });
     expect(enqueueRun).toHaveBeenCalledTimes(1);
     expect(insertedPrompt).toContain("[Focused Review Thread]");
     expect(insertedPrompt).toContain("location: src/app.ts:12 (head)");
@@ -3103,7 +3373,10 @@ describe("API issues and pull requests", () => {
       {
         when: "UPDATE issues",
         run: (params) => {
-          closedIssueNumbers.push(Number(params[5]));
+          const issueNumber = Number(params.at(-1));
+          if (Number.isFinite(issueNumber)) {
+            closedIssueNumbers.push(issueNumber);
+          }
           return { success: true };
         }
       }
@@ -3124,7 +3397,7 @@ describe("API issues and pull requests", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(closedIssueNumbers.sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(Array.from(new Set(closedIssueNumbers)).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 
   it("returns conflict when squash merge cannot be applied", async () => {
