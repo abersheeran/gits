@@ -51,12 +51,14 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 - Queue 优先调度，无法入队时可直接执行
 - Cloudflare Containers 承担 agent runtime
+- 平台 Worker 直接暴露 HTTP MCP endpoint，供 actions runtime 与本地 agent 共用
 - 不同实例规格使用不同 DO 绑定
 - runtime 会：
   - clone 仓库
   - checkout 指定 ref/sha
   - 注入内部 token
   - 注入 agent 配置文件
+  - 为 actions runtime 自动接入平台 MCP endpoint
   - 运行 agent 命令
   - 流式回传 stdout/stderr/result
 
@@ -66,6 +68,15 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `agent_sessions` 记录 source、origin、branch、workflow、linked run
 - `agent_session_steps`、`artifacts`、`usage_records`、`interventions` 用于沉淀执行过程
 - 全量日志和全文 artifact 存在 `ACTION_LOGS_BUCKET`，D1 只保留 excerpt
+
+### 2.5 平台 MCP 能力
+
+- 平台直接提供 MCP tools：
+  - `gits_issue_reply`
+  - `gits_create_pull_request`
+- actions runtime 通过平台签发的临时 token 接入这些工具
+- 本地 agent 不再依赖 actions container 内嵌 MCP server，而是直接连接平台 MCP endpoint
+- 本地 agent 使用用户自己在账号下创建的 token 接入；平台不为本地 agent 代发临时 token
 
 ## 3. 当前已实现能力
 
@@ -100,7 +111,19 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - interventions
 - structured validation report
 
-### 3.4 摘要回流
+### 3.4 平台 MCP
+
+- 平台已能直接承载 MCP server，不再要求在 actions container 镜像内打包 `gits-platform-mcp`
+- actions runtime 会把平台 MCP endpoint 作为 HTTP MCP server 注入给 codex / claude_code
+- 本地 agent 也可直接连接同一个平台 MCP endpoint
+- 对 actions runtime：
+  - 继续使用平台临时 token
+  - 评论与建 PR 仍可按 actions 身份回写
+- 对本地 agent：
+  - 使用用户自建 token
+  - 不复用平台给 actions 生成的临时 token
+
+### 3.5 摘要回流
 
 - Issue 与 PR 页面会直接消费最近 run/session 的摘要
 - validation summary 优先消费 structured validation report
@@ -111,7 +134,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
   - scoped multi-step checks
   - highlighted artifacts 优先级排序
 
-### 3.5 主流程状态协调
+### 3.6 主流程状态协调
 
 - 若 run 来源是 `issue` 或 `pull_request`，完成后会自动触发 Issue task status 回流
 - 回流失败不会覆盖 run 原始结果，但会留下 warning 供排障
@@ -140,6 +163,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ## 5. 当前接口
 
+- `ALL /api/mcp`
 - `GET /api/settings/actions`
 - `PATCH /api/settings/actions`
 - `GET /api/repos/:owner/:repo/actions/config`
@@ -183,9 +207,11 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `src/services/action-run-queue-service.ts`
 - `src/services/agent-session-service.ts`
 - `src/services/agent-session-validation-summary.ts`
+- `src/services/platform-mcp-service.ts`
 - `src/actions/actions-container.ts`
 - `containers/actions-runner/server.ts`
 - `src/routes/api.ts`
+- `docs/MCP.zh-CN.md`
 - `web/src/pages/repository-actions-page.tsx`
 - `web/src/pages/agent-session-detail-page.tsx`
 - `web/src/lib/validation-summary.ts`
@@ -213,8 +239,14 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - runtime 已能执行。
 - 但 session 开始前仍缺代码搜索、相关文件候选、review thread 摘要和更稳定的上下文 bundle。
 
+### 8.5 本地 agent 接入仍缺更明确的产品化入口
+
+- 平台 MCP endpoint 已可复用给本地 agent。
+- 但用户如何发现 endpoint、如何选择自己的 token、如何管理 token 粒度，仍需要后续产品入口承接。
+
 ## 9. 下一步优先级
 
 1. 继续沉淀更面向评审的 validation 和 artifact 摘要。
 2. 增强 session 的 resume / continue / handoff 语义，而不是增加更多分散入口。
 3. 为 runtime 补上更好的任务上下文输入整理能力。
+4. 为本地 agent 补更清晰的接入入口与 token 权限管理体验。

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { mustSessionUser, optionalSession, requireSession } from "../middleware/auth";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
@@ -25,6 +26,10 @@ import { buildAgentSessionValidationSummary } from "../services/agent-session-va
 import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 import { RepositoryMetadataService } from "../services/repository-metadata-service";
+import {
+  collectPlatformMcpForwardHeaders,
+  createPlatformMcpServer
+} from "../services/platform-mcp-service";
 import {
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError,
@@ -1961,6 +1966,25 @@ router.get("/public/repos", async (c) => {
     parseLimit(c.req.query("limit"), 50)
   );
   return c.json({ repositories });
+});
+
+router.all("/mcp", requireSession, async (c) => {
+  const issueNumberQuery = c.req.query("issueNumber");
+  const transport = new WebStandardStreamableHTTPServerTransport();
+  const server = createPlatformMcpServer({
+    apiBaseUrl: new URL(c.req.url).origin,
+    forwardedHeaders: collectPlatformMcpForwardHeaders(c.req.raw.headers),
+    defaults: {
+      owner: c.req.query("owner") ?? null,
+      repo: c.req.query("repo") ?? null,
+      issueNumber:
+        issueNumberQuery !== undefined
+          ? assertPositiveInteger(issueNumberQuery, "issueNumber")
+          : null
+    }
+  });
+  await server.connect(transport);
+  return transport.handleRequest(c.req.raw);
 });
 
 router.post("/auth/tokens", requireSession, async (c) => {

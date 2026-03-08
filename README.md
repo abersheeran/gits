@@ -37,6 +37,7 @@ npm run dev
 ## Documentation
 
 - Chinese usage guide: `docs/USAGE.zh-CN.md`
+- MCP usage guide: `docs/MCP.zh-CN.md`
 
 ## Configure Cloudflare resources
 

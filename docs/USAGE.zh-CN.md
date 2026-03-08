@@ -7,6 +7,10 @@
 3. 使用 Issue、Pull Request、Actions 和 Agent Session
 4. 通过 API 与 Git Smart HTTP 走通核心链路
 
+相关独立文档：
+
+- [MCP 使用文档](/Users/aber/Documents/gits/gits/docs/MCP.zh-CN.md)
+
 ## 1. 当前产品范围
 
 `gits` 当前是一个面向 Agent 协作的软件交付平台，主工作流是：
