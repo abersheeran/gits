@@ -1026,6 +1026,86 @@ describe("API issues and pull requests", () => {
     expect(body.pullRequest.head_ref).toBe("refs/heads/feature");
   });
 
+  it("returns pull request detail with linked closing issues", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "user-2",
+          author_username: "bob",
+          title: "Add feature",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "SUM(CASE WHEN decision = 'approve'",
+        first: () => ({
+          approvals: 1,
+          change_requests: 0,
+          comments: 0
+        })
+      },
+      {
+        when: "FROM pull_request_closing_issues",
+        all: () => [{ issue_number: 3 }]
+      },
+      {
+        when: "FROM issues i",
+        all: () => [
+          {
+            id: "issue-3",
+            repository_id: "repo-1",
+            number: 3,
+            author_id: "owner-1",
+            author_username: "alice",
+            title: "Fix login",
+            body: "body",
+            state: "open",
+            task_status: "waiting-human",
+            acceptance_criteria: "- login succeeds",
+            created_at: now - 5_000,
+            updated_at: now - 1_000,
+            closed_at: null
+          }
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      closingIssueNumbers: number[];
+      closingIssues: Array<{ number: number; task_status: string; acceptance_criteria: string }>;
+    };
+    expect(body.closingIssueNumbers).toEqual([3]);
+    expect(body.closingIssues).toHaveLength(1);
+    expect(body.closingIssues[0]?.number).toBe(3);
+    expect(body.closingIssues[0]?.task_status).toBe("waiting-human");
+    expect(body.closingIssues[0]?.acceptance_criteria).toContain("login succeeds");
+  });
+
   it("lists issues for readable repositories", async () => {
     const db = createMockD1Database([
       {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { ReactionStrip } from "@/components/repository/reaction-strip";
@@ -44,6 +45,7 @@ import {
   type AgentSessionDetail,
   type AgentSessionRecord,
   type AuthUser,
+  type IssueRecord,
   type PullRequestReviewDecision,
   type PullRequestReviewRecord,
   type PullRequestReviewSummary,
@@ -110,6 +112,47 @@ function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
 }
 
+function formatDuration(startedAt: number | null, completedAt: number | null): string {
+  if (!startedAt) {
+    return "-";
+  }
+  const end = completedAt ?? Date.now();
+  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function excerptText(value: string, maxLength: number): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function usageRecordValue(
+  detail: AgentSessionDetail | null,
+  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars"
+): number | null {
+  const record = detail?.usageRecords.find((item) => item.kind === kind);
+  return record ? record.value : null;
+}
+
+function latestValidationStatus(
+  provenanceDetail: AgentSessionDetail | null,
+  latestRun: ActionRunRecord | null,
+  latestSession: AgentSessionRecord | null
+): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
+  return provenanceDetail?.linkedRun?.status ?? latestRun?.status ?? latestSession?.status ?? null;
+}
+
 type SelectedReviewRange = {
   path: string;
   baseOid: string;
@@ -172,7 +215,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentSubmitting, setAgentSubmitting] = useState(false);
-  const [closingIssueNumbers, setClosingIssueNumbers] = useState<number[]>([]);
+  const [closingIssues, setClosingIssues] = useState<IssueRecord[]>([]);
   const [comparison, setComparison] = useState<RepositoryCompareResponse | null>(null);
   const [reviewSummary, setReviewSummary] = useState<PullRequestReviewSummary>({
     approvals: 0,
@@ -247,7 +290,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         }
         setDetail(nextDetail);
         setPullRequest(applyComparisonToPullRequest(nextPullRequestDetail.pullRequest, nextComparison));
-        setClosingIssueNumbers(nextPullRequestDetail.closingIssueNumbers);
+        setClosingIssues(nextPullRequestDetail.closingIssues);
         setProvenanceDetail(nextProvenance.latestSession);
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
@@ -312,7 +355,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
     const timer = window.setInterval(async () => {
       try {
-        const [latestRunItems, latestSessionItems] = await Promise.all([
+        const [latestRunItems, latestSessionItems, nextProvenance] = await Promise.all([
           listLatestActionRunsBySource(owner, repo, {
             sourceType: "pull_request",
             numbers: [number]
@@ -320,10 +363,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           listLatestAgentSessionsBySource(owner, repo, {
             sourceType: "pull_request",
             numbers: [number]
-          })
+          }),
+          getPullRequestProvenance(owner, repo, number).catch(() => null)
         ]);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestAgentSession(latestSessionItems[0]?.session ?? null);
+        setProvenanceDetail(nextProvenance?.latestSession ?? null);
       } catch {
         // Ignore transient polling errors.
       }
@@ -412,7 +457,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setComparison(nextComparison);
       if (nextState === "merged") {
         const next = await getPullRequest(owner, repo, number);
-        setClosingIssueNumbers(next.closingIssueNumbers);
+        setClosingIssues(next.closingIssues);
       }
     } catch (updateError) {
       setError(formatApiError(updateError));
@@ -736,6 +781,46 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const openReviewThreadCount = reviewThreads.filter((thread) => thread.status === "open").length;
   const resolvedReviewThreadCount = reviewThreads.length - openReviewThreadCount;
   const selectedRangeSupportsSuggestion = selectedReviewRange?.side === "head";
+  const latestValidationRun = provenanceDetail?.linkedRun ?? latestActionRun;
+  const latestValidationSession = provenanceDetail?.session ?? latestAgentSession;
+  const latestValidationState = latestValidationStatus(
+    provenanceDetail,
+    latestActionRun,
+    latestAgentSession
+  );
+  const validationPassed = latestValidationState === "success";
+  const validationDurationMs = usageRecordValue(provenanceDetail, "duration_ms");
+  const validationExitCode = usageRecordValue(provenanceDetail, "exit_code");
+  const validationStdoutChars = usageRecordValue(provenanceDetail, "stdout_chars");
+  const validationStderrChars = usageRecordValue(provenanceDetail, "stderr_chars");
+  const unresolvedClosingIssues = closingIssues.filter((issue) => issue.task_status !== "done");
+  const mergeReady =
+    pullRequest.state === "open" &&
+    comparison?.mergeable === "mergeable" &&
+    openReviewThreadCount === 0 &&
+    reviewSummary.changeRequests === 0 &&
+    validationPassed &&
+    unresolvedClosingIssues.length === 0;
+  const mergeSummaryHeadline =
+    pullRequest.state !== "open"
+      ? "This pull request is no longer open."
+      : mergeReady
+        ? "The pull request is in a merge-ready shape for human review."
+        : "The pull request still has open items before merge.";
+  const mergeSummaryDetail =
+    pullRequest.state !== "open"
+      ? "Further review should focus on historical context rather than merge readiness."
+      : comparison?.mergeable !== "mergeable"
+        ? "Resolve merge conflicts before a human decides to merge."
+        : openReviewThreadCount > 0
+          ? "Resolve or explicitly acknowledge the remaining open review threads."
+          : reviewSummary.changeRequests > 0
+            ? "There are still change-request reviews that need a follow-up pass."
+            : unresolvedClosingIssues.length > 0
+              ? "Linked issues still have unfinished task states or acceptance criteria to review."
+            : !validationPassed
+              ? "Run one more successful validation pass so the final reviewer can judge the latest code state."
+              : "Validation, review threads, and mergeability all look aligned for a final human decision.";
 
   return (
     <div className="space-y-4">
@@ -770,6 +855,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <Badge variant="outline">Approvals: {reviewSummary.approvals}</Badge>
           <Badge variant="outline">Changes requested: {reviewSummary.changeRequests}</Badge>
           <Badge variant="outline">Comments: {reviewSummary.comments}</Badge>
+          <Badge variant={mergeReady ? "default" : "secondary"}>
+            {mergeReady ? "Ready for human merge review" : "Needs attention"}
+          </Badge>
           {comparison ? (
             <>
               <Badge variant={mergeabilityBadgeVariant(comparison.mergeable)}>
@@ -783,16 +871,16 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             </>
           ) : null}
         </div>
-        {closingIssueNumbers.length > 0 ? (
+        {closingIssues.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>Will close on merge:</span>
-            {closingIssueNumbers.map((issueNumber) => (
+            {closingIssues.map((issue) => (
               <Link
-                key={issueNumber}
+                key={issue.id}
                 className="text-[#0969da] hover:underline"
-                to={`/repo/${owner}/${repo}/issues/${issueNumber}`}
+                to={`/repo/${owner}/${repo}/issues/${issue.number}`}
               >
-                #{issueNumber}
+                #{issue.number}
               </Link>
             ))}
           </div>
@@ -846,6 +934,176 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   : undefined
               }
             />
+          </section>
+
+          <section className="space-y-3 rounded-md border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold">Validation summary</h2>
+                <p className="text-sm text-muted-foreground">
+                  直接展示最近一轮 Agent 交付、验证结果和关键 artifact，不再要求先跳到 Session 页。
+                </p>
+              </div>
+              {latestValidationState ? <ActionStatusBadge status={latestValidationState} /> : null}
+            </div>
+            {latestValidationRun || latestValidationSession ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                    <p className="text-sm font-medium">Latest validation run</p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {latestValidationRun ? (
+                        <>
+                          <Badge variant="outline">
+                            {latestValidationRun.workflow_name || "Run"} #{latestValidationRun.run_number}
+                          </Badge>
+                          <Badge variant="outline">agent: {latestValidationRun.agent_type}</Badge>
+                        </>
+                      ) : null}
+                      {validationDurationMs !== null ? (
+                        <Badge variant="outline">{Math.round(validationDurationMs)} ms</Badge>
+                      ) : null}
+                      {validationExitCode !== null ? (
+                        <Badge variant="outline">exit: {Math.round(validationExitCode)}</Badge>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <p>Updated: {formatDateTime(latestValidationRun?.updated_at ?? latestValidationSession?.updated_at ?? null)}</p>
+                      <p>
+                        Duration:{" "}
+                        {formatDuration(
+                          latestValidationRun?.started_at ?? latestValidationSession?.started_at ?? null,
+                          latestValidationRun?.completed_at ?? latestValidationSession?.completed_at ?? null
+                        )}
+                      </p>
+                      {latestValidationRun ? (
+                        <p>
+                          {latestValidationRun.trigger_ref ?? "-"} · triggered by{" "}
+                          {latestValidationRun.triggered_by_username ?? "system"}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                    <p className="text-sm font-medium">Latest agent update</p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {latestValidationSession ? (
+                        <>
+                          <Badge variant="outline">{latestValidationSession.origin}</Badge>
+                          <Badge variant="outline">{latestValidationSession.agent_type}</Badge>
+                        </>
+                      ) : null}
+                      {provenanceDetail ? (
+                        <Badge variant="outline">
+                          interventions: {provenanceDetail.interventions.length}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      {latestValidationSession ? <p>Session: {latestValidationSession.id}</p> : null}
+                      <p>Branch: {latestValidationSession?.branch_ref ?? pullRequest.head_ref}</p>
+                      <p>Triggered by: {latestValidationSession?.created_by_username ?? "system"}</p>
+                      <p>Updated: {formatDateTime(latestValidationSession?.updated_at ?? null)}</p>
+                    </div>
+                  </div>
+                </div>
+                {provenanceDetail ? (
+                  <>
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline">
+                        artifacts: {provenanceDetail.artifacts.length}
+                      </Badge>
+                      <Badge variant="outline">
+                        stdout: {validationStdoutChars !== null ? Math.round(validationStdoutChars).toLocaleString() : "-"} chars
+                      </Badge>
+                      <Badge variant="outline">
+                        stderr: {validationStderrChars !== null ? Math.round(validationStderrChars).toLocaleString() : "-"} chars
+                      </Badge>
+                    </div>
+                    {provenanceDetail.artifacts.length > 0 ? (
+                      <div className="space-y-3">
+                        {provenanceDetail.artifacts.slice(0, 3).map((artifact) => (
+                          <div key={artifact.id} className="space-y-1 rounded-md border bg-background/70 p-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant="outline">{artifact.kind}</Badge>
+                              <span>{artifact.title}</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {excerptText(artifact.content_text, 220) || "(empty artifact)"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">暂无关键 artifact 摘要。</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    当前只拿到最新 run / session 状态，尚无更完整的 provenance 摘要。
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前 PR 还没有可用的验证结果。</p>
+            )}
+          </section>
+
+          <section className="space-y-3 rounded-md border p-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Merge summary</h2>
+              <p className="text-sm text-muted-foreground">
+                在一个地方汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。
+              </p>
+            </div>
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <p className="text-sm font-medium">{mergeSummaryHeadline}</p>
+              <p className="text-sm text-muted-foreground">{mergeSummaryDetail}</p>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                {comparison ? (
+                  <Badge variant={mergeabilityBadgeVariant(comparison.mergeable)}>
+                    {mergeabilityLabel(comparison.mergeable)}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Mergeability unknown</Badge>
+                )}
+                <Badge variant="outline">Open threads: {openReviewThreadCount}</Badge>
+                <Badge variant="outline">Change requests: {reviewSummary.changeRequests}</Badge>
+                <Badge variant="outline">
+                  Validation: {latestValidationState ?? "missing"}
+                </Badge>
+                <Badge variant="outline">Linked issues: {closingIssues.length}</Badge>
+                <Badge variant="outline">
+                  Issues not done: {unresolvedClosingIssues.length}
+                </Badge>
+              </div>
+            </div>
+            {closingIssues.length > 0 ? (
+              <div className="space-y-3">
+                {closingIssues.map((issue) => (
+                  <div key={issue.id} className="space-y-2 rounded-md border bg-background/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        className="text-sm font-medium gh-link"
+                        to={`/repo/${owner}/${repo}/issues/${issue.number}`}
+                      >
+                        Issue #{issue.number} {issue.title}
+                      </Link>
+                      <IssueTaskStatusBadge status={issue.task_status} />
+                      <RepositoryStateBadge state={issue.state} kind="issue" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Acceptance criteria:{" "}
+                      {issue.acceptance_criteria.trim()
+                        ? excerptText(issue.acceptance_criteria, 180)
+                        : "(none)"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">当前 PR 没有关联关闭的 Issue。</p>
+            )}
           </section>
 
           {comparison ? (

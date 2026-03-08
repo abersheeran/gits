@@ -586,6 +586,47 @@ export class IssueService {
     return rows.results.map((item) => item.number).sort((a, b) => a - b);
   }
 
+  async listIssuesByNumbers(
+    repositoryId: string,
+    numbers: number[],
+    viewerId?: string
+  ): Promise<IssueRecord[]> {
+    const normalized = this.normalizeIssueNumbers(numbers);
+    if (normalized.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          i.id,
+          i.repository_id,
+          i.number,
+          i.author_id,
+          u.username AS author_username,
+          i.title,
+          i.body,
+          i.state,
+          i.task_status,
+          i.acceptance_criteria,
+          i.milestone_id,
+          i.created_at,
+          i.updated_at,
+          i.closed_at
+         FROM issues i
+         JOIN users u ON u.id = i.author_id
+         WHERE i.repository_id = ? AND i.number IN (${Array.from(
+           { length: normalized.length },
+           () => "?"
+         ).join(", ")})
+         ORDER BY i.number ASC`
+      )
+      .bind(repositoryId, ...normalized)
+      .all<BaseIssueRow>();
+
+    return this.hydrateIssues(repositoryId, rows.results, viewerId);
+  }
+
   async closeIssuesByNumbers(repositoryId: string, numbers: number[]): Promise<void> {
     const normalized = this.normalizeIssueNumbers(numbers);
     for (const issueNumber of normalized) {

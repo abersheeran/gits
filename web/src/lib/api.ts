@@ -337,6 +337,7 @@ export type PullRequestDetailResponse = {
   pullRequest: PullRequestRecord;
   reviewSummary: PullRequestReviewSummary;
   closingIssueNumbers: number[];
+  closingIssues: IssueRecord[];
 };
 
 export type PullRequestProvenanceResponse = {

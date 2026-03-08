@@ -2969,7 +2969,13 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
     pullRequestService.summarizePullRequestReviews(repository.id, number),
     pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
   ]);
-  return c.json({ pullRequest, reviewSummary, closingIssueNumbers });
+  const issueService = new IssueService(c.env.DB);
+  const closingIssues = await issueService.listIssuesByNumbers(
+    repository.id,
+    closingIssueNumbers,
+    sessionUser?.id
+  );
+  return c.json({ pullRequest, reviewSummary, closingIssueNumbers, closingIssues });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number/provenance", optionalSession, async (c) => {

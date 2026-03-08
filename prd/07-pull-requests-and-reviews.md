@@ -27,6 +27,9 @@ PR 是这款产品的交付中心。
   - mergeability
   - 文件 diff
   - review summary
+  - validation summary
+  - merge summary
+  - 关联 closing Issue 的任务完成度摘要
   - 最新 Agent provenance 摘要
 - Review：
   - `comment`
@@ -52,24 +55,11 @@ PR 是这款产品的交付中心。
 4. Agent 从 thread focused resume。
 5. 人类最终合并 PR。
 
-但 PR 页面还不够完整。
+但 PR 的评审连续性还不够强。
 
 ## 4. 面向主工作流仍需补足
 
-### 4.1 PR 页面还缺“验证结果中心”
-
-现在有 Session、artifact、usage，但用户做最终判断时还不够直接。
-
-PR 页应该直接展示：
-
-- 最近一次测试结果
-- 最近一次构建结果
-- 关键 artifact 摘要
-- 最近一次 Agent 修改摘要
-
-而不是主要依赖用户再跳到 Session 页拼接理解。
-
-### 4.2 Review 线程在多次提交之间还不够稳定
+### 4.1 Review 线程在多次提交之间还不够稳定
 
 当前 thread 已锚定到真实 diff，但还缺：
 
@@ -77,16 +67,17 @@ PR 页应该直接展示：
 - stale thread 标记
 - 更明确的 patch-set 变化感知
 
-### 4.3 合并前的判断面还不够直接
+### 4.2 验证摘要已经有第一版，但仍偏轻量
 
-PR 页面需要一个非常清晰的 merge summary，至少包括：
+现在 PR 页面已经能直接展示最近验证状态、关键 artifact 摘要、最近一次 Agent 修改摘要和 merge summary。
 
-- 是否仍有 unresolved thread
-- 最近一次 Agent 修改是否完成
-- 最近一次验证是否通过
-- 关联 Issue 是否满足验收标准
+但验证摘要还缺更结构化的视角，例如：
 
-### 4.4 Issue 与 PR 的双向关联仍然偏弱
+- 区分“测试结果”和“构建结果”
+- 对 artifact 做更稳定的优先级排序
+- 自动提炼更明确的人类审校摘要
+
+### 4.3 Issue 与 PR 的双向关联仍然偏弱
 
 当前支持关闭关联 Issue，但还缺更清晰的任务链视图：
 
@@ -100,7 +91,7 @@ PR 页面需要一个非常清晰的 merge summary，至少包括：
 
 1. 创建 PR 时校验 base/head。
 2. 系统阻止同一 `head/base` 组合的重复未关闭 PR。
-3. PR 页面可展示 compare、reviews、review threads、Agent provenance。
+3. PR 页面可展示 compare、reviews、review threads、validation summary、merge summary、Agent provenance。
 4. 用户可从 thread 直接继续 Agent。
 5. 合并成功后自动关闭关联 Issue。
 
@@ -109,7 +100,7 @@ PR 页面需要一个非常清晰的 merge summary，至少包括：
 1. Agent 基于 Issue 提交 PR。
 2. 人类在 PR 中评审代码和测试产物。
 3. Agent 根据 review thread 继续修改。
-4. PR 页面持续汇总“最新改动 + 最新验证 + 最新反馈”。
+4. PR 页面持续汇总“最新改动 + 最新验证 + 最新反馈 + 关联 Issue 完成度”。
 5. 人类完成最终合并。
 
 ## 6. 当前接口
@@ -152,12 +143,11 @@ PR 页面需要一个非常清晰的 merge summary，至少包括：
 ## 9. 当前边界与下一步
 
 - 当前只有 squash merge。
-- PR 页面还没有把测试结果和关键 artifact 直接做成判断面。
+- PR 页面已具备第一版 validation summary 和 merge summary。
 - thread 在新 commit 后还缺更稳定的连续性处理。
 
 下一步优先级：
 
-1. 在 PR 页面补测试/构建/关键 artifact 摘要。
-2. 增加 merge summary，让人类更容易做最终判断。
-3. 增强 thread 在多次提交之间的重新锚定与 stale 标记。
-4. 把 PR 和来源 Issue 之间的状态回流做得更明显。
+1. 增强 thread 在多次提交之间的重新锚定与 stale 标记。
+2. 把 PR 和来源 Issue 之间的状态回流做得更明显。
+3. 把验证摘要进一步结构化成更适合评审的测试/构建视图。

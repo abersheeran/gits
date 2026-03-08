@@ -32,25 +32,23 @@
 - 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图。
 - 已支持 PR 创建、比较、Review、Reaction、squash merge。
 - 已支持 anchored review thread、多轮 thread comments、suggested changes。
+- 已支持在 PR 页面直接展示 validation summary、merge summary 和关联 Issue 完成度。
 - 已支持从单条 unresolved review thread focused resume Agent。
 - 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
 - 已支持从 Issue、PR、workflow、mention、rerun、dispatch 创建 Session。
 
 ## 4. 当前真正的缺口
 
-### 4.1 PR 还不是完整的交付中心
-
-- PR 页面还缺“最新测试结果 / 验证摘要 / 关键 artifact”的直接展示。
-- 人类合并前缺少足够直接的 merge summary：
-  - 是否还有 unresolved thread
-  - 最近一次 Agent 修改做了什么
-  - 最新验证结果如何
-
-### 4.2 Review 循环还不够顺
+### 4.1 Review 循环还不够顺
 
 - thread 在新 commit 后还缺更稳定的重新锚定。
 - 还缺 stale thread 标记和更明确的 patch-set 感知。
 - Agent 修改 PR 后，Review 与 Session 的状态回流还不够明显。
+
+### 4.2 PR 的验证摘要还是首版
+
+- 当前已能在 PR 中直接看最近验证状态、关键 artifact 和 merge summary。
+- 但还缺更结构化的测试/构建拆分，以及更稳定的人类审校摘要提炼。
 
 ### 4.3 Agent 上下文供给还偏弱
 
@@ -87,7 +85,7 @@
 ### P1
 
 - 增加代码搜索和轻量 Context Bundle。
-- 把验证结果和 artifact 更直接地并入 Issue 与 PR 主界面。
+- 把验证结果和 artifact 更直接地并入 Issue 主界面。
 - 强化 thread 在多次提交之间的连续性。
 
 ## 7. 推荐阅读顺序
