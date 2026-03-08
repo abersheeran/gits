@@ -1346,6 +1346,56 @@ async function buildAgentSessionDetailPayload(args: {
   };
 }
 
+async function buildLatestPullRequestProvenancePayload(args: {
+  db: D1Database;
+  repository: RepositoryRecord;
+  owner: string;
+  repo: string;
+  pullRequestNumbers: number[];
+  viewerId?: string;
+}): Promise<
+  Array<{
+    sourceNumber: number;
+    latestSession: Awaited<ReturnType<typeof buildAgentSessionDetailPayload>> | null;
+  }>
+> {
+  if (args.pullRequestNumbers.length === 0) {
+    return [];
+  }
+
+  const agentSessionService = new AgentSessionService(args.db);
+  const latestSessions = await agentSessionService.listLatestSessionsBySource(
+    args.repository.id,
+    "pull_request",
+    args.pullRequestNumbers
+  );
+
+  const detailEntries = await Promise.all(
+    latestSessions
+      .filter((session) => session.source_number !== null)
+      .map(async (session) => [
+        session.source_number as number,
+        await buildAgentSessionDetailPayload({
+          db: args.db,
+          repository: args.repository,
+          owner: args.owner,
+          repo: args.repo,
+          session,
+          ...(args.viewerId ? { viewerId: args.viewerId } : {})
+        })
+      ] as const)
+  );
+  const detailBySourceNumber = new Map<
+    number,
+    Awaited<ReturnType<typeof buildAgentSessionDetailPayload>>
+  >(detailEntries);
+
+  return args.pullRequestNumbers.map((sourceNumber) => ({
+    sourceNumber,
+    latestSession: detailBySourceNumber.get(sourceNumber) ?? null
+  }));
+}
+
 async function listRepositoryParticipants(
   repositoryService: RepositoryService,
   repository: RepositoryRecord
@@ -2960,6 +3010,31 @@ router.get("/repos/:owner/:repo/pulls", optionalSession, async (c) => {
   });
 });
 
+router.get("/repos/:owner/:repo/pulls/provenance/latest", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const pullRequestNumbers = parseActionRunSourceNumbers(c.req.query("numbers"));
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const items = await buildLatestPullRequestProvenancePayload({
+    db: c.env.DB,
+    repository,
+    owner,
+    repo,
+    pullRequestNumbers,
+    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+  });
+
+  return c.json({ items });
+});
+
 router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
@@ -3018,26 +3093,15 @@ router.get("/repos/:owner/:repo/pulls/:number/provenance", optionalSession, asyn
     throw new HTTPException(404, { message: "Pull request not found" });
   }
 
-  const agentSessionService = new AgentSessionService(c.env.DB);
-  const [latestSession] = await agentSessionService.listLatestSessionsBySource(
-    repository.id,
-    "pull_request",
-    [number]
-  );
-
-  if (!latestSession) {
-    return c.json({ latestSession: null });
-  }
-
-  const detail = await buildAgentSessionDetailPayload({
+  const [item] = await buildLatestPullRequestProvenancePayload({
     db: c.env.DB,
     repository,
     owner,
     repo,
-    session: latestSession,
+    pullRequestNumbers: [number],
     ...(sessionUser ? { viewerId: sessionUser.id } : {})
   });
-  return c.json({ latestSession: detail });
+  return c.json({ latestSession: item?.latestSession ?? null });
 });
 
 router.get("/repos/:owner/:repo/pulls/:number/reviews", optionalSession, async (c) => {

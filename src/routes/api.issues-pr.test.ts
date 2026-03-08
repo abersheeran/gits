@@ -2809,6 +2809,144 @@ describe("API issues and pull requests", () => {
     expect(body.latestSession?.interventions[0]?.kind).toBe("mcp_setup_warning");
   });
 
+  it("returns latest pull request provenance in batch form for issue task views", async () => {
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "AND s.source_type = ?\n           AND s.source_number IN",
+        all: () => [
+          buildAgentSessionRow({
+            id: "session-pr-batch",
+            source_number: 1,
+            origin: "pull_request_resume",
+            linked_run_id: "run-pr-batch",
+            created_at: now - 8_000,
+            updated_at: now - 4_000
+          })
+        ]
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-pr-batch",
+            run_number: 11,
+            workflow_name: "__agent_session_internal__codex",
+            trigger_event: "mention_actions",
+            trigger_source_type: "pull_request",
+            trigger_source_number: 1,
+            status: "success",
+            created_at: now - 8_000,
+            updated_at: now - 4_000
+          })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: (params) => {
+          const number = Number(params[1]);
+          if (number !== 1) {
+            return null;
+          }
+          return {
+            id: "pr-1",
+            repository_id: "repo-1",
+            number: 1,
+            author_id: "owner-1",
+            author_username: "alice",
+            title: "Improve README",
+            body: "Please update the implementation safely.",
+            state: "open",
+            base_ref: "refs/heads/main",
+            head_ref: "refs/heads/feature",
+            base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            merge_commit_oid: null,
+            created_at: now,
+            updated_at: now,
+            closed_at: null,
+            merged_at: null
+          };
+        }
+      },
+      {
+        when: "FROM agent_session_artifacts",
+        all: () => [
+          {
+            id: "artifact-pr-batch",
+            session_id: "session-pr-batch",
+            repository_id: "repo-1",
+            kind: "stdout",
+            title: "Runner stdout",
+            media_type: "text/plain",
+            size_bytes: 24,
+            content_text: "batch artifact payload",
+            created_at: now - 3_000,
+            updated_at: now - 3_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_usage_records",
+        all: () => [
+          {
+            id: 1,
+            session_id: "session-pr-batch",
+            repository_id: "repo-1",
+            kind: "duration_ms",
+            value: 1250,
+            unit: "ms",
+            detail: "Container execution duration",
+            payload_json: "{\"runId\":\"run-pr-batch\"}",
+            created_at: now - 3_000,
+            updated_at: now - 3_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_interventions",
+        all: () => []
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/provenance/latest?numbers=1,2"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      items: Array<{
+        sourceNumber: number;
+        latestSession: {
+          session: { id: string };
+          linkedRun: { id: string; status: string } | null;
+          sourceContext: { type: string; number: number | null; title: string | null };
+          artifacts: Array<{ title: string }>;
+          usageRecords: Array<{ kind: string; value: number }>;
+        } | null;
+      }>;
+    };
+
+    expect(body.items).toHaveLength(2);
+    expect(body.items[0]?.sourceNumber).toBe(1);
+    expect(body.items[0]?.latestSession?.session.id).toBe("session-pr-batch");
+    expect(body.items[0]?.latestSession?.linkedRun?.id).toBe("run-pr-batch");
+    expect(body.items[0]?.latestSession?.linkedRun?.status).toBe("success");
+    expect(body.items[0]?.latestSession?.sourceContext.type).toBe("pull_request");
+    expect(body.items[0]?.latestSession?.sourceContext.number).toBe(1);
+    expect(body.items[0]?.latestSession?.sourceContext.title).toBe("Improve README");
+    expect(body.items[0]?.latestSession?.artifacts[0]?.title).toBe("Runner stdout");
+    expect(body.items[0]?.latestSession?.usageRecords[0]?.value).toBe(1250);
+    expect(body.items[1]).toEqual({
+      sourceNumber: 2,
+      latestSession: null
+    });
+  });
+
   it("allows marking closing issues when creating pull requests", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",

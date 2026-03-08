@@ -128,6 +128,7 @@ PR 是这款产品的交付中心。
 - `POST /api/repos/:owner/:repo/pulls/:number/review-threads/:threadId/resolve`
 - `POST /api/repos/:owner/:repo/pulls/:number/resume-agent`
 - `GET /api/repos/:owner/:repo/pulls/:number/provenance`
+- `GET /api/repos/:owner/:repo/pulls/provenance/latest`
 - `GET /api/repos/:owner/:repo/compare`
 
 ## 7. 当前数据
@@ -155,6 +156,7 @@ PR 是这款产品的交付中心。
 
 - 当前只有 squash merge。
 - PR 页面已具备第一版 validation summary 和 merge summary。
+- PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：

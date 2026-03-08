@@ -8,6 +8,7 @@ import { ReactionStrip } from "@/components/repository/reaction-strip";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
@@ -16,9 +17,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   addReaction,
   assignIssueAgent,
+  type AgentSessionDetail,
   listLatestAgentSessionsBySource,
   listLatestActionRunsByCommentIds,
   listLatestActionRunsBySource,
+  listLatestPullRequestProvenance,
   createIssueComment,
   formatApiError,
   getIssue,
@@ -79,6 +82,45 @@ function shortBranchName(ref: string): string {
   return ref.replace(/^refs\/heads\//, "");
 }
 
+function formatDuration(startedAt: number | null, completedAt: number | null): string {
+  if (!startedAt) {
+    return "-";
+  }
+  const end = completedAt ?? Date.now();
+  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+}
+
+function excerptText(value: string, maxLength: number): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function usageRecordValue(
+  detail: AgentSessionDetail | null,
+  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars"
+): number | null {
+  const record = detail?.usageRecords.find((item) => item.kind === kind);
+  return record ? record.value : null;
+}
+
+function latestValidationStatus(
+  detail: AgentSessionDetail | null
+): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
+  return detail?.linkedRun?.status ?? detail?.session.status ?? null;
+}
+
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const params = useParams<{ owner: string; repo: string; number: string }>();
   const owner = params.owner ?? "";
@@ -97,12 +139,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
-  const [latestPullRequestRunByNumber, setLatestPullRequestRunByNumber] = useState<
-    Record<number, ActionRunRecord>
-  >({});
-  const [latestPullRequestSessionByNumber, setLatestPullRequestSessionByNumber] = useState<
-    Record<number, AgentSessionRecord>
-  >({});
+  const [latestPullRequestProvenanceByNumber, setLatestPullRequestProvenanceByNumber] =
+    useState<Record<number, AgentSessionDetail | null>>({});
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentSubmitAction, setAgentSubmitAction] = useState<"assign" | "resume" | null>(null);
@@ -164,40 +202,26 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setLatestRunByCommentId(nextRunByCommentId);
   }
 
-  async function refreshLinkedPullRequestStatuses(
+  async function refreshLinkedPullRequestProvenance(
     nextLinkedPullRequestsInput?: IssueLinkedPullRequestRecord[]
   ): Promise<void> {
     const nextLinkedPullRequests = nextLinkedPullRequestsInput ?? linkedPullRequests;
     if (!owner || !repo || nextLinkedPullRequests.length === 0) {
-      setLatestPullRequestRunByNumber({});
-      setLatestPullRequestSessionByNumber({});
+      setLatestPullRequestProvenanceByNumber({});
       return;
     }
-    const pullRequestNumbers = nextLinkedPullRequests.map((pullRequest) => pullRequest.number);
-    const [latestRunItems, latestSessionItems] = await Promise.all([
-      listLatestActionRunsBySource(owner, repo, {
-        sourceType: "pull_request",
-        numbers: pullRequestNumbers
-      }),
-      listLatestAgentSessionsBySource(owner, repo, {
-        sourceType: "pull_request",
-        numbers: pullRequestNumbers
-      })
-    ]);
-    const nextRunByPullRequestNumber: Record<number, ActionRunRecord> = {};
-    const nextSessionByPullRequestNumber: Record<number, AgentSessionRecord> = {};
-    for (const item of latestRunItems) {
-      if (item.run) {
-        nextRunByPullRequestNumber[item.sourceNumber] = item.run;
+    const items = await listLatestPullRequestProvenance(
+      owner,
+      repo,
+      nextLinkedPullRequests.map((pullRequest) => pullRequest.number)
+    );
+    const nextProvenanceByPullRequestNumber: Record<number, AgentSessionDetail | null> = {};
+    for (const item of items) {
+      if (item.latestSession) {
+        nextProvenanceByPullRequestNumber[item.sourceNumber] = item.latestSession;
       }
     }
-    for (const item of latestSessionItems) {
-      if (item.session) {
-        nextSessionByPullRequestNumber[item.sourceNumber] = item.session;
-      }
-    }
-    setLatestPullRequestRunByNumber(nextRunByPullRequestNumber);
-    setLatestPullRequestSessionByNumber(nextSessionByPullRequestNumber);
+    setLatestPullRequestProvenanceByNumber(nextProvenanceByPullRequestNumber);
   }
 
   useEffect(() => {
@@ -245,41 +269,25 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         const linkedPullRequestNumbers = nextIssueDetail.linkedPullRequests.map(
           (pullRequest) => pullRequest.number
         );
-        const [latestCommentRunItems, latestPullRequestRunItems, latestPullRequestSessionItems] =
-          await Promise.all([
-            latestCommentRunItemsPromise,
-            linkedPullRequestNumbers.length > 0
-              ? listLatestActionRunsBySource(owner, repo, {
-                  sourceType: "pull_request",
-                  numbers: linkedPullRequestNumbers
-                })
-              : Promise.resolve([]),
-            linkedPullRequestNumbers.length > 0
-              ? listLatestAgentSessionsBySource(owner, repo, {
-                  sourceType: "pull_request",
-                  numbers: linkedPullRequestNumbers
-                })
-              : Promise.resolve([])
-          ]);
+        const [latestCommentRunItems, latestPullRequestProvenanceItems] = await Promise.all([
+          latestCommentRunItemsPromise,
+          linkedPullRequestNumbers.length > 0
+            ? listLatestPullRequestProvenance(owner, repo, linkedPullRequestNumbers)
+            : Promise.resolve([])
+        ]);
         if (canceled) {
           return;
         }
         const nextRunByCommentId: Record<string, ActionRunRecord> = {};
-        const nextPullRequestRunByNumber: Record<number, ActionRunRecord> = {};
-        const nextPullRequestSessionByNumber: Record<number, AgentSessionRecord> = {};
+        const nextPullRequestProvenanceByNumber: Record<number, AgentSessionDetail | null> = {};
         for (const item of latestCommentRunItems) {
           if (item.run) {
             nextRunByCommentId[item.commentId] = item.run;
           }
         }
-        for (const item of latestPullRequestRunItems) {
-          if (item.run) {
-            nextPullRequestRunByNumber[item.sourceNumber] = item.run;
-          }
-        }
-        for (const item of latestPullRequestSessionItems) {
-          if (item.session) {
-            nextPullRequestSessionByNumber[item.sourceNumber] = item.session;
+        for (const item of latestPullRequestProvenanceItems) {
+          if (item.latestSession) {
+            nextPullRequestProvenanceByNumber[item.sourceNumber] = item.latestSession;
           }
         }
         setDetail(nextDetail);
@@ -292,8 +300,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestAgentSession(latestSessionItems[0]?.session ?? null);
         setLatestRunByCommentId(nextRunByCommentId);
-        setLatestPullRequestRunByNumber(nextPullRequestRunByNumber);
-        setLatestPullRequestSessionByNumber(nextPullRequestSessionByNumber);
+        setLatestPullRequestProvenanceByNumber(nextPullRequestProvenanceByNumber);
       } catch (loadError) {
         if (!canceled) {
           setLoadError(formatApiError(loadError));
@@ -329,21 +336,22 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     const run = latestRunByCommentId[comment.id];
     return run ? run.status === "queued" || run.status === "running" : false;
   });
-  const hasPendingPullRequestRun = linkedPullRequests.some((pullRequest) => {
-    const run = latestPullRequestRunByNumber[pullRequest.number];
-    return run ? run.status === "queued" || run.status === "running" : false;
+  const hasPendingPullRequestValidation = linkedPullRequests.some((pullRequest) => {
+    const status = latestValidationStatus(
+      latestPullRequestProvenanceByNumber[pullRequest.number] ?? null
+    );
+    return status === "queued" || status === "running";
   });
-  const hasPendingPullRequestAgentSession = linkedPullRequests.some((pullRequest) =>
-    isPendingAgentSession(latestPullRequestSessionByNumber[pullRequest.number] ?? null)
-  );
+  const linkedPullRequestsWithValidation = linkedPullRequests.filter(
+    (pullRequest) => latestPullRequestProvenanceByNumber[pullRequest.number]
+  ).length;
 
   useEffect(() => {
     if (
       (!hasPendingRun &&
         !hasPendingAgentSession &&
         !hasPendingCommentRun &&
-        !hasPendingPullRequestRun &&
-        !hasPendingPullRequestAgentSession) ||
+        !hasPendingPullRequestValidation) ||
       !owner ||
       !repo ||
       !Number.isInteger(number) ||
@@ -357,7 +365,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           refreshLatestRunStatus(),
           refreshLatestAgentSessionStatus(),
           refreshCommentRunStatuses(),
-          refreshLinkedPullRequestStatuses()
+          refreshLinkedPullRequestProvenance()
         ]);
       } catch {
         // Ignore transient polling errors.
@@ -370,8 +378,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     comments,
     hasPendingAgentSession,
     hasPendingCommentRun,
-    hasPendingPullRequestAgentSession,
-    hasPendingPullRequestRun,
+    hasPendingPullRequestValidation,
     hasPendingRun,
     linkedPullRequests,
     number,
@@ -814,6 +821,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 <p>Comments: {issue.comment_count}</p>
                 <p>Updated: {formatDateTime(issue.updated_at)}</p>
                 <p>Linked pull requests: {linkedPullRequests.length}</p>
+                <p>PRs with validation summary: {linkedPullRequestsWithValidation}</p>
               </div>
               {latestActionRun ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -863,7 +871,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Linked pull requests</h2>
               <p className="text-sm text-muted-foreground">
-                直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent / run 进展。
+                直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent、run 和验证摘要。
               </p>
             </div>
             {linkedPullRequests.length === 0 ? (
@@ -871,9 +879,20 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             ) : (
               <div className="space-y-3">
                 {linkedPullRequests.map((pullRequest) => {
-                  const pullRequestRun = latestPullRequestRunByNumber[pullRequest.number];
-                  const pullRequestSession =
-                    latestPullRequestSessionByNumber[pullRequest.number] ?? null;
+                  const pullRequestProvenance =
+                    latestPullRequestProvenanceByNumber[pullRequest.number] ?? null;
+                  const pullRequestRun = pullRequestProvenance?.linkedRun ?? null;
+                  const pullRequestSession = pullRequestProvenance?.session ?? null;
+                  const pullRequestValidationStatus =
+                    latestValidationStatus(pullRequestProvenance);
+                  const pullRequestValidationDurationMs = usageRecordValue(
+                    pullRequestProvenance,
+                    "duration_ms"
+                  );
+                  const pullRequestValidationExitCode = usageRecordValue(
+                    pullRequestProvenance,
+                    "exit_code"
+                  );
                   return (
                     <div key={pullRequest.id} className="space-y-3 rounded-md border bg-muted/20 p-3">
                       <div className="space-y-2">
@@ -922,6 +941,70 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                           <span className="text-xs text-muted-foreground">暂无 PR run</span>
                         )}
                       </div>
+                      {pullRequestProvenance ? (
+                        <div className="space-y-3 rounded-md border bg-background/70 p-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium">Latest validation</span>
+                            {pullRequestValidationStatus ? (
+                              <ActionStatusBadge status={pullRequestValidationStatus} />
+                            ) : null}
+                            <Badge variant="outline">
+                              artifacts: {pullRequestProvenance.artifacts.length}
+                            </Badge>
+                            {pullRequestValidationDurationMs !== null ? (
+                              <Badge variant="outline">
+                                {Math.round(pullRequestValidationDurationMs)} ms
+                              </Badge>
+                            ) : null}
+                            {pullRequestValidationExitCode !== null ? (
+                              <Badge variant="outline">
+                                exit: {Math.round(pullRequestValidationExitCode)}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="space-y-1 text-xs text-muted-foreground">
+                            <p>
+                              Updated:{" "}
+                              {formatDateTime(
+                                pullRequestRun?.updated_at ?? pullRequestSession?.updated_at ?? null
+                              )}
+                            </p>
+                            <p>
+                              Duration:{" "}
+                              {formatDuration(
+                                pullRequestRun?.started_at ?? pullRequestSession?.started_at ?? null,
+                                pullRequestRun?.completed_at ??
+                                  pullRequestSession?.completed_at ??
+                                  null
+                              )}
+                            </p>
+                          </div>
+                          {pullRequestProvenance.artifacts.length > 0 ? (
+                            <div className="space-y-2">
+                              {pullRequestProvenance.artifacts.slice(0, 2).map((artifact) => (
+                                <div
+                                  key={artifact.id}
+                                  className="space-y-1 rounded-md border bg-muted/20 p-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <Badge variant="outline">{artifact.kind}</Badge>
+                                    <span>{artifact.title}</span>
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">
+                                    {excerptText(artifact.content_text, 180) || "(empty artifact)"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">暂无关键 artifact 摘要。</p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          当前 PR 还没有可展示的验证摘要。
+                        </p>
+                      )}
                     </div>
                   );
                 })}

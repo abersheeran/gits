@@ -344,6 +344,11 @@ export type PullRequestProvenanceResponse = {
   latestSession: AgentSessionDetail | null;
 };
 
+export type PullRequestLatestProvenanceItem = {
+  sourceNumber: number;
+  latestSession: AgentSessionDetail | null;
+};
+
 export type PullRequestReviewRecord = {
   id: string;
   repository_id: string;
@@ -1051,6 +1056,22 @@ export async function getPullRequestProvenance(
   return requestJson<PullRequestProvenanceResponse>(
     `/api/repos/${owner}/${repo}/pulls/${number}/provenance`
   );
+}
+
+export async function listLatestPullRequestProvenance(
+  owner: string,
+  repo: string,
+  numbers: number[]
+): Promise<PullRequestLatestProvenanceItem[]> {
+  if (numbers.length === 0) {
+    return [];
+  }
+  const query = new URLSearchParams();
+  query.set("numbers", numbers.join(","));
+  const response = await requestJson<{ items: PullRequestLatestProvenanceItem[] }>(
+    `/api/repos/${owner}/${repo}/pulls/provenance/latest?${query.toString()}`
+  );
+  return response.items;
 }
 
 export async function createPullRequest(
