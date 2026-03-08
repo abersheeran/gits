@@ -108,6 +108,10 @@
 		{
 			"binding": "GIT_BUCKET",
 			"bucket_name": "gits"
+		},
+		{
+			"binding": "ACTION_LOGS_BUCKET",
+			"bucket_name": "gits-action-logs"
 		}
 	],
 	"d1_databases": [

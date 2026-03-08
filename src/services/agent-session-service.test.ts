@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSessionService } from "./agent-session-service";
+import { ActionLogStorageService, buildLogExcerpt } from "./action-log-storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
+import { MockR2Bucket } from "../test-utils/mock-r2";
 
 function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
   const now = Date.now();
@@ -216,10 +218,14 @@ describe("AgentSessionService structured steps", () => {
   });
 
   it("records structured artifacts, usage, and interventions for a run result", async () => {
-    const artifactKinds: string[] = [];
+    const artifactsByKind = new Map<string, { sizeBytes: number; contentText: string }>();
     const usageKinds: string[] = [];
     const interventionKinds: string[] = [];
     const usagePayloads = new Map<string, string | null>();
+    const runLogs = `run logs ${"x".repeat(5_000)}`;
+    const stdout = `stdout payload ${"y".repeat(5_000)}`;
+    const stderr = `stderr payload ${"z".repeat(5_000)}`;
+    const bucket = new MockR2Bucket();
     const db = createMockD1Database([
       {
         when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
@@ -232,7 +238,10 @@ describe("AgentSessionService structured steps", () => {
       {
         when: "INSERT INTO agent_session_artifacts",
         run: (params) => {
-          artifactKinds.push(String(params[3] ?? ""));
+          artifactsByKind.set(String(params[3] ?? ""), {
+            sizeBytes: Number(params[6] ?? 0),
+            contentText: String(params[7] ?? "")
+          });
           return { success: true };
         }
       },
@@ -253,14 +262,17 @@ describe("AgentSessionService structured steps", () => {
       }
     ]);
 
-    const service = new AgentSessionService(db);
+    const service = new AgentSessionService(
+      db,
+      new ActionLogStorageService(bucket as unknown as R2Bucket)
+    );
     await service.recordRunObservability({
       repositoryId: "repo-1",
       runId: "run-observe",
-      logs: "run logs",
+      logs: runLogs,
       result: {
-        stdout: "stdout payload",
-        stderr: "stderr payload",
+        stdout,
+        stderr,
         durationMs: 321,
         exitCode: 1,
         error: "runner failed",
@@ -284,7 +296,19 @@ describe("AgentSessionService structured steps", () => {
       recordedAt: 999
     });
 
-    expect(artifactKinds).toEqual(["run_logs", "stdout", "stderr"]);
+    expect([...artifactsByKind.keys()]).toEqual(["run_logs", "stdout", "stderr"]);
+    expect(artifactsByKind.get("run_logs")).toEqual({
+      sizeBytes: runLogs.length,
+      contentText: buildLogExcerpt(runLogs)
+    });
+    expect(artifactsByKind.get("stdout")).toEqual({
+      sizeBytes: stdout.length,
+      contentText: buildLogExcerpt(stdout)
+    });
+    expect(artifactsByKind.get("stderr")).toEqual({
+      sizeBytes: stderr.length,
+      contentText: buildLogExcerpt(stderr)
+    });
     expect(usageKinds).toEqual([
       "run_log_chars",
       "stdout_chars",
@@ -300,6 +324,47 @@ describe("AgentSessionService structured steps", () => {
         detail: "Ran npm test and stopped after the first failing suite."
       }
     });
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
+    await expect(logStorage.readRunLogs("repo-1", "run-observe")).resolves.toBe(runLogs);
+    await expect(
+      logStorage.readSessionArtifactLogs("repo-1", "session-observe", "run_logs")
+    ).resolves.toBe(runLogs);
+    await expect(
+      logStorage.readSessionArtifactLogs("repo-1", "session-observe", "stdout")
+    ).resolves.toBe(stdout);
+    await expect(
+      logStorage.readSessionArtifactLogs("repo-1", "session-observe", "stderr")
+    ).resolves.toBe(stderr);
+  });
+
+  it("reads full artifact content from object storage when available", async () => {
+    const bucket = new MockR2Bucket();
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
+    await logStorage.writeSessionArtifactLogs("repo-1", "session-read", "stdout", "full stdout");
+    const db = createMockD1Database([
+      {
+        when: "WHERE repository_id = ? AND session_id = ? AND id = ?",
+        first: () => ({
+          id: "artifact-stdout",
+          session_id: "session-read",
+          repository_id: "repo-1",
+          kind: "stdout",
+          title: "Runner stdout",
+          media_type: "text/plain",
+          size_bytes: 11,
+          content_text: "excerpt",
+          created_at: 10,
+          updated_at: 11
+        })
+      }
+    ]);
+
+    const service = new AgentSessionService(db, logStorage);
+    const content = await service.readArtifactContent("repo-1", "session-read", "artifact-stdout");
+
+    expect(content?.artifact.id).toBe("artifact-stdout");
+    expect(content?.artifact.has_full_content).toBe(true);
+    expect(content?.content).toBe("full stdout");
   });
 
   it("lists structured artifacts, usage records, and interventions", async () => {

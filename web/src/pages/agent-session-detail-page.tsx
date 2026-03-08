@@ -11,6 +11,7 @@ import { PendingButton } from "@/components/ui/pending-button";
 import {
   cancelRepositoryAgentSession,
   formatApiError,
+  getRepositoryAgentSessionArtifactContent,
   getRepositoryAgentSessionDetail,
   getRepositoryAgentSessionTimeline,
   getRepositoryDetail,
@@ -135,6 +136,9 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"cancel" | null>(null);
+  const [artifactContentById, setArtifactContentById] = useState<Record<string, string>>({});
+  const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const mountedRef = useRef(true);
 
   const loadData = useCallback(
@@ -213,6 +217,37 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
       setError(formatApiError(cancelError));
     } finally {
       setPendingAction(null);
+    }
+  }
+
+  async function loadArtifactContent(artifactId: string): Promise<void> {
+    if (!owner || !repo || !sessionDetail || artifactContentById[artifactId] !== undefined) {
+      return;
+    }
+    setLoadingArtifactId(artifactId);
+    setError(null);
+    try {
+      const response = await getRepositoryAgentSessionArtifactContent(
+        owner,
+        repo,
+        sessionDetail.session.id,
+        artifactId
+      );
+      if (!mountedRef.current) {
+        return;
+      }
+      setArtifactContentById((current) => ({
+        ...current,
+        [artifactId]: response.content
+      }));
+    } catch (loadError) {
+      if (mountedRef.current) {
+        setError(formatApiError(loadError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingArtifactId(null);
+      }
     }
   }
 
@@ -366,10 +401,26 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               </div>
 
               <div className="rounded-md border bg-muted/20 p-3">
-                <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                  {session.prompt || "(empty prompt)"}
-                </pre>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Prompt</p>
+                    <p className="text-xs text-muted-foreground">
+                      Keep the full handoff text collapsed unless you are debugging the exact agent instruction.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPromptExpanded((current) => !current)}
+                  >
+                    {promptExpanded ? "Hide prompt" : "Show prompt"}
+                  </Button>
+                </div>
+                {promptExpanded ? (
+                  <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
+                    {session.prompt || "(empty prompt)"}
+                  </pre>
+                ) : null}
               </div>
             </CardContent>
           </Card>
@@ -470,29 +521,110 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Artifacts</CardTitle>
+              <CardTitle className="text-base">Validation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-sm font-medium text-foreground">
+                  {sessionDetail.validationSummary.headline}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {sessionDetail.validationSummary.detail}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Exit code</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {sessionDetail.validationSummary.exit_code === null
+                      ? "-"
+                      : String(sessionDetail.validationSummary.exit_code)}
+                  </p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Stdout</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {sessionDetail.validationSummary.stdout_chars === null
+                      ? "-"
+                      : `${Math.round(sessionDetail.validationSummary.stdout_chars).toLocaleString()} chars`}
+                  </p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Stderr</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {sessionDetail.validationSummary.stderr_chars === null
+                      ? "-"
+                      : `${Math.round(sessionDetail.validationSummary.stderr_chars).toLocaleString()} chars`}
+                  </p>
+                </div>
+              </div>
+              {sessionDetail.validationSummary.checks.length > 0 ? (
+                <ul className="space-y-2">
+                  {sessionDetail.validationSummary.checks.map((check) => (
+                    <li key={`${check.kind}-${check.scope ?? "default"}-${check.command}`} className="rounded-md border bg-muted/20 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{check.label}</Badge>
+                        {check.scope ? <Badge variant="outline">{check.scope}</Badge> : null}
+                        <Badge variant="outline">{check.status}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm font-medium text-foreground">{check.command}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{check.summary}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Execution logs</CardTitle>
             </CardHeader>
             <CardContent>
               {artifacts.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No structured artifacts yet.</p>
               ) : (
                 <div className="space-y-4">
-                  {artifacts.map((artifact: AgentSessionArtifactRecord) => (
-                    <section key={artifact.id} className="rounded-md border bg-muted/20 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{artifact.kind.replaceAll("_", " ")}</Badge>
-                          <span className="text-sm font-medium">{artifact.title}</span>
+                  {artifacts.map((artifact: AgentSessionArtifactRecord) => {
+                    const fullContent = artifactContentById[artifact.id];
+                    const showingExcerpt = fullContent === undefined;
+                    return (
+                      <section key={artifact.id} className="rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{artifact.kind.replaceAll("_", " ")}</Badge>
+                            <span className="text-sm font-medium">{artifact.title}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>{formatArtifactSize(artifact.size_bytes)}</span>
+                            <span>{formatDateTime(artifact.updated_at)}</span>
+                            {artifact.has_full_content ? (
+                              <PendingButton
+                                size="sm"
+                                variant="outline"
+                                pending={loadingArtifactId === artifact.id}
+                                disabled={loadingArtifactId === artifact.id}
+                                pendingText="Loading..."
+                                onClick={() => {
+                                  void loadArtifactContent(artifact.id);
+                                }}
+                              >
+                                {showingExcerpt ? "Load full output" : "Refresh full output"}
+                              </PendingButton>
+                            ) : null}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatArtifactSize(artifact.size_bytes)} · {formatDateTime(artifact.updated_at)}
-                        </div>
-                      </div>
-                      <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs text-muted-foreground">
-                        {artifact.content_text}
-                      </pre>
-                    </section>
-                  ))}
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {showingExcerpt
+                            ? "Showing compact excerpt from the session summary."
+                            : "Showing full content loaded from object storage."}
+                        </p>
+                        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                          {fullContent ?? artifact.content_text}
+                        </pre>
+                      </section>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

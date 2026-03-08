@@ -284,7 +284,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return null;
     }
-    const nextPullRequestDetail = await getPullRequest(owner, repo, number);
+    const [nextPullRequestDetail, nextReviews, nextReviewThreads] = await Promise.all([
+      getPullRequest(owner, repo, number),
+      listPullRequestReviews(owner, repo, number),
+      listPullRequestReviewThreads(owner, repo, number)
+    ]);
     const nextComparison = await compareRepositoryRefs(owner, repo, {
       baseRef: nextPullRequestDetail.pullRequest.base_ref,
       headRef: nextPullRequestDetail.pullRequest.head_ref
@@ -293,6 +297,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setClosingIssues(nextPullRequestDetail.closingIssues);
     setTaskFlow(nextPullRequestDetail.taskFlow);
     setComparison(nextComparison);
+    setReviews(nextReviews.reviews);
+    setReviewSummary(nextReviews.reviewSummary);
+    setReviewThreads(nextReviewThreads);
     return nextPullRequestDetail;
   }
 
@@ -1647,39 +1654,83 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
           <section className="space-y-4 rounded-md border p-4">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold">Agent session</h2>
+              <h2 className="text-base font-semibold">Agent handoff</h2>
               <p className="text-sm text-muted-foreground">
-                从当前 PR、Review 和 diff 上下文继续一个 Agent session。
+                最近一轮 session、验证摘要和继续 Agent 的主入口都收在这里。
               </p>
             </div>
 
-            {latestAgentSession ? (
+            {provenanceDetail || latestAgentSession ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <ActionStatusBadge status={latestAgentSession.status} />
+                  <ActionStatusBadge
+                    status={(provenanceDetail?.session ?? latestAgentSession)?.status ?? "queued"}
+                  />
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {latestAgentSession.agent_type}
+                    {(provenanceDetail?.session ?? latestAgentSession)?.agent_type}
                   </span>
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {latestAgentSession.origin}
+                    {(provenanceDetail?.session ?? latestAgentSession)?.origin}
                   </span>
+                  <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>Session: {latestAgentSession.id}</p>
-                  <p>Branch: {latestAgentSession.branch_ref ?? "-"}</p>
-                  <p>Triggered by: {latestAgentSession.created_by_username ?? "system"}</p>
-                  <p>Updated: {formatDateTime(latestAgentSession.updated_at)}</p>
+                  <p>Session: {(provenanceDetail?.session ?? latestAgentSession)?.id ?? "-"}</p>
+                  <p>Branch: {(provenanceDetail?.session ?? latestAgentSession)?.branch_ref ?? "-"}</p>
+                  <p>Source: {provenanceDetail?.sourceContext.title ?? "Current pull request"}</p>
+                  <p>
+                    Triggered by:{" "}
+                    {(provenanceDetail?.session ?? latestAgentSession)?.created_by_username ?? "system"}
+                  </p>
+                  <p>
+                    Updated:{" "}
+                    {formatDateTime(
+                      (provenanceDetail?.session ?? latestAgentSession)?.updated_at ?? null
+                    )}
+                  </p>
                 </div>
+                {validationSummary ? (
+                  <div className="space-y-2 rounded-md border bg-background/70 p-3">
+                    <p className="text-sm font-medium">{validationSummary.headline}</p>
+                    <p className="text-xs text-muted-foreground">{validationSummary.detail}</p>
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline">validation: {latestValidationState ?? "missing"}</Badge>
+                      {validationDurationMs !== null ? (
+                        <Badge variant="outline">{Math.round(validationDurationMs)} ms</Badge>
+                      ) : null}
+                      {validationExitCode !== null ? (
+                        <Badge variant="outline">exit: {Math.round(validationExitCode)}</Badge>
+                      ) : null}
+                    </div>
+                    {highlightedArtifacts.length > 0 ? (
+                      <div className="space-y-2">
+                        {highlightedArtifacts.slice(0, 2).map((artifact) => (
+                          <div key={artifact.id} className="rounded-md border bg-muted/20 p-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <Badge variant="outline">{artifact.kind}</Badge>
+                              <span>{artifact.title}</span>
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {excerptText(artifact.content_text, 160) || "(empty excerpt)"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={`/repo/${owner}/${repo}/agent-sessions/${latestAgentSession.id}`}>
+                    <Link
+                      to={`/repo/${owner}/${repo}/agent-sessions/${(provenanceDetail?.session ?? latestAgentSession)?.id}`}
+                    >
                       查看 session
                     </Link>
                   </Button>
-                  {latestAgentSession.linked_run_id ? (
+                  {(provenanceDetail?.session ?? latestAgentSession)?.linked_run_id ? (
                     <Button variant="outline" size="sm" asChild>
                       <Link
-                        to={`/repo/${owner}/${repo}/actions?runId=${latestAgentSession.linked_run_id}`}
+                        to={`/repo/${owner}/${repo}/actions?runId=${(provenanceDetail?.session ?? latestAgentSession)?.linked_run_id}`}
                       >
                         查看对应 run
                       </Link>
@@ -1688,7 +1739,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">当前 PR 还没有 Agent session。</p>
+              <p className="text-sm text-muted-foreground">当前 PR 还没有可展示的 Agent handoff。</p>
             )}
 
             {canRunAgents ? (
@@ -1716,7 +1767,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     id="pull-request-agent-instruction"
                     value={agentInstruction}
                     onChange={(event) => setAgentInstruction(event.target.value)}
-                    rows={6}
+                    rows={5}
                     placeholder="Optional guidance for the next iteration"
                   />
                 </div>
@@ -1737,60 +1788,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             ) : (
               <p className="text-sm text-muted-foreground">
                 仅仓库所有者或协作者可以从当前 PR 继续 Agent。
-              </p>
-            )}
-          </section>
-
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Provenance</h2>
-              <p className="text-sm text-muted-foreground">
-                展示当前 PR 最近一次 Agent 执行的来源 session、run 与产物摘要。
-              </p>
-            </div>
-            {provenanceDetail ? (
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <ActionStatusBadge status={provenanceDetail.session.status} />
-                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {provenanceDetail.session.agent_type}
-                  </span>
-                  <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {provenanceDetail.session.origin}
-                  </span>
-                </div>
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>Session: {provenanceDetail.session.id}</p>
-                  <p>Linked run: {provenanceDetail.linkedRun?.id ?? "-"}</p>
-                  <p>Source: {provenanceDetail.sourceContext.title ?? "Current pull request"}</p>
-                  <p>Updated: {formatDateTime(provenanceDetail.session.updated_at)}</p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline">
-                    Artifacts: {provenanceDetail.artifacts.length}
-                  </Badge>
-                  <Badge variant="outline">
-                    Usage records: {provenanceDetail.usageRecords.length}
-                  </Badge>
-                  <Badge variant="outline">
-                    Interventions: {provenanceDetail.interventions.length}
-                  </Badge>
-                </div>
-                {provenanceDetail.artifacts.length > 0 ? (
-                  <div className="space-y-1 text-xs text-muted-foreground">
-                    {provenanceDetail.artifacts.slice(0, 2).map((artifact) => (
-                      <p key={artifact.id}>
-                        {artifact.kind}: {artifact.title}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">暂无 artifact 摘要。</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                当前 PR 还没有可展示的 Agent provenance。
               </p>
             )}
           </section>

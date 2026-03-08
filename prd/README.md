@@ -36,6 +36,8 @@
 - 已支持在 PR 页面直接展示 validation summary、merge summary、Task chain / Handoff 和关联 Issue 完成度；review summary 已按 reviewer 当前有效决策汇总。
 - 已支持从单条 unresolved review thread focused resume Agent。
 - 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
+- 已开始把 Agent Session 界面按“任务决策摘要”和“按需展开正文”重新分层：Issue / PR / Actions 展示摘要，Session detail 与单独日志接口负责全文。
+- 已把 stdout / stderr / run full logs 从 D1 移出；D1 只保留 excerpt 与元数据，全文日志落到专用 R2。
 - 已支持从 Issue、PR、workflow、mention、rerun、dispatch 创建 Session。
 
 ## 4. 当前真正的缺口

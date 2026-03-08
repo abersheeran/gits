@@ -105,18 +105,24 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
       return;
     }
     const timer = window.setInterval(async () => {
-      const issueNumbers = issues.map((issue) => issue.number);
       try {
-        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
-          sourceType: "issue",
-          numbers: issueNumbers
-        });
+        const nextIssues = await listIssues(owner, repo, { state, limit: 100 });
+        const issueNumbers = nextIssues.issues.map((issue) => issue.number);
+        const latestRunItems =
+          issueNumbers.length > 0
+            ? await listLatestActionRunsBySource(owner, repo, {
+                sourceType: "issue",
+                numbers: issueNumbers
+              })
+            : [];
         const nextRunByIssueNumber: Record<number, ActionRunRecord> = {};
         for (const item of latestRunItems) {
           if (item.run) {
             nextRunByIssueNumber[item.sourceNumber] = item.run;
           }
         }
+        setIssues(nextIssues.issues);
+        setTotalIssues(nextIssues.pagination.total);
         setLatestRunByIssueNumber(nextRunByIssueNumber);
       } catch {
         // Ignore transient polling errors.
@@ -125,7 +131,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRun, owner, repo, issues]);
+  }, [hasPendingRun, issues, owner, repo, state]);
 
   if (!owner || !repo) {
     return (

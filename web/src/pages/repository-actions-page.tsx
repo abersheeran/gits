@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   cancelRepositoryAgentSession,
   getActionRunLogStreamPath,
+  getActionRunLogs,
   formatApiError,
   getActionRun,
   getRepositoryAgentSession,
@@ -329,6 +330,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     action: "cancel";
   } | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
+  const [fullRunLogsById, setFullRunLogsById] = useState<Record<string, string>>({});
+  const [loadingRunLogsById, setLoadingRunLogsById] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [eventFilter, setEventFilter] = useState<string>("all");
@@ -825,10 +828,36 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
+  async function loadFullRunLogs(runId: string) {
+    if (!owner || !repo || loadingRunLogsById[runId] || fullRunLogsById[runId] !== undefined) {
+      return;
+    }
+    setLoadingRunLogsById((current) => ({ ...current, [runId]: true }));
+    try {
+      const response = await getActionRunLogs(owner, repo, runId);
+      if (!mountedRef.current) {
+        return;
+      }
+      setFullRunLogsById((current) => ({ ...current, [runId]: response.logs }));
+    } catch (loadError) {
+      if (mountedRef.current) {
+        setError(formatApiError(loadError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingRunLogsById((current) => ({ ...current, [runId]: false }));
+      }
+    }
+  }
+
   function toggleRunLogs(runId: string) {
+    const run = runsRef.current.find((item) => item.id === runId) ?? null;
     setExpandedRunIds((current) =>
       current.includes(runId) ? current.filter((item) => item !== runId) : [...current, runId]
     );
+    if (run && !isPendingRun(run)) {
+      void loadFullRunLogs(runId);
+    }
   }
 
   if (!owner || !repo) {
@@ -1127,42 +1156,39 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               ) : (
                 <div className="space-y-3">
                   {selectedAgentSession ? (
-                    <div className="rounded-md border bg-muted/20 p-4">
+                    <div className="rounded-md border bg-background p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-2">
+                        <div className="min-w-0 space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <ActionStatusBadge status={selectedAgentSession.status} />
                             <Badge variant="outline">{selectedAgentSession.agent_type}</Badge>
-                            <Badge variant="outline">{selectedAgentSession.origin}</Badge>
                             <Badge variant="outline">{sessionSourceLabel(selectedAgentSession)}</Badge>
                           </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>session: {selectedAgentSession.id}</span>
-                            <span>branch: {selectedAgentSession.branch_ref ?? "-"}</span>
-                            <span>actor: {selectedAgentSession.created_by_username ?? "system"}</span>
-                            <span>updated: {formatDateTime(selectedAgentSession.updated_at)}</span>
+                          <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+                            <p>Origin: {selectedAgentSession.origin}</p>
+                            <p>Actor: {selectedAgentSession.created_by_username ?? "system"}</p>
+                            <p>Branch: {selectedAgentSession.branch_ref ?? "-"}</p>
+                            <p>Updated: {formatDateTime(selectedAgentSession.updated_at)}</p>
+                            <p>Session: {selectedAgentSession.id}</p>
+                            <p>Linked run: {selectedAgentSession.linked_run_id ?? "-"}</p>
                           </div>
+                          <p className="text-xs text-muted-foreground">
+                            This panel stays focused on source, status, and handoff. Prompt and full execution
+                            details live in the session detail view.
+                          </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {selectedAgentSession.linked_run_id ? (
                             <Button size="sm" variant="outline" asChild>
-                              <Link to={`?runId=${selectedAgentSession.linked_run_id}`}>
-                                View run
-                              </Link>
+                              <Link to={`?runId=${selectedAgentSession.linked_run_id}`}>Open linked run</Link>
                             </Button>
                           ) : null}
                           <Button size="sm" variant="outline" asChild>
                             <Link to={`/repo/${owner}/${repo}/agent-sessions/${selectedAgentSession.id}`}>
-                              Session detail
+                              Open session detail
                             </Link>
                           </Button>
                         </div>
-                      </div>
-                      <div className="mt-3 rounded-md border bg-background/60 p-3">
-                        <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
-                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                          {selectedAgentSession.prompt || "(empty prompt)"}
-                        </pre>
                       </div>
                       {canManageActions ? (
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1180,7 +1206,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 void handleAgentSessionAction(selectedAgentSession);
                               }}
                             >
-                              Cancel
+                              Cancel queued session
                             </PendingButton>
                           ) : null}
                         </div>
@@ -1201,13 +1227,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           <div className="flex flex-wrap items-center gap-2">
                             <ActionStatusBadge status={session.status} />
                             <Badge variant="outline">{session.agent_type}</Badge>
-                            <Badge variant="outline">{session.origin}</Badge>
                             <Badge variant="outline">{sessionSourceLabel(session)}</Badge>
                           </div>
                           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>session: {session.id}</span>
+                            <span>{session.origin}</span>
                             <span>branch: {session.branch_ref ?? "-"}</span>
-                            <span>actor: {session.created_by_username ?? "system"}</span>
                             <span>updated: {formatDateTime(session.updated_at)}</span>
                           </div>
                         </div>
@@ -1322,6 +1346,9 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                     <ul className="space-y-2">
                       {workflowRuns.map((run) => {
                         const expanded = expandedRunIds.includes(run.id);
+                        const fullLogs = fullRunLogsById[run.id];
+                        const displayedLogs = fullLogs ?? run.logs;
+                        const showingExcerpt = !isPendingRun(run) && fullLogs === undefined;
                         return (
                           <li
                             id={`action-run-${run.id}`}
@@ -1404,9 +1431,35 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                     {run.prompt || "(empty prompt)"}
                                   </pre>
                                 </div>
-                                <pre className="max-h-80 overflow-auto rounded-md bg-muted/30 p-2 text-xs">
-                                  {run.logs || "(empty logs)"}
-                                </pre>
+                                <div className="rounded-md border bg-muted/20 p-3">
+                                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <p className="text-xs font-medium text-foreground">Execution logs</p>
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {showingExcerpt
+                                          ? "Showing excerpt from D1 summary. Load full logs from object storage when needed."
+                                          : "Showing full execution logs."}
+                                      </p>
+                                    </div>
+                                    {showingExcerpt ? (
+                                      <PendingButton
+                                        size="sm"
+                                        variant="outline"
+                                        pending={loadingRunLogsById[run.id] === true}
+                                        disabled={loadingRunLogsById[run.id] === true}
+                                        pendingText="Loading logs..."
+                                        onClick={() => {
+                                          void loadFullRunLogs(run.id);
+                                        }}
+                                      >
+                                        Load full logs
+                                      </PendingButton>
+                                    ) : null}
+                                  </div>
+                                  <pre className="max-h-80 overflow-auto rounded-md bg-background p-2 text-xs">
+                                    {displayedLogs || "(empty logs)"}
+                                  </pre>
+                                </div>
                               </div>
                             ) : null}
                           </li>

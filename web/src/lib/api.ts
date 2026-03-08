@@ -522,6 +522,8 @@ export type ActionRunRecord = {
   instance_type: ActionContainerInstanceType;
   prompt: string;
   logs: string;
+  has_full_logs?: boolean;
+  logs_url?: string | null;
   exit_code: number | null;
   container_instance: string | null;
   created_at: number;
@@ -632,8 +634,19 @@ export type AgentSessionArtifactRecord = {
   media_type: string;
   size_bytes: number;
   content_text: string;
+  has_full_content?: boolean;
+  content_url?: string | null;
   created_at: number;
   updated_at: number;
+};
+
+export type ActionRunLogsResponse = {
+  logs: string;
+};
+
+export type AgentSessionArtifactContentResponse = {
+  artifact: AgentSessionArtifactRecord;
+  content: string;
 };
 
 export type AgentSessionUsageRecord = {
@@ -1435,6 +1448,16 @@ export function getActionRunLogStreamPath(owner: string, repo: string, runId: st
   return `/api/repos/${owner}/${repo}/actions/runs/${runId}/logs/stream`;
 }
 
+export async function getActionRunLogs(
+  owner: string,
+  repo: string,
+  runId: string
+): Promise<ActionRunLogsResponse> {
+  return requestJson<ActionRunLogsResponse>(
+    `/api/repos/${owner}/${repo}/actions/runs/${runId}/logs`
+  );
+}
+
 export async function rerunActionRun(
   owner: string,
   repo: string,
@@ -1542,6 +1565,17 @@ export async function listRepositoryAgentSessionArtifacts(
     `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/artifacts`
   );
   return response.artifacts;
+}
+
+export async function getRepositoryAgentSessionArtifactContent(
+  owner: string,
+  repo: string,
+  sessionId: string,
+  artifactId: string
+): Promise<AgentSessionArtifactContentResponse> {
+  return requestJson<AgentSessionArtifactContentResponse>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/artifacts/${artifactId}/content`
+  );
 }
 
 export async function cancelRepositoryAgentSession(

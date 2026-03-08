@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
+import { ActionLogStorageService } from "../services/action-log-storage-service";
 import { AuthService } from "../services/auth-service";
 import { PullRequestMergeConflictError } from "../services/pull-request-merge-service";
 import { RepositoryObjectClient } from "../services/repository-object";
 import { WorkflowTaskFlowService } from "../services/workflow-task-flow-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
+import { MockR2Bucket } from "../test-utils/mock-r2";
 import type { AppEnv } from "../types";
 import apiRoutes from "./api";
 
@@ -4153,6 +4155,39 @@ describe("API issues and pull requests", () => {
     expect(readCount).toBeGreaterThanOrEqual(3);
   });
 
+  it("returns full action run logs from object storage when available", async () => {
+    const bucket = new MockR2Bucket();
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
+    await logStorage.writeRunLogs("repo-1", "run-full-logs", "line 1\nline 2\nline 3");
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE r.repository_id = ? AND r.id = ?",
+        first: () =>
+          buildActionRunRow({
+            id: "run-full-logs",
+            status: "success",
+            logs: "excerpt"
+          })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-full-logs/logs"),
+      {
+        ...createBaseEnv(db),
+        GIT_BUCKET: bucket as unknown as R2Bucket
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { logs: string };
+    expect(body.logs).toBe("line 1\nline 2\nline 3");
+  });
+
   it("rejects rerunning action runs for non-collaborators", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-3",
@@ -4513,6 +4548,60 @@ describe("API issues and pull requests", () => {
     expect(body.interventions[0]?.kind).toBe("mcp_setup_warning");
   });
 
+  it("returns full agent session artifact content from object storage when available", async () => {
+    const bucket = new MockR2Bucket();
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
+    await logStorage.writeSessionArtifactLogs(
+      "repo-1",
+      "session-artifact",
+      "stdout",
+      "full stdout output"
+    );
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE repository_id = ? AND session_id = ? AND id = ?",
+        first: () => ({
+          id: "artifact-stdout",
+          session_id: "session-artifact",
+          repository_id: "repo-1",
+          kind: "stdout",
+          title: "Runner stdout",
+          media_type: "text/plain",
+          size_bytes: 18,
+          content_text: "excerpt",
+          created_at: 10,
+          updated_at: 11
+        })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request(
+        "http://localhost/api/repos/alice/demo/agent-sessions/session-artifact/artifacts/artifact-stdout/content"
+      ),
+      {
+        ...createBaseEnv(db),
+        GIT_BUCKET: bucket as unknown as R2Bucket
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      artifact: { id: string; has_full_content: boolean; content_url: string | null };
+      content: string;
+    };
+    expect(body.artifact.id).toBe("artifact-stdout");
+    expect(body.artifact.has_full_content).toBe(true);
+    expect(body.artifact.content_url).toBe(
+      "/api/repos/alice/demo/agent-sessions/session-artifact/artifacts/artifact-stdout/content"
+    );
+    expect(body.content).toBe("full stdout output");
+  });
+
   it("builds agent session timeline events from linked run logs", async () => {
     const now = Date.now();
     const db = createMockD1Database([
@@ -4555,11 +4644,17 @@ prompt: debug
 claimed_at: ${new Date(now - 11_000).toISOString()}
 started_at: ${new Date(now - 10_000).toISOString()}
 
+[attempted]
+codex run
+
 [stdout]
 Analyzing repository
 Applying fix
 
 [stderr]
+Tests still failing
+
+[error]
 Tests still failing`,
             exit_code: 1,
             created_at: now - 12_000,
@@ -4595,14 +4690,16 @@ Tests still failing`,
     expect(body.events.some((event) => event.type === "session_started")).toBe(true);
     expect(
       body.events.some(
-        (event) => event.type === "log" && event.stream === "stdout" && event.detail === "Analyzing repository"
+        (event) => event.type === "log" && event.stream === "system" && event.detail === "codex run"
       )
     ).toBe(true);
     expect(
       body.events.some(
-        (event) => event.type === "log" && event.stream === "stderr" && event.detail === "Tests still failing"
+        (event) => event.type === "log" && event.stream === "error" && event.detail === "Tests still failing"
       )
     ).toBe(true);
+    expect(body.events.some((event) => event.type === "log" && event.stream === "stdout")).toBe(false);
+    expect(body.events.some((event) => event.type === "log" && event.stream === "stderr")).toBe(false);
     expect(
       body.events.some((event) => event.type === "session_completed" && event.title === "Session failed")
     ).toBe(true);
@@ -4735,9 +4832,7 @@ Tests still failing`,
         (event) => event.id === "step-3" && event.type === "session_completed" && event.title === "Session completed"
       )
     ).toBe(true);
-    expect(
-      body.events.some((event) => event.type === "log" && event.detail === "Analyzing repository")
-    ).toBe(true);
+    expect(body.events.some((event) => event.type === "log")).toBe(false);
     expect(
       body.events.some(
         (event) => event.type === "intervention" && event.title === "Cancellation requested"

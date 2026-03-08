@@ -63,6 +63,8 @@ PR 是这款产品的交付中心。
 - `GET pull request detail` 现在会在返回前先重算并回写关联 closing issues 的任务状态，因此 `closingIssues[].task_status`、`primaryIssueNumber` 和 `taskFlow` 在同一次响应里保持一致。
 - 当存在 unresolved review thread 时，PR 侧边栏主 CTA 会默认继续最早的 open thread；否则继续整个 PR。
 - `primaryIssueNumber` 不再直接取第一个 closing issue，而是优先选择仍然 open 且尚未 `done` 的关联 Issue；没有时再退回到其他 open issue，最后才退回最小 issue number。
+- PR 侧边栏现在把最近 session、验证摘要、highlighted artifacts 和继续 Agent 的主入口收拢到统一的 `Agent handoff` 面板，而不再拆成多块 provenance / session / CTA。
+- PR 页现在只展示 review / validation / handoff 决策相关的 Session 摘要；prompt、stdout/stderr 和全文日志仍以 Session detail / Actions 页为主入口。
 - 合并：
   - 当前支持 squash merge
   - 合并后自动关闭关联 Issue
@@ -186,6 +188,7 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 - PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report；skipped 已从 pending 中拆分出来，同 kind 多 step 可通过 scope 呈现，partial 也可直接显示给评审者。
 - PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
 - PR detail 已具备第一版 Task chain / Handoff 摘要，并把继续 Agent 的默认入口统一到同一套语义；当前 driver issue / review thread 的选择规则也已经确定化。
+- PR 页的 polling 现在会同时刷新 detail / reviews / review threads / provenance，避免 handoff 摘要与 review 统计不同步。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：

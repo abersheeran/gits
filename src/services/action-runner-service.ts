@@ -8,6 +8,7 @@ import { getActionRunnerNamespace } from "./action-container-instance-types";
 import { buildActionRunLifecycleLines } from "./action-run-log-format";
 import { ACTIONS_SYSTEM_EMAIL, ACTIONS_SYSTEM_USERNAME } from "./auth-service";
 import { ActionsService } from "./actions-service";
+import { ActionLogStorageService, buildLogExcerpt } from "./action-log-storage-service";
 import {
   extractValidationReportFromText,
   parseAgentSessionValidationReport
@@ -268,6 +269,7 @@ function buildLiveRunLogs(input: {
 
 async function consumeStreamedRunnerResponse(input: {
   actionsService: ActionsService;
+  logStorage: ActionLogStorageService;
   repositoryId: string;
   runId: string;
   runNumber: number;
@@ -330,7 +332,12 @@ async function consumeStreamedRunnerResponse(input: {
       }
 
       try {
-        await input.actionsService.updateRunningRunLogs(input.repositoryId, input.runId, logs);
+        await input.logStorage.writeRunLogs(input.repositoryId, input.runId, logs);
+        await input.actionsService.updateRunningRunLogs(
+          input.repositoryId,
+          input.runId,
+          buildLogExcerpt(logs)
+        );
         lastFlushedLogs = logs;
         lastFlushAt = now;
         pendingCharsSinceFlush = 0;
@@ -520,6 +527,7 @@ export async function executeActionRun(input: {
   env: {
     DB: D1Database;
     GIT_BUCKET: R2Bucket;
+    ACTION_LOGS_BUCKET?: R2Bucket;
     REPOSITORY_OBJECTS: DurableObjectNamespace;
     JWT_SECRET: string;
     ACTIONS_RUNNER?: DurableObjectNamespace;
@@ -546,7 +554,8 @@ export async function executeActionRun(input: {
   requestOrigin: string;
 }): Promise<void> {
   const actionsService = new ActionsService(input.env.DB);
-  const agentSessionService = new AgentSessionService(input.env.DB);
+  const actionLogStorage = new ActionLogStorageService(input.env.ACTION_LOGS_BUCKET ?? input.env.GIT_BUCKET);
+  const agentSessionService = new AgentSessionService(input.env.DB, actionLogStorage);
   const workflowTaskFlowService = new WorkflowTaskFlowService(
     input.env.DB,
     createRepositoryObjectClient(input.env)
@@ -593,17 +602,33 @@ export async function executeActionRun(input: {
     exitCode?: number | null;
     result?: RunnerExecuteResult;
   }): Promise<void> => {
+    let finalLogs = args.logs;
+    try {
+      await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, finalLogs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown log storage error";
+      finalLogs = appendRunLogSection(finalLogs, "log_storage_warning", message);
+    }
     await actionsService.completeRun(input.repository.id, input.run.id, {
       status: args.status,
-      logs: args.logs,
+      logs: buildLogExcerpt(finalLogs),
       exitCode: args.exitCode ?? null
     });
     const reconciliationWarning = await reconcileSourceTaskStatus();
-    const finalLogs = reconciliationWarning
-      ? appendRunLogSection(args.logs, "status_reconciliation_warning", reconciliationWarning)
-      : args.logs;
+    finalLogs = reconciliationWarning
+      ? appendRunLogSection(finalLogs, "status_reconciliation_warning", reconciliationWarning)
+      : finalLogs;
     if (finalLogs !== args.logs) {
-      await actionsService.replaceRunLogs(input.repository.id, input.run.id, finalLogs);
+      try {
+        await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, finalLogs);
+      } catch {
+        // Keep the run result even if the final warning line cannot be persisted to object storage.
+      }
+      await actionsService.replaceRunLogs(
+        input.repository.id,
+        input.run.id,
+        buildLogExcerpt(finalLogs)
+      );
     }
     await recordRunObservability({
       repositoryId: input.repository.id,
@@ -730,25 +755,33 @@ export async function executeActionRun(input: {
       }
       return;
     }
+    let initialLogs = buildRunLogs({
+      runId: input.run.id,
+      runNumber: input.run.run_number,
+      agentType: input.run.agent_type,
+      prompt: input.run.prompt,
+      claimedAt,
+      startedAt,
+      redactText: redactLogs
+    });
+    try {
+      await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, initialLogs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown log storage error";
+      initialLogs = appendRunLogSection(initialLogs, "log_storage_warning", message);
+    }
     await actionsService.updateRunningRunLogs(
       input.repository.id,
       input.run.id,
-      buildRunLogs({
-        runId: input.run.id,
-        runNumber: input.run.run_number,
-        agentType: input.run.agent_type,
-        prompt: input.run.prompt,
-        claimedAt,
-        startedAt,
-        redactText: redactLogs
-      })
+      buildLogExcerpt(initialLogs)
     );
 
     if (isStreamedRunnerResponse(runnerResponse)) {
-      runnerResult = await consumeStreamedRunnerResponse({
-        actionsService,
-        repositoryId: input.repository.id,
-        runId: input.run.id,
+        runnerResult = await consumeStreamedRunnerResponse({
+          actionsService,
+          logStorage: actionLogStorage,
+          repositoryId: input.repository.id,
+          runId: input.run.id,
         runNumber: input.run.run_number,
         agentType: input.run.agent_type,
         prompt: input.run.prompt,

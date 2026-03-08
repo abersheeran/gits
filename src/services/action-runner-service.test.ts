@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeActionRun } from "./action-runner-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
@@ -14,6 +14,10 @@ import {
 import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 
 describe("executeActionRun", () => {
+  beforeEach(() => {
+    vi.spyOn(ActionsService.prototype, "replaceRunLogs").mockResolvedValue();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

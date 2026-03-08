@@ -15,6 +15,11 @@ import type {
   AgentSessionUsageRecord,
   AgentSessionValidationReport
 } from "../types";
+import {
+  ActionLogStorageService,
+  buildLogExcerpt,
+  type AgentLogArtifactKind
+} from "./action-log-storage-service";
 
 export type AgentSessionTimelineEvent = {
   id: string;
@@ -33,6 +38,15 @@ export type AgentSessionTimelineEvent = {
   level: "info" | "success" | "warning" | "error";
   stream: "system" | "stdout" | "stderr" | "error" | null;
 };
+
+const TIMELINE_SYSTEM_LOG_SECTIONS = new Set([
+  "attempted",
+  "mcp_setup",
+  "status_reconciliation_warning",
+  "log_stream_warning"
+]);
+
+const TIMELINE_ERROR_LOG_SECTIONS = new Set(["error", "runner_error", "runner_spawn_error"]);
 
 type AgentSessionRow = {
   id: string;
@@ -163,8 +177,15 @@ function parsePayloadJson(value: string | null): Record<string, unknown> | null 
   return null;
 }
 
+function isLogArtifactKind(kind: AgentSessionArtifactKind): kind is AgentLogArtifactKind {
+  return kind === "run_logs" || kind === "stdout" || kind === "stderr";
+}
+
 export class AgentSessionService {
-  constructor(private readonly db: D1Database) {}
+  constructor(
+    private readonly db: D1Database,
+    private readonly logStorage: ActionLogStorageService | null = null
+  ) {}
 
   private mapRow(row: AgentSessionRow): AgentSessionRecord {
     return {
@@ -217,6 +238,8 @@ export class AgentSessionService {
       media_type: row.media_type,
       size_bytes: row.size_bytes,
       content_text: row.content_text,
+      has_full_content: isLogArtifactKind(row.kind),
+      content_url: null,
       created_at: row.created_at,
       updated_at: row.updated_at
     };
@@ -298,6 +321,7 @@ export class AgentSessionService {
     title: string;
     mediaType: string;
     contentText: string;
+    sizeBytes?: number;
     createdAt?: number;
     updatedAt?: number;
   }): Promise<void> {
@@ -332,7 +356,7 @@ export class AgentSessionService {
         input.kind,
         input.title,
         input.mediaType,
-        input.contentText.length,
+        input.sizeBytes ?? input.contentText.length,
         input.contentText,
         createdAt,
         now
@@ -483,7 +507,7 @@ export class AgentSessionService {
 
     const lines = run.logs.split(/\r?\n/);
     const logEvents: AgentSessionTimelineEvent[] = [];
-    let section: "stdout" | "stderr" | "error" | null = null;
+    let section: string | null = null;
     const baseTimestamp = run.started_at ?? session.started_at ?? run.created_at ?? session.created_at;
 
     for (const line of lines) {
@@ -491,36 +515,28 @@ export class AgentSessionService {
       if (!trimmed) {
         continue;
       }
-      if (trimmed === "[stdout]") {
-        section = "stdout";
-        continue;
-      }
-      if (trimmed === "[stderr]") {
-        section = "stderr";
-        continue;
-      }
-      if (trimmed === "[error]" || trimmed === "[runner_error]") {
-        section = "error";
+      const sectionMatch = trimmed.match(/^\[([a-z_]+)\]$/i);
+      if (sectionMatch) {
+        section = sectionMatch[1]?.toLowerCase() ?? null;
         continue;
       }
       if (section === null) {
         continue;
       }
+      if (!TIMELINE_SYSTEM_LOG_SECTIONS.has(section) && !TIMELINE_ERROR_LOG_SECTIONS.has(section)) {
+        continue;
+      }
 
       const timestamp = baseTimestamp !== null ? baseTimestamp + logEvents.length : null;
+      const isErrorSection = TIMELINE_ERROR_LOG_SECTIONS.has(section);
       logEvents.push({
         id: `${session.id}-log-${logEvents.length}`,
         type: "log",
-        title:
-          section === "stdout"
-            ? "stdout"
-            : section === "stderr"
-              ? "stderr"
-              : "runner error",
+        title: section.replaceAll("_", " "),
         detail: line,
         timestamp,
-        level: section === "stdout" ? "info" : "error",
-        stream: section
+        level: isErrorSection ? "error" : section === "mcp_setup" ? "warning" : "info",
+        stream: isErrorSection ? "error" : "system"
       });
     }
 
@@ -790,6 +806,56 @@ export class AgentSessionService {
     return rows.results.map((row) => this.mapArtifactRow(row));
   }
 
+  async findArtifactById(
+    repositoryId: string,
+    sessionId: string,
+    artifactId: string
+  ): Promise<AgentSessionArtifactRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+          id,
+          session_id,
+          repository_id,
+          kind,
+          title,
+          media_type,
+          size_bytes,
+          content_text,
+          created_at,
+          updated_at
+         FROM agent_session_artifacts
+         WHERE repository_id = ? AND session_id = ? AND id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, sessionId, artifactId)
+      .first<AgentSessionArtifactRow>();
+
+    return row ? this.mapArtifactRow(row) : null;
+  }
+
+  async readArtifactContent(
+    repositoryId: string,
+    sessionId: string,
+    artifactId: string
+  ): Promise<{ artifact: AgentSessionArtifactRecord; content: string } | null> {
+    const artifact = await this.findArtifactById(repositoryId, sessionId, artifactId);
+    if (!artifact) {
+      return null;
+    }
+    if (this.logStorage && isLogArtifactKind(artifact.kind)) {
+      const content = await this.logStorage.readSessionArtifactLogs(
+        repositoryId,
+        sessionId,
+        artifact.kind
+      );
+      if (content !== null) {
+        return { artifact, content };
+      }
+    }
+    return { artifact, content: artifact.content_text };
+  }
+
   async listUsageRecords(
     repositoryId: string,
     sessionId: string
@@ -1003,13 +1069,23 @@ export class AgentSessionService {
     };
     const runLogs = input.logs.trim();
     if (runLogs) {
+      if (this.logStorage) {
+        await this.logStorage.writeRunLogs(input.repositoryId, input.runId, input.logs);
+        await this.logStorage.writeSessionArtifactLogs(
+          input.repositoryId,
+          session.id,
+          "run_logs",
+          input.logs
+        );
+      }
       await this.upsertArtifact({
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "run_logs",
         title: "Run logs",
         mediaType: "text/plain",
-        contentText: input.logs,
+        contentText: buildLogExcerpt(input.logs),
+        sizeBytes: input.logs.length,
         createdAt: recordedAt,
         updatedAt: recordedAt
       });
@@ -1027,13 +1103,22 @@ export class AgentSessionService {
     }
 
     if (input.result?.stdout?.length) {
+      if (this.logStorage) {
+        await this.logStorage.writeSessionArtifactLogs(
+          input.repositoryId,
+          session.id,
+          "stdout",
+          input.result.stdout
+        );
+      }
       await this.upsertArtifact({
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "stdout",
         title: "Runner stdout",
         mediaType: "text/plain",
-        contentText: input.result.stdout,
+        contentText: buildLogExcerpt(input.result.stdout),
+        sizeBytes: input.result.stdout.length,
         createdAt: recordedAt,
         updatedAt: recordedAt
       });
@@ -1051,13 +1136,22 @@ export class AgentSessionService {
     }
 
     if (input.result?.stderr?.length) {
+      if (this.logStorage) {
+        await this.logStorage.writeSessionArtifactLogs(
+          input.repositoryId,
+          session.id,
+          "stderr",
+          input.result.stderr
+        );
+      }
       await this.upsertArtifact({
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "stderr",
         title: "Runner stderr",
         mediaType: "text/plain",
-        contentText: input.result.stderr,
+        contentText: buildLogExcerpt(input.result.stderr),
+        sizeBytes: input.result.stderr.length,
         createdAt: recordedAt,
         updatedAt: recordedAt
       });

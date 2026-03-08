@@ -19,6 +19,7 @@ import {
   ACTION_CONTAINER_INSTANCE_TYPES,
   getActionRunnerNamespace
 } from "../services/action-container-instance-types";
+import { ActionLogStorageService, buildLogExcerpt } from "../services/action-log-storage-service";
 import { AgentSessionService } from "../services/agent-session-service";
 import { buildAgentSessionValidationSummary } from "../services/agent-session-validation-summary";
 import { ActionsService } from "../services/actions-service";
@@ -1324,9 +1325,19 @@ async function buildAgentSessionDetailPayload(args: {
 
   return {
     session: args.session,
-    linkedRun,
+    linkedRun: linkedRun
+      ? {
+          ...linkedRun,
+          has_full_logs: true,
+          logs_url: `/api/repos/${args.owner}/${args.repo}/actions/runs/${linkedRun.id}/logs`
+        }
+      : null,
     sourceContext,
-    artifacts,
+    artifacts: artifacts.map((artifact) => ({
+      ...artifact,
+      has_full_content: true,
+      content_url: `/api/repos/${args.owner}/${args.repo}/agent-sessions/${args.session.id}/artifacts/${artifact.id}/content`
+    })),
     usageRecords,
     interventions,
     validationSummary: buildAgentSessionValidationSummary({
@@ -1335,6 +1346,24 @@ async function buildAgentSessionDetailPayload(args: {
       usageRecords,
       interventions
     })
+  };
+}
+
+function createActionLogStorageService(
+  env: Pick<AppEnv["Bindings"], "ACTION_LOGS_BUCKET" | "GIT_BUCKET">
+): ActionLogStorageService {
+  return new ActionLogStorageService(env.ACTION_LOGS_BUCKET ?? env.GIT_BUCKET);
+}
+
+function withActionRunApiMetadata(
+  owner: string,
+  repo: string,
+  run: ActionRunRecord
+): ActionRunRecord {
+  return {
+    ...run,
+    has_full_logs: true,
+    logs_url: `/api/repos/${owner}/${repo}/actions/runs/${run.id}/logs`
   };
 }
 
@@ -1585,6 +1614,8 @@ function shouldSkipActionRunReconciliation(run: ActionRunRecord, now: number): b
 async function reconcileRunningActionRuns(input: {
   env: Pick<
     AppEnv["Bindings"],
+    | "ACTION_LOGS_BUCKET"
+    | "GIT_BUCKET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
     | "ACTIONS_RUNNER_STANDARD_1"
@@ -1596,6 +1627,7 @@ async function reconcileRunningActionRuns(input: {
   repositoryId: string;
   runs: ActionRunRecord[];
 }): Promise<ActionRunRecord[]> {
+  const actionLogStorage = createActionLogStorageService(input.env);
   const runningRuns = input.runs.filter(
     (run) =>
       (run.status === "queued" || run.status === "running") &&
@@ -1638,11 +1670,16 @@ async function reconcileRunningActionRuns(input: {
         containerExitCode,
         reconciledAt
       });
+      try {
+        await actionLogStorage.writeRunLogs(input.repositoryId, run.id, logs);
+      } catch {
+        // Leave the run reconciliation result intact even if external log persistence fails.
+      }
       const result = await input.actionsService.failPendingRunIfStillPending(
         input.repositoryId,
         run.id,
         {
-          logs,
+          logs: buildLogExcerpt(logs),
           exitCode: containerExitCode,
           completedAt: reconciledAt
         }
@@ -1655,7 +1692,7 @@ async function reconcileRunningActionRuns(input: {
       updatedRuns.set(run.id, {
         ...run,
         status: "failed",
-        logs,
+        logs: buildLogExcerpt(logs),
         exit_code: containerExitCode,
         completed_at: result.completedAt,
         updated_at: result.completedAt
@@ -1738,6 +1775,21 @@ function buildRunLogStreamEvents(
   }
 
   return [];
+}
+
+async function hydrateRunWithFullLogs(args: {
+  logStorage: ActionLogStorageService;
+  repositoryId: string;
+  run: ActionRunRecord;
+}): Promise<ActionRunRecord> {
+  const logs = await args.logStorage.readRunLogs(args.repositoryId, args.run.id);
+  if (logs === null) {
+    return args.run;
+  }
+  return {
+    ...args.run,
+    logs
+  };
 }
 
 async function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -4768,7 +4820,9 @@ router.get("/repos/:owner/:repo/actions/runs", optionalSession, async (c) => {
     repositoryId: repository.id,
     runs
   });
-  return c.json({ runs: reconciledRuns });
+  return c.json({
+    runs: reconciledRuns.map((run) => withActionRunApiMetadata(owner, repo, run))
+  });
 });
 
 router.get("/repos/:owner/:repo/actions/runs/latest", optionalSession, async (c) => {
@@ -4808,7 +4862,9 @@ router.get("/repos/:owner/:repo/actions/runs/latest", optionalSession, async (c)
     sourceType,
     items: sourceNumbers.map((sourceNumber) => ({
       sourceNumber,
-      run: runBySourceNumber.get(sourceNumber) ?? null
+      run: runBySourceNumber.get(sourceNumber)
+        ? withActionRunApiMetadata(owner, repo, runBySourceNumber.get(sourceNumber) as ActionRunRecord)
+        : null
     }))
   });
 });
@@ -4844,7 +4900,9 @@ router.get("/repos/:owner/:repo/actions/runs/latest-by-comments", optionalSessio
   return c.json({
     items: commentIds.map((commentId) => ({
       commentId,
-      run: runByCommentId.get(commentId) ?? null
+      run: runByCommentId.get(commentId)
+        ? withActionRunApiMetadata(owner, repo, runByCommentId.get(commentId) as ActionRunRecord)
+        : null
     }))
   });
 });
@@ -4935,7 +4993,10 @@ router.get("/repos/:owner/:repo/agent-sessions/:sessionId", optionalSession, asy
     ...(sessionUser ? { userId: sessionUser.id } : {})
   });
 
-  const agentSessionService = new AgentSessionService(c.env.DB);
+  const agentSessionService = new AgentSessionService(
+    c.env.DB,
+    createActionLogStorageService(c.env)
+  );
   const session = await agentSessionService.findSessionById(repository.id, sessionId);
   if (!session) {
     throw new HTTPException(404, { message: "Agent session not found" });
@@ -4972,7 +5033,79 @@ router.get("/repos/:owner/:repo/agent-sessions/:sessionId/artifacts", optionalSe
   }
 
   const artifacts = await agentSessionService.listArtifacts(repository.id, session.id);
-  return c.json({ artifacts });
+  return c.json({
+    artifacts: artifacts.map((artifact) => ({
+      ...artifact,
+      has_full_content: true,
+      content_url: `/api/repos/${owner}/${repo}/agent-sessions/${session.id}/artifacts/${artifact.id}/content`
+    }))
+  });
+});
+
+router.get(
+  "/repos/:owner/:repo/agent-sessions/:sessionId/artifacts/:artifactId/content",
+  optionalSession,
+  async (c) => {
+    const owner = c.req.param("owner");
+    const repo = c.req.param("repo");
+    const sessionId = assertString(c.req.param("sessionId"), "sessionId");
+    const artifactId = assertString(c.req.param("artifactId"), "artifactId");
+    const repositoryService = new RepositoryService(c.env.DB);
+    const sessionUser = c.get("sessionUser");
+    const repository = await findReadableRepositoryOr404({
+      repositoryService,
+      owner,
+      repo,
+      ...(sessionUser ? { userId: sessionUser.id } : {})
+    });
+
+    const agentSessionService = new AgentSessionService(
+      c.env.DB,
+      createActionLogStorageService(c.env)
+    );
+    const content = await agentSessionService.readArtifactContent(
+      repository.id,
+      sessionId,
+      artifactId
+    );
+    if (!content) {
+      throw new HTTPException(404, { message: "Agent session artifact not found" });
+    }
+    return c.json({
+      artifact: {
+        ...content.artifact,
+        has_full_content: true,
+        content_url: `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/artifacts/${artifactId}/content`
+      },
+      content: content.content
+    });
+  }
+);
+
+router.get("/repos/:owner/:repo/actions/runs/:runId/logs", optionalSession, async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const runId = assertString(c.req.param("runId"), "runId");
+  const repositoryService = new RepositoryService(c.env.DB);
+  const sessionUser = c.get("sessionUser");
+  const repository = await findReadableRepositoryOr404({
+    repositoryService,
+    owner,
+    repo,
+    ...(sessionUser ? { userId: sessionUser.id } : {})
+  });
+
+  const actionsService = new ActionsService(c.env.DB);
+  const run = await actionsService.findRunById(repository.id, runId);
+  if (!run) {
+    throw new HTTPException(404, { message: "Action run not found" });
+  }
+
+  const logStorage = createActionLogStorageService(c.env);
+  const fullLogs = await logStorage.readRunLogs(repository.id, run.id);
+  return c.json({
+    logs: fullLogs ?? run.logs
+  });
 });
 
 router.get("/repos/:owner/:repo/agent-sessions/:sessionId/timeline", optionalSession, async (c) => {
@@ -5104,7 +5237,9 @@ router.get("/repos/:owner/:repo/actions/runs/:runId", optionalSession, async (c)
     repositoryId: repository.id,
     runs: [run]
   });
-  return c.json({ run: reconciledRuns[0] ?? run });
+  return c.json({
+    run: withActionRunApiMetadata(owner, repo, reconciledRuns[0] ?? run)
+  });
 });
 
 router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSession, async (c) => {
@@ -5121,6 +5256,7 @@ router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSessio
   });
 
   const actionsService = new ActionsService(c.env.DB);
+  const logStorage = createActionLogStorageService(c.env);
   const existingRun = await actionsService.findRunById(repository.id, runId);
   if (!existingRun) {
     throw new HTTPException(404, { message: "Action run not found" });
@@ -5156,7 +5292,11 @@ router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSessio
         }
       };
 
-      let currentRun = existingRun;
+      let currentRun = await hydrateRunWithFullLogs({
+        logStorage,
+        repositoryId: repository.id,
+        run: existingRun
+      });
       let previousRun: ActionRunRecord | null = null;
       const deadline = Date.now() + ACTION_RUN_LOG_STREAM_MAX_DURATION_MS;
       let lastHeartbeatAt = 0;
@@ -5187,6 +5327,12 @@ router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSessio
             });
             currentRun = reconciledRuns[0] ?? currentRun;
           }
+
+          currentRun = await hydrateRunWithFullLogs({
+            logStorage,
+            repositoryId: repository.id,
+            run: currentRun
+          });
 
           for (const payload of buildRunLogStreamEvents(previousRun, currentRun)) {
             if (!enqueue(payload)) {
@@ -5242,7 +5388,11 @@ router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSessio
             });
             break;
           }
-          currentRun = nextRun;
+          currentRun = await hydrateRunWithFullLogs({
+            logStorage,
+            repositoryId: repository.id,
+            run: nextRun
+          });
         }
       } catch (error) {
         if (!cancelController.signal.aborted) {

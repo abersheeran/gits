@@ -365,6 +365,8 @@ export type ActionRunRecord = {
   instance_type: ActionContainerInstanceType;
   prompt: string;
   logs: string;
+  has_full_logs?: boolean;
+  logs_url?: string | null;
   exit_code: number | null;
   container_instance: string | null;
   created_at: number;
@@ -435,8 +437,19 @@ export type AgentSessionArtifactRecord = {
   media_type: string;
   size_bytes: number;
   content_text: string;
+  has_full_content?: boolean;
+  content_url?: string | null;
   created_at: number;
   updated_at: number;
+};
+
+export type ActionRunLogsResponse = {
+  logs: string;
+};
+
+export type AgentSessionArtifactContentResponse = {
+  artifact: AgentSessionArtifactRecord;
+  content: string;
 };
 
 export type AgentSessionUsageRecord = {
@@ -495,6 +508,7 @@ export type AgentSessionValidationSummary = {
 export type AppBindings = {
   DB: D1Database;
   GIT_BUCKET: R2Bucket;
+  ACTION_LOGS_BUCKET?: R2Bucket;
   REPOSITORY_OBJECTS: DurableObjectNamespace;
   ACTIONS_RUNNER?: DurableObjectNamespace;
   ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
