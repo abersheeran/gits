@@ -273,6 +273,7 @@ describe("AgentSessionService structured steps", () => {
             {
               kind: "tests",
               label: "Tests",
+              scope: null,
               status: "failed",
               command: "npm test",
               summary: "The login retry suite failed."

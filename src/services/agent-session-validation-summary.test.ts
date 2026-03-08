@@ -217,14 +217,29 @@ describe("buildAgentSessionValidationSummary", () => {
           payload: {
             runId: "run-3",
             validationReport: {
-              headline: "Tests passed; build still needs a manual run.",
-              detail: "Ran npm test successfully and left the build step for a follow-up pass.",
+              headline: "Tests passed; build was skipped.",
+              detail: "Ran npm test successfully and skipped the build because the patch only touched markdown.",
               checks: [
                 {
                   kind: "tests",
+                  scope: "unit",
                   status: "passed",
-                  command: "npm test",
-                  summary: "Vitest completed successfully."
+                  command: "npm test -- --project unit",
+                  summary: "Unit tests completed successfully."
+                },
+                {
+                  kind: "tests",
+                  scope: "integration",
+                  status: "pending",
+                  command: "npm test -- --project integration",
+                  summary: "Integration tests are still running."
+                },
+                {
+                  kind: "build",
+                  scope: null,
+                  status: "skipped",
+                  command: "npm run build",
+                  summary: "Build was intentionally skipped for this run."
                 }
               ]
             }
@@ -236,18 +251,125 @@ describe("buildAgentSessionValidationSummary", () => {
       interventions: []
     });
 
-    expect(summary.headline).toBe("Tests passed; build still needs a manual run.");
-    expect(summary.detail).toBe(
-      "Ran npm test successfully and left the build step for a follow-up pass."
+    expect(summary.headline).toBe("Tests passed; build was skipped.");
+    expect(summary.detail).toBe("Ran npm test successfully and skipped the build because the patch only touched markdown.");
+    expect(summary.checks).toEqual([
+      {
+        kind: "tests",
+        label: "Tests",
+        scope: "unit",
+        status: "passed",
+        command: "npm test -- --project unit",
+        summary: "Unit tests completed successfully."
+      },
+      {
+        kind: "tests",
+        label: "Tests",
+        scope: "integration",
+        status: "pending",
+        command: "npm test -- --project integration",
+        summary: "Integration tests are still running."
+      },
+      {
+        kind: "build",
+        label: "Build",
+        scope: null,
+        status: "skipped",
+        command: "npm run build",
+        summary: "Build was intentionally skipped for this run."
+      }
+    ]);
+  });
+
+  it("preserves partial structured checks and prioritizes their artifacts ahead of passing output", () => {
+    const summary = buildAgentSessionValidationSummary({
+      status: "failed",
+      artifacts: [
+        {
+          id: "artifact-build",
+          session_id: "session-4",
+          repository_id: "repo-1",
+          kind: "stdout",
+          title: "Build output",
+          media_type: "text/plain",
+          size_bytes: 160,
+          content_text: "npm run build -- --filter client\nclient bundle emitted assets before optimization failed",
+          created_at: 10,
+          updated_at: 20
+        },
+        {
+          id: "artifact-tests",
+          session_id: "session-4",
+          repository_id: "repo-1",
+          kind: "stdout",
+          title: "Unit test output",
+          media_type: "text/plain",
+          size_bytes: 120,
+          content_text: "npm test -- --project unit\nall unit suites passed",
+          created_at: 9,
+          updated_at: 19
+        }
+      ],
+      usageRecords: [
+        {
+          id: 7,
+          session_id: "session-4",
+          repository_id: "repo-1",
+          kind: "run_log_chars",
+          value: 640,
+          unit: "chars",
+          detail: null,
+          payload: {
+            runId: "run-4",
+            validationReport: {
+              headline: "Unit tests passed, but the client build only partially completed.",
+              detail: "The client build emitted assets before failing in the final optimization step.",
+              checks: [
+                {
+                  kind: "tests",
+                  scope: "unit",
+                  status: "passed",
+                  command: "npm test -- --project unit",
+                  summary: "Unit tests completed successfully."
+                },
+                {
+                  kind: "build",
+                  scope: "client",
+                  status: "partial",
+                  command: "npm run build -- --filter client",
+                  summary: "Client build emitted assets before failing in the final optimization step."
+                }
+              ]
+            }
+          },
+          created_at: 1,
+          updated_at: 2
+        }
+      ],
+      interventions: []
+    });
+
+    expect(summary.headline).toBe(
+      "Unit tests passed, but the client build only partially completed."
     );
     expect(summary.checks).toEqual([
       {
         kind: "tests",
         label: "Tests",
+        scope: "unit",
         status: "passed",
-        command: "npm test",
-        summary: "Vitest completed successfully."
+        command: "npm test -- --project unit",
+        summary: "Unit tests completed successfully."
+      },
+      {
+        kind: "build",
+        label: "Build",
+        scope: "client",
+        status: "partial",
+        command: "npm run build -- --filter client",
+        summary: "Client build emitted assets before failing in the final optimization step."
       }
     ]);
+    expect(summary.highlighted_artifact_ids[0]).toBe("artifact-build");
   });
 });

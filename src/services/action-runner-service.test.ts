@@ -484,6 +484,7 @@ describe("executeActionRun", () => {
               {
                 kind: "tests",
                 label: "Tests",
+                scope: null,
                 status: "passed",
                 command: "npm test",
                 summary: "Vitest completed successfully."

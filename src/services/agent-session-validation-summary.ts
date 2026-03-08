@@ -171,6 +171,7 @@ function detectValidationCheck(
   return {
     kind: definition.kind,
     label: definition.label,
+    scope: null,
     status,
     command,
     summary
@@ -182,7 +183,19 @@ function prioritizeArtifacts(
   overallStatus: ActionRunStatus | null,
   checks: AgentSessionValidationCheckRecord[]
 ): string[] {
-  const checkKeywords = checks.map((check) => check.command.toLowerCase());
+  const checkKeywordScores = checks
+    .filter((check) => check.status !== "skipped")
+    .map((check) => ({
+      keyword: check.command.toLowerCase(),
+      score:
+        check.status === "failed" || check.status === "cancelled"
+          ? 0
+          : check.status === "partial"
+            ? 1
+            : check.status === "pending"
+              ? 2
+              : 3
+    }));
   const rankForKind =
     overallStatus === "failed" || overallStatus === "cancelled"
       ? new Map<string, number>([
@@ -204,14 +217,20 @@ function prioritizeArtifacts(
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
       }
-      const leftHasCheckKeyword = checkKeywords.some((keyword) =>
-        left.content_text.toLowerCase().includes(keyword)
-      );
-      const rightHasCheckKeyword = checkKeywords.some((keyword) =>
-        right.content_text.toLowerCase().includes(keyword)
-      );
-      if (leftHasCheckKeyword !== rightHasCheckKeyword) {
-        return leftHasCheckKeyword ? -1 : 1;
+      const leftCheckScore = checkKeywordScores.reduce((best, item) => {
+        if (!left.content_text.toLowerCase().includes(item.keyword)) {
+          return best;
+        }
+        return Math.min(best, item.score);
+      }, Number.POSITIVE_INFINITY);
+      const rightCheckScore = checkKeywordScores.reduce((best, item) => {
+        if (!right.content_text.toLowerCase().includes(item.keyword)) {
+          return best;
+        }
+        return Math.min(best, item.score);
+      }, Number.POSITIVE_INFINITY);
+      if (leftCheckScore !== rightCheckScore) {
+        return leftCheckScore - rightCheckScore;
       }
       return right.updated_at - left.updated_at;
     })

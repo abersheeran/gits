@@ -20,7 +20,9 @@ const VALIDATION_CHECK_STATUSES = new Set<AgentSessionValidationCheckStatus>([
   "passed",
   "failed",
   "pending",
-  "cancelled"
+  "cancelled",
+  "skipped",
+  "partial"
 ]);
 
 const VALIDATION_REPORT_BLOCK_PATTERN = new RegExp(
@@ -62,6 +64,7 @@ function parseValidationCheck(value: unknown): AgentSessionValidationCheckRecord
     return null;
   }
 
+  const scope = normalizeSingleLineText(data.scope, 80);
   const command = normalizeSingleLineText(data.command, 160);
   const summary = normalizeSingleLineText(data.summary, 240);
   if (!command || !summary) {
@@ -71,6 +74,7 @@ function parseValidationCheck(value: unknown): AgentSessionValidationCheckRecord
   return {
     kind: kind as AgentSessionValidationCheckKind,
     label: VALIDATION_CHECK_LABELS[kind as AgentSessionValidationCheckKind],
+    scope,
     status: status as AgentSessionValidationCheckStatus,
     command,
     summary
@@ -91,13 +95,17 @@ export function parseAgentSessionValidationReport(
     return null;
   }
 
-  const seenKinds = new Set<AgentSessionValidationCheckKind>();
+  const seenChecks = new Set<string>();
   const checks = data.checks.flatMap((item) => {
     const parsed = parseValidationCheck(item);
-    if (!parsed || seenKinds.has(parsed.kind)) {
+    if (!parsed) {
       return [];
     }
-    seenKinds.add(parsed.kind);
+    const checkKey = `${parsed.kind}\u0000${parsed.scope ?? ""}\u0000${parsed.command}`;
+    if (seenChecks.has(checkKey)) {
+      return [];
+    }
+    seenChecks.add(checkKey);
     return [parsed];
   });
 
@@ -122,13 +130,17 @@ export function appendValidationReportPrompt(prompt: string): string {
 Before you exit, print exactly one machine-readable validation report to stdout.
 Use this exact envelope on separate lines:
 ${GITS_VALIDATION_REPORT_BEGIN}
-{"headline":"...","detail":"...","checks":[{"kind":"tests","status":"passed","command":"npm test","summary":"Unit tests passed."}]}
+{"headline":"...","detail":"...","checks":[{"kind":"tests","scope":"unit","status":"passed","command":"npm test","summary":"Unit tests passed."}]}
 ${GITS_VALIDATION_REPORT_END}
 Rules:
 - Output valid JSON only between the markers. Do not use markdown fences.
 - Always emit the block once, even if you did not run validation. In that case, use checks: [] and explain why in headline/detail.
 - Allowed check kinds: tests, build, lint.
-- Allowed statuses: passed, failed, pending, cancelled.
+- Allowed statuses: passed, failed, pending, cancelled, skipped, partial.
+- Use scope when you need to report multiple steps for the same kind, for example tests/unit and tests/integration.
+- Use skipped when you intentionally did not run a validation step because an earlier result already blocked it or it was unnecessary.
+- Use pending only if a validation step was started but you are exiting before it produced a final result.
+- Use partial when a validation command finished with a mixed or incomplete outcome that should be reviewed by a human, but is more specific than a plain failure.
 - Keep headline, detail, command, and summary factual and concise.
 - Each check must describe a validation command you actually ran or intentionally skipped because an earlier validation step failed.`;
 }

@@ -33,6 +33,9 @@ PR 是这款产品的交付中心。
 - 最新 Agent provenance 摘要
 - PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
 - PR validation summary 现在会优先消费 Agent runtime 主动输出的 machine-readable validation report，并在缺失时回退到 rule-based 检测。
+- 结构化 validation report 已开始支持 `skipped`，可区分“故意未执行”与“仍在运行/等待结果”。
+- 结构化 validation report 现在支持同 kind 多条 check，并通过 `scope` 表达 unit / integration 这类 multi-step validation。
+- 结构化 validation report 现在支持 `partial`，用于表达“部分成功但仍需人类重点审校”的检查结果。
 - Review：
   - `comment`
   - `approve`
@@ -81,11 +84,10 @@ PR 是这款产品的交付中心。
 ### 4.2 验证摘要已经进入结构化阶段，但仍可继续增强
 
 现在 PR 页面已经能直接展示最近验证状态、关键 artifact 摘要、最近一次 Agent 修改摘要和 merge summary。
-runtime 也开始要求 Agent 在退出前输出 machine-readable validation report，后端会抽取并优先用于 tests / build / lint 摘要。
+runtime 也开始要求 Agent 在退出前输出 machine-readable validation report，后端会抽取并优先用于 tests / build / lint 摘要；当前已支持 skipped、partial 和 scoped multi-step checks。
 
 但这套结构化验证结果还缺更完整的覆盖，例如：
 
-- skipped / partial / multi-step validation 的一致表示
 - 对 artifact 做更稳定的优先级排序
 - 自动提炼更明确的人类审校摘要
 
@@ -160,12 +162,12 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 ## 9. 当前边界与下一步
 
 - 当前只有 squash merge。
-- PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report。
+- PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report；skipped 已从 pending 中拆分出来，同 kind 多 step 可通过 scope 呈现，partial 也可直接显示给评审者。
 - PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：
 
 1. 把 PR 和来源 Issue 之间的状态回流做得更明显。
-2. 继续扩展结构化验证结果的覆盖面和 artifact 优先级提炼。
+2. 继续扩展结构化验证结果的 artifact 优先级和人类审校摘要提炼。
 3. 提升 review thread 在 rename / 复杂 patch-set 下的锚点映射质量。

@@ -70,6 +70,12 @@ export function validationCheckBadgeVariant(
   if (status === "passed") {
     return "default";
   }
+  if (status === "partial") {
+    return "secondary";
+  }
+  if (status === "skipped") {
+    return "outline";
+  }
   if (status === "failed" || status === "cancelled") {
     return "destructive";
   }
@@ -77,5 +83,14 @@ export function validationCheckBadgeVariant(
 }
 
 export function validationCheckStatusLabel(check: AgentSessionValidationCheckRecord): string {
-  return `${check.label}: ${check.status}`;
+  const label = check.scope ? `${check.label} (${check.scope})` : check.label;
+  const statusLabel =
+    check.status === "pending"
+      ? "running"
+      : check.status === "partial"
+        ? "partial"
+      : check.status === "skipped"
+        ? "skipped"
+        : check.status;
+  return `${label}: ${statusLabel}`;
 }

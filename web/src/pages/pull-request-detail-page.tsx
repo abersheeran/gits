@@ -1063,7 +1063,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {validationSummary?.checks.length ? (
                       <div className="grid gap-3 md:grid-cols-3">
                         {validationSummary.checks.map((check) => (
-                          <div key={check.kind} className="space-y-2 rounded-md border bg-background/70 p-3">
+                          <div
+                            key={`${check.kind}:${check.scope ?? ""}:${check.command}`}
+                            className="space-y-2 rounded-md border bg-background/70 p-3"
+                          >
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant={validationCheckBadgeVariant(check.status)}>
                                 {validationCheckStatusLabel(check)}

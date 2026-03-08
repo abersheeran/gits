@@ -962,7 +962,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                             <div className="flex flex-wrap gap-2">
                               {pullRequestValidationSummary.checks.map((check) => (
                                 <Badge
-                                  key={check.kind}
+                                  key={`${check.kind}:${check.scope ?? ""}:${check.command}`}
                                   variant={validationCheckBadgeVariant(check.status)}
                                 >
                                   {validationCheckStatusLabel(check)}

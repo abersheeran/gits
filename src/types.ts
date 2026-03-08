@@ -115,7 +115,9 @@ export type AgentSessionValidationCheckStatus =
   | "passed"
   | "failed"
   | "pending"
-  | "cancelled";
+  | "cancelled"
+  | "skipped"
+  | "partial";
 
 export type ActionRunQueueMessage = {
   repositoryId: string;
@@ -448,6 +450,7 @@ export type AgentSessionInterventionRecord = {
 export type AgentSessionValidationCheckRecord = {
   kind: AgentSessionValidationCheckKind;
   label: string;
+  scope: string | null;
   status: AgentSessionValidationCheckStatus;
   command: string;
   summary: string;
