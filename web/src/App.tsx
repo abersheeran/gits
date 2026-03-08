@@ -1,26 +1,71 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState, type ComponentType } from "react";
 import { Navigate, Route, Routes, matchPath, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { getCurrentUser, type AuthUser } from "@/lib/api";
-import { DashboardPage } from "@/pages/dashboard-page";
-import { HomePage } from "@/pages/home-page";
-import { AgentSessionDetailPage } from "@/pages/agent-session-detail-page";
-import { IssueDetailPage } from "@/pages/issue-detail-page";
-import { LoginPage } from "@/pages/login-page";
-import { ActionsSettingsPage } from "@/pages/actions-settings-page";
-import { NewIssuePage } from "@/pages/new-issue-page";
-import { NewPullRequestPage } from "@/pages/new-pull-request-page";
-import { NewRepositoryPage } from "@/pages/new-repository-page";
-import { PullRequestDetailPage } from "@/pages/pull-request-detail-page";
-import { RegisterPage } from "@/pages/register-page";
-import { RepositoryActionsPage } from "@/pages/repository-actions-page";
-import { RepositoryCollaboratorsPage } from "@/pages/repository-collaborators-page";
-import { RepositoryIssuesPage } from "@/pages/repository-issues-page";
-import { RepositoryPage } from "@/pages/repository-page";
-import { RepositoryPullsPage } from "@/pages/repository-pulls-page";
-import { RepositorySettingsPage } from "@/pages/repository-settings-page";
-import { TokensPage } from "@/pages/tokens-page";
+
+function lazyPage<TProps>(
+  loader: () => Promise<{
+    default: ComponentType<TProps>;
+  }>
+) {
+  return lazy(loader);
+}
+
+const DashboardPage = lazyPage(async () => ({
+  default: (await import("@/pages/dashboard-page")).DashboardPage
+}));
+const HomePage = lazyPage(async () => ({
+  default: (await import("@/pages/home-page")).HomePage
+}));
+const AgentSessionDetailPage = lazyPage(async () => ({
+  default: (await import("@/pages/agent-session-detail-page")).AgentSessionDetailPage
+}));
+const IssueDetailPage = lazyPage(async () => ({
+  default: (await import("@/pages/issue-detail-page")).IssueDetailPage
+}));
+const LoginPage = lazyPage(async () => ({
+  default: (await import("@/pages/login-page")).LoginPage
+}));
+const ActionsSettingsPage = lazyPage(async () => ({
+  default: (await import("@/pages/actions-settings-page")).ActionsSettingsPage
+}));
+const NewIssuePage = lazyPage(async () => ({
+  default: (await import("@/pages/new-issue-page")).NewIssuePage
+}));
+const NewPullRequestPage = lazyPage(async () => ({
+  default: (await import("@/pages/new-pull-request-page")).NewPullRequestPage
+}));
+const NewRepositoryPage = lazyPage(async () => ({
+  default: (await import("@/pages/new-repository-page")).NewRepositoryPage
+}));
+const PullRequestDetailPage = lazyPage(async () => ({
+  default: (await import("@/pages/pull-request-detail-page")).PullRequestDetailPage
+}));
+const RegisterPage = lazyPage(async () => ({
+  default: (await import("@/pages/register-page")).RegisterPage
+}));
+const RepositoryActionsPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-actions-page")).RepositoryActionsPage
+}));
+const RepositoryCollaboratorsPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-collaborators-page")).RepositoryCollaboratorsPage
+}));
+const RepositoryIssuesPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-issues-page")).RepositoryIssuesPage
+}));
+const RepositoryPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-page")).RepositoryPage
+}));
+const RepositoryPullsPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-pulls-page")).RepositoryPullsPage
+}));
+const RepositorySettingsPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-settings-page")).RepositorySettingsPage
+}));
+const TokensPage = lazyPage(async () => ({
+  default: (await import("@/pages/tokens-page")).TokensPage
+}));
 
 const APP_NAME = "gits";
 
@@ -167,37 +212,66 @@ function App() {
 
   return (
     <AppShell user={user} onAuthChanged={refreshAuth}>
-      <Routes>
-        <Route path="/" element={<HomePage user={user} />} />
-        <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
-        <Route path="/register" element={<RegisterPage user={user} onAuthChanged={refreshAuth} />} />
-        <Route path="/dashboard" element={<DashboardPage user={user} />} />
-        <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
-        <Route path="/tokens" element={<TokensPage user={user} />} />
-        <Route path="/settings/actions" element={<ActionsSettingsPage user={user} />} />
-        <Route path="/repo/:owner/:repo/settings" element={<RepositorySettingsPage user={user} />} />
-        <Route
-          path="/repo/:owner/:repo/collaborators"
-          element={<RepositoryCollaboratorsPage user={user} />}
-        />
-        <Route path="/repo/:owner/:repo/issues" element={<RepositoryIssuesPage user={user} />} />
-        <Route path="/repo/:owner/:repo/issues/new" element={<NewIssuePage user={user} />} />
-        <Route path="/repo/:owner/:repo/issues/:number" element={<IssueDetailPage user={user} />} />
-        <Route path="/repo/:owner/:repo/pulls" element={<RepositoryPullsPage user={user} />} />
-        <Route path="/repo/:owner/:repo/pulls/new" element={<NewPullRequestPage user={user} />} />
-        <Route
-          path="/repo/:owner/:repo/pulls/:number"
-          element={<PullRequestDetailPage user={user} />}
-        />
-        <Route
-          path="/repo/:owner/:repo/agent-sessions/:sessionId"
-          element={<AgentSessionDetailPage user={user} />}
-        />
-        <Route path="/repo/:owner/:repo/actions" element={<RepositoryActionsPage user={user} />} />
-        <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
-        <Route path="/repo/:owner/:repo/:kind/:ref/*" element={<RepositoryPage user={user} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense
+        fallback={
+          <div className="mx-auto w-[min(1080px,92vw)] py-10">
+            <PageLoadingState
+              title="Loading page"
+              description="Fetching the current route bundle and preparing the page."
+            />
+          </div>
+        }
+      >
+        <Routes>
+          <Route path="/" element={<HomePage user={user} />} />
+          <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
+          <Route
+            path="/register"
+            element={<RegisterPage user={user} onAuthChanged={refreshAuth} />}
+          />
+          <Route path="/dashboard" element={<DashboardPage user={user} />} />
+          <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
+          <Route path="/tokens" element={<TokensPage user={user} />} />
+          <Route path="/settings/actions" element={<ActionsSettingsPage user={user} />} />
+          <Route
+            path="/repo/:owner/:repo/settings"
+            element={<RepositorySettingsPage user={user} />}
+          />
+          <Route
+            path="/repo/:owner/:repo/collaborators"
+            element={<RepositoryCollaboratorsPage user={user} />}
+          />
+          <Route path="/repo/:owner/:repo/issues" element={<RepositoryIssuesPage user={user} />} />
+          <Route path="/repo/:owner/:repo/issues/new" element={<NewIssuePage user={user} />} />
+          <Route
+            path="/repo/:owner/:repo/issues/:number"
+            element={<IssueDetailPage user={user} />}
+          />
+          <Route path="/repo/:owner/:repo/pulls" element={<RepositoryPullsPage user={user} />} />
+          <Route
+            path="/repo/:owner/:repo/pulls/new"
+            element={<NewPullRequestPage user={user} />}
+          />
+          <Route
+            path="/repo/:owner/:repo/pulls/:number"
+            element={<PullRequestDetailPage user={user} />}
+          />
+          <Route
+            path="/repo/:owner/:repo/agent-sessions/:sessionId"
+            element={<AgentSessionDetailPage user={user} />}
+          />
+          <Route
+            path="/repo/:owner/:repo/actions"
+            element={<RepositoryActionsPage user={user} />}
+          />
+          <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
+          <Route
+            path="/repo/:owner/:repo/:kind/:ref/*"
+            element={<RepositoryPage user={user} />}
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </AppShell>
   );
 }
