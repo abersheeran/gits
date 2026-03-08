@@ -1,5 +1,8 @@
 import { Container } from "@cloudflare/containers";
 import type { AppBindings, ActionRunSourceType } from "../types";
+import { buildActionRunLifecycleLines } from "../services/action-run-log-format";
+import { ActionLogStorageService, buildLogExcerpt } from "../services/action-log-storage-service";
+import { ActionsService } from "../services/actions-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
@@ -11,6 +14,9 @@ import { createSecretRedactor } from "../utils/secret-redaction";
 type ExecuteRequest = {
   agentType: "codex" | "claude_code";
   prompt: string;
+  repositoryId?: string;
+  runId?: string;
+  containerInstance?: string;
   repositoryUrl?: string;
   ref?: string;
   sha?: string;
@@ -48,10 +54,22 @@ type ActiveExecutionTokens = {
   prCreateToken: IssuedActionToken | null;
 };
 
+type PendingRunLifecycle = {
+  repositoryId: string;
+  runId: string;
+  runNumber: number;
+  agentType: "codex" | "claude_code";
+  prompt: string;
+  containerInstance: string;
+  startedAt: number | null;
+  startRejected: boolean;
+};
+
 type ContainerStopParams = Parameters<Container<AppBindings>["onStop"]>[0];
 
 const ISSUE_REPLY_TOKEN_UNAVAILABLE = "[GITS_ISSUE_REPLY_TOKEN_UNAVAILABLE]";
 const PR_CREATE_TOKEN_UNAVAILABLE = "[GITS_PR_CREATE_TOKEN_UNAVAILABLE]";
+const TERMINAL_ACTION_RUN_STATUSES = new Set(["success", "failed", "cancelled"]);
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -64,6 +82,83 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function buildPendingRunLifecycle(payload: ExecuteRequest): PendingRunLifecycle | null {
+  const repositoryId = payload.repositoryId?.trim();
+  const runId = payload.runId?.trim();
+  const containerInstance = payload.containerInstance?.trim();
+  if (!repositoryId || !runId || !containerInstance) {
+    return null;
+  }
+  if (!isPositiveInteger(payload.runNumber)) {
+    throw new Error("Field 'runNumber' must be a positive integer when lifecycle sync is enabled");
+  }
+  return {
+    repositoryId,
+    runId,
+    runNumber: payload.runNumber,
+    agentType: payload.agentType,
+    prompt: payload.prompt,
+    containerInstance,
+    startedAt: null,
+    startRejected: false
+  };
+}
+
+function readContainerStopExitCode(params: ContainerStopParams): number | null {
+  return typeof params?.exitCode === "number" ? params.exitCode : null;
+}
+
+function readContainerStopReason(params: ContainerStopParams): string | null {
+  return typeof params?.reason === "string" && params.reason.trim()
+    ? params.reason.trim()
+    : null;
+}
+
+function buildLifecycleFailureLogs(input: {
+  existingLogs: string;
+  containerInstance: string;
+  claimedAt?: number | null;
+  startedAt?: number | null;
+  reconciledAt: number;
+  stopReason?: string | null;
+  exitCode?: number | null;
+  errorMessage?: string | null;
+}): string {
+  const lines: string[] = [];
+  const existingLogs = input.existingLogs.trim();
+  if (existingLogs) {
+    lines.push(existingLogs);
+    lines.push("");
+    lines.push(...buildActionRunLifecycleLines({ reconciledAt: input.reconciledAt }));
+    lines.push("");
+  } else {
+    lines.push(
+      ...buildActionRunLifecycleLines(
+        {
+          claimedAt: input.claimedAt,
+          startedAt: input.startedAt,
+          reconciledAt: input.reconciledAt
+        },
+        { includeMissing: true }
+      )
+    );
+    lines.push("");
+  }
+  lines.push("[runner_error]");
+  lines.push(`Container ${input.containerInstance} stopped before run completion.`);
+  if (input.stopReason) {
+    lines.push(`container_stop_reason: ${input.stopReason}`);
+  }
+  if (input.exitCode !== null && input.exitCode !== undefined) {
+    lines.push(`container_exit_code: ${input.exitCode}`);
+  }
+  if (input.errorMessage?.trim()) {
+    lines.push(input.errorMessage.trim());
+  }
+  lines.push("Run was marked as failed from Cloudflare container lifecycle hooks.");
+  return lines.join("\n");
 }
 
 function buildPendingExecutionAuth(payload: ExecuteRequest): PendingExecutionAuth | null {
@@ -114,8 +209,10 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
 
   private readonly bindings: AppBindings;
   private pendingExecutionAuth: PendingExecutionAuth | null = null;
+  private pendingRunLifecycle: PendingRunLifecycle | null = null;
   private activeExecutionTokens: ActiveExecutionTokens | null = null;
   private cleanupPromise: Promise<void> | null = null;
+  private lifecycleFailureSyncPromise: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState<{}>, env: AppBindings) {
     super(ctx, env);
@@ -155,6 +252,119 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
         ? { GITS_PR_CREATE_TOKEN: this.activeExecutionTokens.prCreateToken.token }
         : {})
     };
+  }
+
+  private createActionLogStorageService(): ActionLogStorageService {
+    return new ActionLogStorageService(this.bindings.ACTION_LOGS_BUCKET ?? this.bindings.GIT_BUCKET);
+  }
+
+  private async syncRunStartedFromLifecycle(): Promise<void> {
+    if (
+      !this.pendingRunLifecycle ||
+      this.pendingRunLifecycle.startedAt !== null ||
+      this.pendingRunLifecycle.startRejected
+    ) {
+      return;
+    }
+
+    const actionsService = new ActionsService(this.bindings.DB);
+    const startedAt = await actionsService.updateRunToRunning(
+      this.pendingRunLifecycle.repositoryId,
+      this.pendingRunLifecycle.runId,
+      this.pendingRunLifecycle.containerInstance
+    );
+
+    if (startedAt === null) {
+      this.pendingRunLifecycle.startRejected = true;
+      return;
+    }
+
+    this.pendingRunLifecycle.startedAt = startedAt;
+  }
+
+  private async failRunFromLifecycle(input: {
+    stopReason?: string | null;
+    exitCode?: number | null;
+    errorMessage?: string | null;
+  }): Promise<void> {
+    if (this.lifecycleFailureSyncPromise) {
+      await this.lifecycleFailureSyncPromise;
+      return;
+    }
+    if (!this.pendingRunLifecycle) {
+      return;
+    }
+
+    const pendingRunLifecycle = this.pendingRunLifecycle;
+    const syncPromise = (async () => {
+      const actionsService = new ActionsService(this.bindings.DB);
+      const run = await actionsService.findRunById(
+        pendingRunLifecycle.repositoryId,
+        pendingRunLifecycle.runId
+      );
+      if (!run || TERMINAL_ACTION_RUN_STATUSES.has(run.status)) {
+        return;
+      }
+
+      const reconciledAt = Date.now();
+      const logStorage = this.createActionLogStorageService();
+      const persistedLogs = await logStorage
+        .readRunLogs(pendingRunLifecycle.repositoryId, pendingRunLifecycle.runId)
+        .catch(() => null);
+      const logs = buildLifecycleFailureLogs({
+        existingLogs: persistedLogs ?? run.logs,
+        containerInstance: run.container_instance ?? pendingRunLifecycle.containerInstance,
+        claimedAt: run.claimed_at,
+        startedAt: run.started_at ?? pendingRunLifecycle.startedAt,
+        reconciledAt,
+        stopReason: input.stopReason ?? null,
+        exitCode: input.exitCode ?? null,
+        errorMessage: input.errorMessage ?? null
+      });
+
+      try {
+        await logStorage.writeRunLogs(pendingRunLifecycle.repositoryId, pendingRunLifecycle.runId, logs);
+      } catch {
+        // Keep the DB reconciliation result even if external log persistence fails.
+      }
+
+      await actionsService.failPendingRunIfStillPending(
+        pendingRunLifecycle.repositoryId,
+        pendingRunLifecycle.runId,
+        {
+          logs: buildLogExcerpt(logs),
+          exitCode: input.exitCode ?? null,
+          completedAt: reconciledAt
+        }
+      );
+    })();
+
+    this.lifecycleFailureSyncPromise = syncPromise;
+    try {
+      await syncPromise;
+    } finally {
+      if (this.lifecycleFailureSyncPromise === syncPromise) {
+        this.lifecycleFailureSyncPromise = null;
+      }
+    }
+  }
+
+  private clearPendingRunLifecycle(): void {
+    this.pendingRunLifecycle = null;
+  }
+
+  private withExecutionMetadata(response: Response): Response {
+    if (!this.pendingRunLifecycle?.startedAt) {
+      return response;
+    }
+
+    const headers = new Headers(response.headers);
+    headers.set("x-gits-run-started-at", String(this.pendingRunLifecycle.startedAt));
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
   }
 
   private async ensureExecutionTokens(): Promise<void> {
@@ -345,10 +555,16 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
 
   override async onStart(): Promise<void> {
     await this.ensureExecutionTokens();
+    await this.syncRunStartedFromLifecycle();
   }
 
-  override async onStop(_: ContainerStopParams): Promise<void> {
+  override async onStop(params: ContainerStopParams): Promise<void> {
+    await this.failRunFromLifecycle({
+      stopReason: readContainerStopReason(params),
+      exitCode: readContainerStopExitCode(params)
+    });
     await this.cleanupExecutionTokens();
+    this.clearPendingRunLifecycle();
   }
 
   override async onActivityExpired(): Promise<void> {
@@ -361,7 +577,12 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
   }
 
   override async onError(error: unknown): Promise<never> {
+    await this.failRunFromLifecycle({
+      stopReason: "container_error",
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
     await this.cleanupExecutionTokens();
+    this.clearPendingRunLifecycle();
     throw error;
   }
 
@@ -389,12 +610,22 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
         const message = error instanceof Error ? error.message : "Invalid execution auth payload";
         return jsonResponse({ message }, 400);
       }
+      try {
+        this.pendingRunLifecycle = buildPendingRunLifecycle(payload);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Invalid execution lifecycle payload";
+        return jsonResponse({ message }, 400);
+      }
 
       this.envVars = {
         ...(payload.env ?? {})
       };
 
       await this.startAndWaitForPorts(this.defaultPort, { portReadyTimeoutMS: 30_000 });
+      if (this.pendingRunLifecycle?.startRejected) {
+        return jsonResponse({ message: "Action run is no longer pending" }, 409);
+      }
 
       const response = await this.containerFetch("http://localhost/run", {
         method: "POST",
@@ -417,12 +648,8 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
         })
       });
 
-      return this.redactRunnerResponse(response);
-    }
-
-    if (request.method === "GET" && url.pathname === "/state") {
-      const state = await this.getState();
-      return jsonResponse({ state });
+      const redacted = await this.redactRunnerResponse(response);
+      return this.withExecutionMetadata(redacted);
     }
 
     if (request.method === "POST" && url.pathname === "/stop") {

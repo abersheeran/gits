@@ -51,6 +51,10 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 - Queue 优先调度，无法入队时可直接执行
 - Cloudflare Containers 承担 agent runtime
+- actions container 的运行状态通过 Cloudflare Containers 生命周期钩子同步：
+  - `onStart` 将 run / session 推进到 `running`
+  - `onStop` / `onError` 会在 run 尚未完成时补写失败结果
+  - 不再依赖容器内状态服务对外暴露状态供平台轮询
 - 平台 Worker 直接暴露 HTTP MCP endpoint，供 actions runtime 与本地 agent 共用
 - 不同实例规格使用不同 DO 绑定
 - runtime 会：
@@ -88,6 +92,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
   - `success`
   - `failed`
   - `cancelled`
+- run / session 的状态推进由平台与 Cloudflare container 生命周期协同完成，而不是由容器内 HTTP 状态接口回传
 - session 作为一等对象存在，并可与 run 关联
 - Session detail 已支持：
   - hero summary

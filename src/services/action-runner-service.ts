@@ -214,6 +214,15 @@ function isStreamedRunnerResponse(response: Response): boolean {
   return contentType.includes("application/x-ndjson");
 }
 
+function parseLifecycleStartedAt(response: Response): number | null {
+  const rawValue = response.headers.get("x-gits-run-started-at");
+  if (!rawValue) {
+    return null;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function appendBoundedDiagnostic(
   current: BoundedLogBuffer,
   next: string | null | undefined
@@ -727,6 +736,9 @@ export async function executeActionRun(input: {
       body: JSON.stringify({
         agentType: input.run.agent_type,
         prompt: input.run.prompt,
+        repositoryId: input.repository.id,
+        runId: input.run.id,
+        containerInstance,
         repositoryUrl: `${repositoryOrigin}/${input.repository.owner_username}/${input.repository.name}.git`,
         ref: input.run.trigger_ref ?? undefined,
         sha: input.run.trigger_sha ?? undefined,
@@ -744,16 +756,15 @@ export async function executeActionRun(input: {
       })
     });
 
-    startedAt = await actionsService.updateRunToRunning(
-      input.repository.id,
-      input.run.id,
-      containerInstance
-    );
-    if (startedAt === null) {
+    if (runnerResponse.status === 409) {
       if (runnerResponse.body) {
         await runnerResponse.body.cancel().catch(() => undefined);
       }
       return;
+    }
+    startedAt = parseLifecycleStartedAt(runnerResponse);
+    if (runnerResponse.ok && startedAt === null) {
+      throw new Error("Container lifecycle hooks did not report run start time");
     }
     let initialLogs = buildRunLogs({
       runId: input.run.id,

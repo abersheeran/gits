@@ -7,7 +7,6 @@ import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "../services/action-runner-prompt-tokens";
-import { buildActionRunLifecycleLines } from "../services/action-run-log-format";
 import {
   containsActionsMention,
   createLinkedAgentSessionForRun,
@@ -16,11 +15,8 @@ import {
   triggerActionWorkflows,
   triggerMentionActionRun
 } from "../services/action-trigger-service";
-import {
-  ACTION_CONTAINER_INSTANCE_TYPES,
-  getActionRunnerNamespace
-} from "../services/action-container-instance-types";
-import { ActionLogStorageService, buildLogExcerpt } from "../services/action-log-storage-service";
+import { ACTION_CONTAINER_INSTANCE_TYPES } from "../services/action-container-instance-types";
+import { ActionLogStorageService } from "../services/action-log-storage-service";
 import { AgentSessionService } from "../services/agent-session-service";
 import { buildAgentSessionValidationSummary } from "../services/agent-session-validation-summary";
 import { ActionsService } from "../services/actions-service";
@@ -1535,182 +1531,15 @@ async function assertReactionSubjectExists(args: {
   }
 }
 
-type ActionsContainerStatePayload = {
-  state?: {
-    status?: string;
-    exitCode?: number;
-  };
-};
-
-const TERMINAL_ACTIONS_CONTAINER_STATES = new Set(["stopped", "stopped_with_code"]);
 const TERMINAL_ACTION_RUN_STATUSES = new Set(["success", "failed", "cancelled"]);
 const ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS = 1_000;
 const ACTION_RUN_LOG_STREAM_MAX_DURATION_MS = 25_000;
 const ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
-const ACTION_RUN_RECONCILIATION_IDLE_GRACE_PERIOD_MS = 15_000;
 
 type SseEventPayload = {
   event: string;
   data: unknown;
 };
-
-function appendContainerStateErrorLogs(input: {
-  run: ActionRunRecord;
-  containerStatus: string;
-  containerExitCode: number | null;
-  reconciledAt: number;
-}): string {
-  const lines: string[] = [];
-  const existingLogs = input.run.logs.trim();
-  if (existingLogs) {
-    lines.push(existingLogs);
-    lines.push("");
-    lines.push(...buildActionRunLifecycleLines({ reconciledAt: input.reconciledAt }));
-    lines.push("");
-  } else {
-    lines.push(
-      ...buildActionRunLifecycleLines(
-        {
-          claimedAt: input.run.claimed_at,
-          startedAt: input.run.started_at,
-          reconciledAt: input.reconciledAt
-        },
-        { includeMissing: true }
-      )
-    );
-    lines.push("");
-  }
-  lines.push("[runner_error]");
-  lines.push(
-    `Container ${input.run.container_instance ?? "(unknown)"} entered '${input.containerStatus}' before run completion.`
-  );
-  if (input.containerExitCode !== null) {
-    lines.push(`container_exit_code: ${input.containerExitCode}`);
-  }
-  lines.push("Run was marked as failed during status reconciliation.");
-  return lines.join("\n");
-}
-
-async function fetchActionsContainerState(
-  actionsRunner: DurableObjectNamespace,
-  containerInstance: string
-): Promise<ActionsContainerStatePayload["state"] | null> {
-  try {
-    const stub = actionsRunner.getByName(containerInstance);
-    const response = await stub.fetch("https://actions-container.internal/state");
-    if (!response.ok) {
-      return null;
-    }
-    const payload = (await response.json()) as ActionsContainerStatePayload | null;
-    if (!payload?.state || typeof payload.state !== "object") {
-      return null;
-    }
-    return payload.state;
-  } catch {
-    return null;
-  }
-}
-
-function shouldSkipActionRunReconciliation(run: ActionRunRecord, now: number): boolean {
-  const lastActivityAt = Math.max(run.updated_at, run.started_at ?? 0, run.created_at);
-  return now - lastActivityAt < ACTION_RUN_RECONCILIATION_IDLE_GRACE_PERIOD_MS;
-}
-
-async function reconcileRunningActionRuns(input: {
-  env: Pick<
-    AppEnv["Bindings"],
-    | "ACTION_LOGS_BUCKET"
-    | "GIT_BUCKET"
-    | "ACTIONS_RUNNER"
-    | "ACTIONS_RUNNER_BASIC"
-    | "ACTIONS_RUNNER_STANDARD_1"
-    | "ACTIONS_RUNNER_STANDARD_2"
-    | "ACTIONS_RUNNER_STANDARD_3"
-    | "ACTIONS_RUNNER_STANDARD_4"
-  >;
-  actionsService: ActionsService;
-  repositoryId: string;
-  runs: ActionRunRecord[];
-}): Promise<ActionRunRecord[]> {
-  const actionLogStorage = createActionLogStorageService(input.env);
-  const runningRuns = input.runs.filter(
-    (run) =>
-      (run.status === "queued" || run.status === "running") &&
-      typeof run.container_instance === "string"
-  );
-  if (runningRuns.length === 0) {
-    return input.runs;
-  }
-
-  const now = Date.now();
-  const updatedRuns = new Map<string, ActionRunRecord>();
-  await Promise.all(
-    runningRuns.map(async (run) => {
-      const containerInstance = run.container_instance;
-      if (!containerInstance) {
-        return;
-      }
-      if (shouldSkipActionRunReconciliation(run, now)) {
-        return;
-      }
-
-      const actionsRunner = getActionRunnerNamespace(input.env, run.instance_type ?? "lite");
-      if (!actionsRunner) {
-        return;
-      }
-      const state = await fetchActionsContainerState(actionsRunner, containerInstance);
-      const containerStatus = state?.status;
-      if (
-        typeof containerStatus !== "string" ||
-        !TERMINAL_ACTIONS_CONTAINER_STATES.has(containerStatus)
-      ) {
-        return;
-      }
-
-      const containerExitCode = typeof state?.exitCode === "number" ? state.exitCode : null;
-      const reconciledAt = Date.now();
-      const logs = appendContainerStateErrorLogs({
-        run,
-        containerStatus,
-        containerExitCode,
-        reconciledAt
-      });
-      try {
-        await actionLogStorage.writeRunLogs(input.repositoryId, run.id, logs);
-      } catch {
-        // Leave the run reconciliation result intact even if external log persistence fails.
-      }
-      const result = await input.actionsService.failPendingRunIfStillPending(
-        input.repositoryId,
-        run.id,
-        {
-          logs: buildLogExcerpt(logs),
-          exitCode: containerExitCode,
-          completedAt: reconciledAt
-        }
-      );
-
-      if (!result.updated) {
-        return;
-      }
-
-      updatedRuns.set(run.id, {
-        ...run,
-        status: "failed",
-        logs: buildLogExcerpt(logs),
-        exit_code: containerExitCode,
-        completed_at: result.completedAt,
-        updated_at: result.completedAt
-      });
-    })
-  );
-
-  if (updatedRuns.size === 0) {
-    return input.runs;
-  }
-
-  return input.runs.map((run) => updatedRuns.get(run.id) ?? run);
-}
 
 function createSseEventChunk(payload: SseEventPayload): string {
   return `event: ${payload.event}\ndata: ${JSON.stringify(payload.data)}\n\n`;
@@ -4838,14 +4667,8 @@ router.get("/repos/:owner/:repo/actions/runs", optionalSession, async (c) => {
 
   const actionsService = new ActionsService(c.env.DB);
   const runs = await actionsService.listRuns(repository.id, parseLimit(c.req.query("limit"), 30));
-  const reconciledRuns = await reconcileRunningActionRuns({
-    env: c.env,
-    actionsService,
-    repositoryId: repository.id,
-    runs
-  });
   return c.json({
-    runs: reconciledRuns.map((run) => withActionRunApiMetadata(owner, repo, run))
+    runs: runs.map((run) => withActionRunApiMetadata(owner, repo, run))
   });
 });
 
@@ -4869,14 +4692,8 @@ router.get("/repos/:owner/:repo/actions/runs/latest", optionalSession, async (c)
     sourceType,
     sourceNumbers
   );
-  const reconciledLatestRuns = await reconcileRunningActionRuns({
-    env: c.env,
-    actionsService,
-    repositoryId: repository.id,
-    runs: latestRuns
-  });
-  const runBySourceNumber = new Map<number, (typeof reconciledLatestRuns)[number]>();
-  for (const run of reconciledLatestRuns) {
+  const runBySourceNumber = new Map<number, (typeof latestRuns)[number]>();
+  for (const run of latestRuns) {
     if (run.trigger_source_number !== null) {
       runBySourceNumber.set(run.trigger_source_number, run);
     }
@@ -4908,14 +4725,8 @@ router.get("/repos/:owner/:repo/actions/runs/latest-by-comments", optionalSessio
 
   const actionsService = new ActionsService(c.env.DB);
   const latestRuns = await actionsService.listLatestRunsByCommentIds(repository.id, commentIds);
-  const reconciledLatestRuns = await reconcileRunningActionRuns({
-    env: c.env,
-    actionsService,
-    repositoryId: repository.id,
-    runs: latestRuns
-  });
-  const runByCommentId = new Map<string, (typeof reconciledLatestRuns)[number]>();
-  for (const run of reconciledLatestRuns) {
+  const runByCommentId = new Map<string, (typeof latestRuns)[number]>();
+  for (const run of latestRuns) {
     if (run.trigger_source_comment_id) {
       runByCommentId.set(run.trigger_source_comment_id, run);
     }
@@ -5255,14 +5066,8 @@ router.get("/repos/:owner/:repo/actions/runs/:runId", optionalSession, async (c)
   if (!run) {
     throw new HTTPException(404, { message: "Action run not found" });
   }
-  const reconciledRuns = await reconcileRunningActionRuns({
-    env: c.env,
-    actionsService,
-    repositoryId: repository.id,
-    runs: [run]
-  });
   return c.json({
-    run: withActionRunApiMetadata(owner, repo, reconciledRuns[0] ?? run)
+    run: withActionRunApiMetadata(owner, repo, run)
   });
 });
 
@@ -5339,19 +5144,6 @@ router.get("/repos/:owner/:repo/actions/runs/:runId/logs/stream", optionalSessio
           if (cancelController.signal.aborted) {
             break;
           }
-          if (
-            (currentRun.status === "queued" || currentRun.status === "running") &&
-            currentRun.container_instance
-          ) {
-            const reconciledRuns = await reconcileRunningActionRuns({
-              env: c.env,
-              actionsService,
-              repositoryId: repository.id,
-              runs: [currentRun]
-            });
-            currentRun = reconciledRuns[0] ?? currentRun;
-          }
-
           currentRun = await hydrateRunWithFullLogs({
             logStorage,
             repositoryId: repository.id,

@@ -13,6 +13,15 @@ import {
 } from "./auth-service";
 import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 
+function createStartedRunnerResponse(payload: unknown, startedAt = 2): Response {
+  return new Response(JSON.stringify(payload), {
+    headers: {
+      "content-type": "application/json",
+      "x-gits-run-started-at": String(startedAt)
+    }
+  });
+}
+
 describe("executeActionRun", () => {
   beforeEach(() => {
     vi.spyOn(ActionsService.prototype, "replaceRunLogs").mockResolvedValue();
@@ -24,7 +33,6 @@ describe("executeActionRun", () => {
 
   it("passes repository action config files to the runner container", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
@@ -37,19 +45,22 @@ describe("executeActionRun", () => {
 
     const runnerFetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as {
+        repositoryId?: string;
+        runId?: string;
+        containerInstance?: string;
         configFiles?: Record<string, string>;
       };
+
+      expect(payload.repositoryId).toBe("repo-1");
+      expect(payload.runId).toBe("run-1");
+      expect(payload.containerInstance).toBe("action-run-run-1");
 
       expect(payload.configFiles).toEqual({
         "/home/rootless/.codex/config.toml": "model = \"gpt-5-codex\"",
         "/home/rootless/.claude/settings.json": "{\n  \"permissions\": \"bypass\"\n}"
       });
 
-      return new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      });
+      return createStartedRunnerResponse({ exitCode: 0, durationMs: 25 });
     });
 
     const stopFetch = vi.fn(async () =>
@@ -102,7 +113,6 @@ describe("executeActionRun", () => {
 
   it("uses the matching runner binding for non-lite instance types", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
@@ -116,11 +126,7 @@ describe("executeActionRun", () => {
 
     const liteFetch = vi.fn();
     const standard3Fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
+      createStartedRunnerResponse({ exitCode: 0, durationMs: 25 })
     );
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -178,7 +184,6 @@ describe("executeActionRun", () => {
 
   it("delegates token lifecycle to the container and passes actions identity hints", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
@@ -224,11 +229,7 @@ describe("executeActionRun", () => {
       expect(payload.env?.GITS_ISSUE_REPLY_TOKEN).toBeUndefined();
       expect(payload.env?.GITS_PR_CREATE_TOKEN).toBeUndefined();
 
-      return new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      });
+      return createStartedRunnerResponse({ exitCode: 0, durationMs: 25 });
     });
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -286,7 +287,6 @@ describe("executeActionRun", () => {
 
   it("grants push and PR permissions for delegated agent sessions", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
@@ -324,11 +324,7 @@ describe("executeActionRun", () => {
     });
 
     const runnerFetch = vi.fn(async (_url: string, init?: RequestInit) =>
-      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
+      createStartedRunnerResponse({ exitCode: 0, durationMs: 25 })
     );
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -396,7 +392,6 @@ describe("executeActionRun", () => {
 
   it("reconciles source task status after source-backed runs complete", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
@@ -412,11 +407,7 @@ describe("executeActionRun", () => {
       .mockResolvedValue([]);
 
     const runnerFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
+      createStartedRunnerResponse({ exitCode: 0, durationMs: 25 })
     );
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -473,7 +464,6 @@ describe("executeActionRun", () => {
 
   it("records a warning when status reconciliation fails after completion", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     const replaceRunLogs = vi
@@ -496,11 +486,7 @@ describe("executeActionRun", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const runnerFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
+      createStartedRunnerResponse({ exitCode: 0, durationMs: 25 })
     );
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -570,7 +556,6 @@ describe("executeActionRun", () => {
 
   it("persists structured observability after a run completes", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
-    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
     vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
@@ -587,8 +572,7 @@ describe("executeActionRun", () => {
       .mockResolvedValue();
 
     const runnerFetch = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
+      createStartedRunnerResponse({
           exitCode: 0,
           durationMs: 25,
           stdout: `stdout payload
@@ -598,13 +582,7 @@ describe("executeActionRun", () => {
           stderr: "stderr payload",
           attemptedCommand: "codex run",
           mcpSetupWarning: "platform MCP missing"
-        }),
-        {
-          headers: {
-            "content-type": "application/json"
-          }
-        }
-      )
+      })
     );
     const stopFetch = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {

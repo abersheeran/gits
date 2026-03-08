@@ -3800,15 +3800,9 @@ describe("API issues and pull requests", () => {
     expect(repositoryConfigRow?.claude_code_config_file_content).toContain("\"permissions\"");
   });
 
-  it("reconciles running action runs when container is already stopped", async () => {
+  it("returns persisted running action runs without probing container state", async () => {
     const now = Date.now();
-    const fetchContainerState = vi.fn(async () =>
-      new Response(JSON.stringify({ state: { status: "stopped_with_code", exitCode: 137 } }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
-    );
+    const fetchContainerState = vi.fn();
 
     const db = createMockD1Database([
       {
@@ -3843,17 +3837,8 @@ describe("API issues and pull requests", () => {
             started_at: now - 45_000,
             completed_at: null,
             updated_at: now - 30_000
-        }
-      ]
-    },
-      {
-        when: "SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?",
-        run: () => ({
-          success: true,
-          meta: {
-            changes: 1
           }
-        })
+        ]
       }
     ]);
 
@@ -3879,26 +3864,15 @@ describe("API issues and pull requests", () => {
       }>;
     };
     expect(body.runs[0]?.id).toBe("run-1");
-    expect(body.runs[0]?.status).toBe("failed");
-    expect(body.runs[0]?.exit_code).toBe(137);
-    expect(body.runs[0]?.logs).toContain("stopped_with_code");
-    expect(body.runs[0]?.logs).toContain("claimed_at:");
-    expect(body.runs[0]?.logs).toContain("started_at:");
-    expect(body.runs[0]?.logs).toContain("reconciled_at:");
-    expect(fetchContainerState).toHaveBeenCalledTimes(1);
-    expect(fetchContainerState).toHaveBeenCalledWith("https://actions-container.internal/state");
+    expect(body.runs[0]?.status).toBe("running");
+    expect(body.runs[0]?.exit_code).toBeNull();
+    expect(fetchContainerState).not.toHaveBeenCalled();
   });
 
-  it("does not fail recently started runs while streaming logs", async () => {
+  it("streams recent run updates without probing container state", async () => {
     const now = Date.now();
     let readCount = 0;
-    const fetchContainerState = vi.fn(async () =>
-      new Response(JSON.stringify({ state: { status: "stopped_with_code", exitCode: 137 } }), {
-        headers: {
-          "content-type": "application/json"
-        }
-      })
-    );
+    const fetchContainerState = vi.fn();
 
     const db = createMockD1Database([
       {

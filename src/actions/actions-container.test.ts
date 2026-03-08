@@ -7,6 +7,8 @@ import {
   GITS_VALIDATION_REPORT_BEGIN,
   GITS_VALIDATION_REPORT_END
 } from "../services/agent-session-validation-report";
+import { ActionLogStorageService } from "../services/action-log-storage-service";
+import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 
 vi.mock("@cloudflare/containers", () => {
@@ -59,6 +61,7 @@ import { ActionsContainer } from "./actions-container";
 type TestActionsContainer = ActionsContainer & {
   bindings: {
     DB: D1Database;
+    GIT_BUCKET: R2Bucket;
     JWT_SECRET: string;
   };
   pendingExecutionAuth: unknown;
@@ -80,6 +83,7 @@ function createTestContainer(
   container.sleepAfter = "10m";
   container.bindings = {
     DB: {} as D1Database,
+    GIT_BUCKET: {} as R2Bucket,
     JWT_SECRET: "test-secret"
   };
   container.pendingExecutionAuth = null;
@@ -106,6 +110,10 @@ describe("ActionsContainer", () => {
   });
 
   it("creates and revokes lifecycle-managed tokens around execute requests", async () => {
+    const updateRunToRunning = vi
+      .spyOn(ActionsService.prototype, "updateRunToRunning")
+      .mockResolvedValue(123);
+    vi.spyOn(ActionsService.prototype, "findRunById").mockResolvedValue(null);
     const createdTokens = [
       { tokenId: "tok-run", token: "gts_11111111111111111111111111111111" },
       { tokenId: "tok-issue", token: "gts_22222222222222222222222222222222" },
@@ -186,6 +194,9 @@ describe("ActionsContainer", () => {
         body: JSON.stringify({
           agentType: "codex",
           prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
+          repositoryId: "repo-1",
+          runId: "run-7",
+          containerInstance: "action-run-run-7",
           runNumber: 7,
           triggeredByUserId: "user-1",
           triggeredByUsername: "alice",
@@ -201,11 +212,13 @@ describe("ActionsContainer", () => {
     );
 
     expect(executeResponse.status).toBe(200);
+    expect(executeResponse.headers.get("x-gits-run-started-at")).toBe("123");
     const responseText = await executeResponse.text();
     expect(responseText).not.toContain("gts_11111111111111111111111111111111");
     expect(responseText).not.toContain("gts_22222222222222222222222222222222");
     expect(responseText).not.toContain("gts_33333333333333333333333333333333");
     expect(responseText).toContain("[REDACTED]");
+    expect(updateRunToRunning).toHaveBeenCalledWith("repo-1", "run-7", "action-run-run-7");
     expect(createAccessToken).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -246,6 +259,8 @@ describe("ActionsContainer", () => {
   });
 
   it("supports explicitly disabling runtime tokens and push access", async () => {
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(456);
+    vi.spyOn(ActionsService.prototype, "findRunById").mockResolvedValue(null);
     const createAccessToken = vi
       .spyOn(AuthService.prototype, "createAccessToken")
       .mockResolvedValue({
@@ -287,6 +302,9 @@ describe("ActionsContainer", () => {
         body: JSON.stringify({
           agentType: "codex",
           prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
+          repositoryId: "repo-1",
+          runId: "run-8",
+          containerInstance: "action-run-run-8",
           runNumber: 8,
           triggeredByUserId: "user-1",
           triggeredByUsername: "alice",
@@ -312,5 +330,88 @@ describe("ActionsContainer", () => {
     expect(stopResponse.status).toBe(200);
     expect(revokeAccessToken).toHaveBeenCalledTimes(1);
     expect(revokeAccessToken).toHaveBeenCalledWith("user-1", "tok-run");
+  });
+
+  it("fails still-pending runs from container lifecycle hooks on stop", async () => {
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(222);
+    vi.spyOn(ActionsService.prototype, "findRunById").mockResolvedValue({
+      id: "run-9",
+      repository_id: "repo-1",
+      run_number: 9,
+      workflow_id: "workflow-1",
+      workflow_name: "CI",
+      trigger_event: "issue_created",
+      trigger_ref: "refs/heads/main",
+      trigger_sha: "abc123",
+      trigger_source_type: "issue",
+      trigger_source_number: 7,
+      trigger_source_comment_id: null,
+      triggered_by: "user-1",
+      triggered_by_username: "alice",
+      status: "running",
+      agent_type: "codex",
+      instance_type: "lite",
+      prompt: "run tests",
+      logs: "existing logs",
+      exit_code: null,
+      container_instance: "action-run-run-9",
+      created_at: 1,
+      claimed_at: 111,
+      started_at: 222,
+      completed_at: null,
+      updated_at: 222
+    });
+    vi.spyOn(ActionLogStorageService.prototype, "readRunLogs").mockResolvedValue("existing logs");
+    const writeRunLogs = vi
+      .spyOn(ActionLogStorageService.prototype, "writeRunLogs")
+      .mockResolvedValue();
+    const failPendingRunIfStillPending = vi
+      .spyOn(ActionsService.prototype, "failPendingRunIfStillPending")
+      .mockResolvedValue({ updated: true, completedAt: 333 });
+
+    const container = createTestContainer(async () =>
+      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    const executeResponse = await container.fetch(
+      new Request("https://actions-container.internal/execute", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          agentType: "codex",
+          prompt: "run tests",
+          repositoryId: "repo-1",
+          runId: "run-9",
+          containerInstance: "action-run-run-9",
+          runNumber: 9
+        })
+      })
+    );
+
+    expect(executeResponse.status).toBe(200);
+
+    const stopResponse = await container.fetch(
+      new Request("https://actions-container.internal/stop", {
+        method: "POST"
+      })
+    );
+
+    expect(stopResponse.status).toBe(200);
+    expect(writeRunLogs).toHaveBeenCalledWith(
+      "repo-1",
+      "run-9",
+      expect.stringContaining("Run was marked as failed from Cloudflare container lifecycle hooks.")
+    );
+    expect(failPendingRunIfStillPending).toHaveBeenCalledWith("repo-1", "run-9", {
+      logs: expect.stringContaining("[runner_error]"),
+      exitCode: 0,
+      completedAt: expect.any(Number)
+    });
   });
 });
