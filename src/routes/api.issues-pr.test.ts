@@ -2794,6 +2794,7 @@ describe("API issues and pull requests", () => {
         artifacts: Array<{ kind: string; title: string }>;
         usageRecords: Array<{ kind: string; value: number }>;
         interventions: Array<{ kind: string; title: string }>;
+        validationSummary: { status: string | null; headline: string };
       } | null;
     };
     expect(body.latestSession?.session.id).toBe("session-pr-provenance");
@@ -2807,6 +2808,8 @@ describe("API issues and pull requests", () => {
     expect(body.latestSession?.artifacts[0]?.kind).toBe("stdout");
     expect(body.latestSession?.usageRecords[0]?.kind).toBe("duration_ms");
     expect(body.latestSession?.interventions[0]?.kind).toBe("mcp_setup_warning");
+    expect(body.latestSession?.validationSummary.status).toBe("running");
+    expect(body.latestSession?.validationSummary.headline).toBe("Validation is still running.");
   });
 
   it("returns latest pull request provenance in batch form for issue task views", async () => {
@@ -2927,6 +2930,7 @@ describe("API issues and pull requests", () => {
           sourceContext: { type: string; number: number | null; title: string | null };
           artifacts: Array<{ title: string }>;
           usageRecords: Array<{ kind: string; value: number }>;
+          validationSummary: { status: string | null; headline: string };
         } | null;
       }>;
     };
@@ -2941,6 +2945,10 @@ describe("API issues and pull requests", () => {
     expect(body.items[0]?.latestSession?.sourceContext.title).toBe("Improve README");
     expect(body.items[0]?.latestSession?.artifacts[0]?.title).toBe("Runner stdout");
     expect(body.items[0]?.latestSession?.usageRecords[0]?.value).toBe(1250);
+    expect(body.items[0]?.latestSession?.validationSummary.status).toBe("success");
+    expect(body.items[0]?.latestSession?.validationSummary.headline).toBe(
+      "Validation passed, but no explicit test/build/lint commands were detected."
+    );
     expect(body.items[1]).toEqual({
       sourceNumber: 2,
       latestSession: null

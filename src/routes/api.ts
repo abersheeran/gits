@@ -20,6 +20,7 @@ import {
   getActionRunnerNamespace
 } from "../services/action-container-instance-types";
 import { AgentSessionService } from "../services/agent-session-service";
+import { buildAgentSessionValidationSummary } from "../services/agent-session-validation-summary";
 import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 import { RepositoryMetadataService } from "../services/repository-metadata-service";
@@ -1316,6 +1317,7 @@ async function buildAgentSessionDetailPayload(args: {
   artifacts: Awaited<ReturnType<AgentSessionService["listArtifacts"]>>;
   usageRecords: Awaited<ReturnType<AgentSessionService["listUsageRecords"]>>;
   interventions: Awaited<ReturnType<AgentSessionService["listInterventions"]>>;
+  validationSummary: ReturnType<typeof buildAgentSessionValidationSummary>;
 }> {
   const agentSessionService = new AgentSessionService(args.db);
   const actionsService = new ActionsService(args.db);
@@ -1342,7 +1344,13 @@ async function buildAgentSessionDetailPayload(args: {
     sourceContext,
     artifacts,
     usageRecords,
-    interventions
+    interventions,
+    validationSummary: buildAgentSessionValidationSummary({
+      status: linkedRun?.status ?? args.session.status,
+      artifacts,
+      usageRecords,
+      interventions
+    })
   };
 }
 

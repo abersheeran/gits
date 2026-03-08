@@ -643,6 +643,34 @@ export type AgentSessionInterventionRecord = {
   created_at: number;
 };
 
+export type AgentSessionValidationCheckKind = "tests" | "build" | "lint";
+
+export type AgentSessionValidationCheckStatus =
+  | "passed"
+  | "failed"
+  | "pending"
+  | "cancelled";
+
+export type AgentSessionValidationCheckRecord = {
+  kind: AgentSessionValidationCheckKind;
+  label: string;
+  status: AgentSessionValidationCheckStatus;
+  command: string;
+  summary: string;
+};
+
+export type AgentSessionValidationSummary = {
+  status: ActionRunStatus | null;
+  headline: string;
+  detail: string;
+  duration_ms: number | null;
+  exit_code: number | null;
+  stdout_chars: number | null;
+  stderr_chars: number | null;
+  checks: AgentSessionValidationCheckRecord[];
+  highlighted_artifact_ids: string[];
+};
+
 export type AgentSessionSourceContext = {
   type: AgentSessionSourceType;
   number: number | null;
@@ -658,6 +686,7 @@ export type AgentSessionDetail = {
   artifacts: AgentSessionArtifactRecord[];
   usageRecords: AgentSessionUsageRecord[];
   interventions: AgentSessionInterventionRecord[];
+  validationSummary: AgentSessionValidationSummary;
 };
 
 export type AgentSessionTimelineEvent = {

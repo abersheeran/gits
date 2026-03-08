@@ -31,6 +31,7 @@ PR 是这款产品的交付中心。
   - merge summary
   - 关联 closing Issue 的任务完成度摘要
   - 最新 Agent provenance 摘要
+- PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
 - Review：
   - `comment`
   - `approve`
@@ -80,9 +81,9 @@ PR 是这款产品的交付中心。
 
 现在 PR 页面已经能直接展示最近验证状态、关键 artifact 摘要、最近一次 Agent 修改摘要和 merge summary。
 
-但验证摘要还缺更结构化的视角，例如：
+但验证摘要还缺更稳的结构化视角，例如：
 
-- 区分“测试结果”和“构建结果”
+- 更高置信度地区分“测试结果”和“构建结果”
 - 对 artifact 做更稳定的优先级排序
 - 自动提炼更明确的人类审校摘要
 
@@ -148,19 +149,21 @@ PR 是这款产品的交付中心。
 - `src/services/pull-request-service.ts`
 - `src/services/pull-request-merge-service.ts`
 - `src/services/repository-browser-service.ts`
+- `src/services/agent-session-validation-summary.ts`
 - `src/routes/api.ts`
 - `web/src/pages/pull-request-detail-page.tsx`
+- `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`
 
 ## 9. 当前边界与下一步
 
 - 当前只有 squash merge。
-- PR 页面已具备第一版 validation summary 和 merge summary。
+- PR 页面已具备 rule-based tests / build / lint validation summary 和 merge summary。
 - PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：
 
 1. 把 PR 和来源 Issue 之间的状态回流做得更明显。
-2. 把验证摘要进一步结构化成更适合评审的测试/构建视图。
+2. 把验证摘要从规则识别升级成更稳定的结构化测试/构建结果。
 3. 提升 review thread 在 rename / 复杂 patch-set 下的锚点映射质量。

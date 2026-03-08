@@ -48,6 +48,14 @@ import {
   type RepositoryUserSummary
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import {
+  excerptText,
+  formatDuration,
+  highlightedValidationArtifacts,
+  latestValidationStatus,
+  validationCheckBadgeVariant,
+  validationCheckStatusLabel
+} from "@/lib/validation-summary";
 
 type IssueDetailPageProps = {
   user: AuthUser | null;
@@ -80,45 +88,6 @@ function issueTaskStatusHint(status: IssueTaskStatus): string {
 
 function shortBranchName(ref: string): string {
   return ref.replace(/^refs\/heads\//, "");
-}
-
-function formatDuration(startedAt: number | null, completedAt: number | null): string {
-  if (!startedAt) {
-    return "-";
-  }
-  const end = completedAt ?? Date.now();
-  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${seconds}s`;
-}
-
-function excerptText(value: string, maxLength: number): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function usageRecordValue(
-  detail: AgentSessionDetail | null,
-  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars"
-): number | null {
-  const record = detail?.usageRecords.find((item) => item.kind === kind);
-  return record ? record.value : null;
-}
-
-function latestValidationStatus(
-  detail: AgentSessionDetail | null
-): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
-  return detail?.linkedRun?.status ?? detail?.session.status ?? null;
 }
 
 export function IssueDetailPage({ user }: IssueDetailPageProps) {
@@ -885,14 +854,14 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   const pullRequestSession = pullRequestProvenance?.session ?? null;
                   const pullRequestValidationStatus =
                     latestValidationStatus(pullRequestProvenance);
-                  const pullRequestValidationDurationMs = usageRecordValue(
-                    pullRequestProvenance,
-                    "duration_ms"
-                  );
-                  const pullRequestValidationExitCode = usageRecordValue(
-                    pullRequestProvenance,
-                    "exit_code"
-                  );
+                  const pullRequestValidationSummary =
+                    pullRequestProvenance?.validationSummary ?? null;
+                  const pullRequestValidationDurationMs =
+                    pullRequestValidationSummary?.duration_ms ?? null;
+                  const pullRequestValidationExitCode =
+                    pullRequestValidationSummary?.exit_code ?? null;
+                  const pullRequestHighlightedArtifacts =
+                    highlightedValidationArtifacts(pullRequestProvenance).slice(0, 2);
                   return (
                     <div key={pullRequest.id} className="space-y-3 rounded-md border bg-muted/20 p-3">
                       <div className="space-y-2">
@@ -962,6 +931,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                               </Badge>
                             ) : null}
                           </div>
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {pullRequestValidationSummary?.headline ??
+                                "Structured validation summary unavailable."}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {pullRequestValidationSummary?.detail ??
+                                "The latest validation output has not been turned into a reviewable summary yet."}
+                            </p>
+                          </div>
                           <div className="space-y-1 text-xs text-muted-foreground">
                             <p>
                               Updated:{" "}
@@ -979,9 +958,25 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                               )}
                             </p>
                           </div>
-                          {pullRequestProvenance.artifacts.length > 0 ? (
+                          {pullRequestValidationSummary?.checks.length ? (
+                            <div className="flex flex-wrap gap-2">
+                              {pullRequestValidationSummary.checks.map((check) => (
+                                <Badge
+                                  key={check.kind}
+                                  variant={validationCheckBadgeVariant(check.status)}
+                                >
+                                  {validationCheckStatusLabel(check)}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              当前还没有从输出中识别出明确的 test / build / lint 命令。
+                            </p>
+                          )}
+                          {pullRequestHighlightedArtifacts.length > 0 ? (
                             <div className="space-y-2">
-                              {pullRequestProvenance.artifacts.slice(0, 2).map((artifact) => (
+                              {pullRequestHighlightedArtifacts.map((artifact) => (
                                 <div
                                   key={artifact.id}
                                   className="space-y-1 rounded-md border bg-muted/20 p-3"

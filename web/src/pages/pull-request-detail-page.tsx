@@ -60,6 +60,14 @@ import {
   type RepositoryUserSummary
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import {
+  excerptText,
+  formatDuration,
+  highlightedValidationArtifacts,
+  latestValidationStatus,
+  validationCheckBadgeVariant,
+  validationCheckStatusLabel
+} from "@/lib/validation-summary";
 
 type PullRequestDetailPageProps = {
   user: AuthUser | null;
@@ -110,47 +118,6 @@ function mergeabilityLabel(mergeable: RepositoryCompareResponse["mergeable"]): s
 
 function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
-}
-
-function formatDuration(startedAt: number | null, completedAt: number | null): string {
-  if (!startedAt) {
-    return "-";
-  }
-  const end = completedAt ?? Date.now();
-  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${seconds}s`;
-}
-
-function excerptText(value: string, maxLength: number): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function usageRecordValue(
-  detail: AgentSessionDetail | null,
-  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars"
-): number | null {
-  const record = detail?.usageRecords.find((item) => item.kind === kind);
-  return record ? record.value : null;
-}
-
-function latestValidationStatus(
-  provenanceDetail: AgentSessionDetail | null,
-  latestRun: ActionRunRecord | null,
-  latestSession: AgentSessionRecord | null
-): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
-  return provenanceDetail?.linkedRun?.status ?? latestRun?.status ?? latestSession?.status ?? null;
 }
 
 type SelectedReviewRange = {
@@ -850,11 +817,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     latestActionRun,
     latestAgentSession
   );
+  const validationSummary = provenanceDetail?.validationSummary ?? null;
   const validationPassed = latestValidationState === "success";
-  const validationDurationMs = usageRecordValue(provenanceDetail, "duration_ms");
-  const validationExitCode = usageRecordValue(provenanceDetail, "exit_code");
-  const validationStdoutChars = usageRecordValue(provenanceDetail, "stdout_chars");
-  const validationStderrChars = usageRecordValue(provenanceDetail, "stderr_chars");
+  const validationDurationMs = validationSummary?.duration_ms ?? null;
+  const validationExitCode = validationSummary?.exit_code ?? null;
+  const validationStdoutChars = validationSummary?.stdout_chars ?? null;
+  const validationStderrChars = validationSummary?.stderr_chars ?? null;
+  const highlightedArtifacts = highlightedValidationArtifacts(provenanceDetail);
   const unresolvedClosingIssues = closingIssues.filter((issue) => issue.task_status !== "done");
   const mergeReady =
     pullRequest.state === "open" &&
@@ -1071,6 +1040,15 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 </div>
                 {provenanceDetail ? (
                   <>
+                    <div className="space-y-2 rounded-md border bg-background/70 p-3">
+                      <p className="text-sm font-medium">
+                        {validationSummary?.headline ?? "Structured validation summary unavailable."}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {validationSummary?.detail ??
+                          "The latest validation output has not been turned into a reviewable summary yet."}
+                      </p>
+                    </div>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                       <Badge variant="outline">
                         artifacts: {provenanceDetail.artifacts.length}
@@ -1082,9 +1060,28 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                         stderr: {validationStderrChars !== null ? Math.round(validationStderrChars).toLocaleString() : "-"} chars
                       </Badge>
                     </div>
-                    {provenanceDetail.artifacts.length > 0 ? (
+                    {validationSummary?.checks.length ? (
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {validationSummary.checks.map((check) => (
+                          <div key={check.kind} className="space-y-2 rounded-md border bg-background/70 p-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant={validationCheckBadgeVariant(check.status)}>
+                                {validationCheckStatusLabel(check)}
+                              </Badge>
+                            </div>
+                            <p className="text-sm font-medium">{check.command}</p>
+                            <p className="text-xs text-muted-foreground">{check.summary}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        当前还没有从输出中识别出明确的 test / build / lint 命令。
+                      </p>
+                    )}
+                    {highlightedArtifacts.length > 0 ? (
                       <div className="space-y-3">
-                        {provenanceDetail.artifacts.slice(0, 3).map((artifact) => (
+                        {highlightedArtifacts.map((artifact) => (
                           <div key={artifact.id} className="space-y-1 rounded-md border bg-background/70 p-3">
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Badge variant="outline">{artifact.kind}</Badge>

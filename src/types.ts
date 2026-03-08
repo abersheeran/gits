@@ -109,6 +109,14 @@ export type AgentSessionUsageKind =
 
 export type AgentSessionInterventionKind = "cancel_requested" | "mcp_setup_warning";
 
+export type AgentSessionValidationCheckKind = "tests" | "build" | "lint";
+
+export type AgentSessionValidationCheckStatus =
+  | "passed"
+  | "failed"
+  | "pending"
+  | "cancelled";
+
 export type ActionRunQueueMessage = {
   repositoryId: string;
   runId: string;
@@ -435,6 +443,26 @@ export type AgentSessionInterventionRecord = {
   created_by_username: string | null;
   payload: Record<string, unknown> | null;
   created_at: number;
+};
+
+export type AgentSessionValidationCheckRecord = {
+  kind: AgentSessionValidationCheckKind;
+  label: string;
+  status: AgentSessionValidationCheckStatus;
+  command: string;
+  summary: string;
+};
+
+export type AgentSessionValidationSummary = {
+  status: ActionRunStatus | null;
+  headline: string;
+  detail: string;
+  duration_ms: number | null;
+  exit_code: number | null;
+  stdout_chars: number | null;
+  stderr_chars: number | null;
+  checks: AgentSessionValidationCheckRecord[];
+  highlighted_artifact_ids: string[];
 };
 
 export type AppBindings = {
