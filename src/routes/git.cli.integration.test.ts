@@ -7,22 +7,25 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
-import { PullRequestMergeService } from "../services/pull-request-merge-service";
+import { createRepositoryObjectClient } from "../services/repository-object";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
+import { createMockRepositoryObjectNamespace } from "../test-utils/mock-repository-object-namespace";
 import { MockR2Bucket } from "../test-utils/mock-r2";
 import type { AppEnv } from "../types";
 
 const execFile = promisify(execFileCallback);
 
 function createEnv(db: D1Database, bucket: R2Bucket): AppEnv["Bindings"] {
-  return {
+  const env = {
     DB: db,
     GIT_BUCKET: bucket,
     JWT_SECRET: "test-secret",
     APP_ORIGIN: "http://localhost:8787"
-  };
+  } as AppEnv["Bindings"];
+  env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
+  return env;
 }
 
 function createPublicRepositoryDb(owner: string, repo: string): D1Database {
@@ -331,8 +334,8 @@ describe("Git smart-http compatibility with git CLI", () => {
         const mainRef = refs.find((item) => item.name === "refs/heads/main");
         expect(mainRef).toBeTruthy();
 
-        const mergeService = new PullRequestMergeService(storage);
-        await mergeService.squashMergePullRequest({
+        await createRepositoryObjectClient(env).squashMergePullRequest({
+          repositoryId: "repo-private-1",
           owner: "alice",
           repo: "squash-pull",
           pullRequest: {

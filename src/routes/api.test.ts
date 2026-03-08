@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
+import { RepositoryObjectClient } from "../services/repository-object";
 import { RepositoryService } from "../services/repository-service";
-import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
 import apiRoutes from "./api";
@@ -20,6 +20,9 @@ function createBaseEnv(db: D1Database): AppEnv["Bindings"] {
   return {
     DB: db,
     GIT_BUCKET: {} as R2Bucket,
+    REPOSITORY_OBJECTS: {
+      getByName: vi.fn()
+    } as unknown as DurableObjectNamespace,
     JWT_SECRET: "test-secret",
     APP_ORIGIN: "http://localhost:8787"
   };
@@ -192,7 +195,7 @@ describe("API validation", () => {
       }
     ]);
     const listBranchesSpy = vi
-      .spyOn(StorageService.prototype, "listHeadRefs")
+      .spyOn(RepositoryObjectClient.prototype, "listHeadRefs")
       .mockResolvedValue([{ name: "refs/heads/main", oid: "0123456789abcdef0123456789abcdef01234567" }]);
 
     const app = createApp();
@@ -201,7 +204,11 @@ describe("API validation", () => {
     const response = await app.fetch(request, env);
 
     expect(response.status).toBe(200);
-    expect(listBranchesSpy).toHaveBeenCalledWith("alice", "demo");
+    expect(listBranchesSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo"
+    });
     const body = (await response.json()) as {
       branches: Array<{ name: string; oid: string }>;
     };
@@ -237,7 +244,7 @@ describe("API validation", () => {
       .spyOn(AuthService.prototype, "verifySessionToken")
       .mockResolvedValue({ id: "user-1", username: "alice" });
     const initSpy = vi
-      .spyOn(StorageService.prototype, "initializeRepository")
+      .spyOn(RepositoryObjectClient.prototype, "initializeRepository")
       .mockResolvedValue(undefined);
     const db = createMockD1Database([
       {
@@ -261,7 +268,11 @@ describe("API validation", () => {
 
     expect(response.status).toBe(201);
     expect(verifySpy).toHaveBeenCalledTimes(1);
-    expect(initSpy).toHaveBeenCalledWith("alice", "demo");
+    expect(initSpy).toHaveBeenCalledWith({
+      repositoryId: expect.any(String),
+      owner: "alice",
+      repo: "demo"
+    });
   });
 
   it("lists current user access tokens", async () => {

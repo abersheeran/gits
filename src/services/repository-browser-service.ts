@@ -249,11 +249,26 @@ function toCommitSummary(commit: {
   };
 }
 
-type LoadedRepositoryContext = Awaited<ReturnType<typeof loadRepositoryFromStorage>> & {
+export type LoadedRepositoryContext = Awaited<ReturnType<typeof loadRepositoryFromStorage>> & {
   branches: RepositoryBranch[];
   branchNames: Set<string>;
   defaultBranch: string | null;
 };
+
+export function buildLoadedRepositoryContext(
+  loaded: Awaited<ReturnType<typeof loadRepositoryFromStorage>>
+): LoadedRepositoryContext {
+  const branches = loaded.headRefs.map((item) => ({
+    name: stripHeadsPrefix(item.name),
+    oid: item.oid
+  }));
+  return {
+    ...loaded,
+    branches,
+    branchNames: new Set(branches.map((item) => item.name)),
+    defaultBranch: branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null
+  };
+}
 
 type FlatTreeEntry = {
   path: string;
@@ -396,18 +411,16 @@ function parseUnifiedDiffHunks(patch: string | null): RepositoryDiffHunk[] {
 export class RepositoryBrowserService {
   constructor(private readonly storage: StorageService) {}
 
-  private async loadContext(owner: string, repo: string): Promise<LoadedRepositoryContext> {
-    const loaded = await loadRepositoryFromStorage(this.storage, owner, repo);
-    const branches = loaded.headRefs.map((item) => ({
-      name: stripHeadsPrefix(item.name),
-      oid: item.oid
-    }));
-    return {
-      ...loaded,
-      branches,
-      branchNames: new Set(branches.map((item) => item.name)),
-      defaultBranch: branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null
-    };
+  async loadRepositoryContext(owner: string, repo: string): Promise<LoadedRepositoryContext> {
+    return buildLoadedRepositoryContext(await loadRepositoryFromStorage(this.storage, owner, repo));
+  }
+
+  private async ensureLoadedContext(
+    owner: string,
+    repo: string,
+    loadedContext?: LoadedRepositoryContext
+  ): Promise<LoadedRepositoryContext> {
+    return loadedContext ?? this.loadRepositoryContext(owner, repo);
   }
 
   private async tryResolveCommitOid(args: {
@@ -930,8 +943,8 @@ export class RepositoryBrowserService {
     owner: string;
     repo: string;
     ref?: string;
-  }): Promise<RepositoryDetail> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryDetail> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const selectedRef = this.selectRef(input.ref, loaded);
 
     const headOid = await this.tryResolveCommitOid({
@@ -965,8 +978,8 @@ export class RepositoryBrowserService {
     repo: string;
     ref?: string;
     path?: string;
-  }): Promise<RepositoryBrowseResult> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryBrowseResult> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const selectedRef = this.selectRef(input.ref, loaded);
     const headOid = await this.tryResolveCommitOid({
       fs: loaded.fs,
@@ -1056,8 +1069,8 @@ export class RepositoryBrowserService {
     repo: string;
     ref?: string;
     limit?: number;
-  }): Promise<{ ref: string | null; commits: CommitSummary[] }> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<{ ref: string | null; commits: CommitSummary[] }> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const selectedRef = this.selectRef(input.ref, loaded);
     if (!selectedRef) {
       return {
@@ -1114,8 +1127,8 @@ export class RepositoryBrowserService {
     ref?: string;
     path: string;
     limit?: number;
-  }): Promise<RepositoryPathHistoryResult> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryPathHistoryResult> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const selectedRef = this.selectRef(input.ref, loaded);
     const normalizedPath = normalizeRepositoryPath(input.path);
     if (!selectedRef || !normalizedPath) {
@@ -1152,8 +1165,8 @@ export class RepositoryBrowserService {
     owner: string;
     repo: string;
     oid: string;
-  }): Promise<RepositoryCommitDetail> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryCommitDetail> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const commitData = await git.readCommit({
       fs: loaded.fs as never,
       dir: loaded.dir,
@@ -1182,8 +1195,8 @@ export class RepositoryBrowserService {
     repo: string;
     baseRef: string;
     headRef: string;
-  }): Promise<RepositoryCompareResult> {
-    const loaded = await this.loadContext(input.owner, input.repo);
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryCompareResult> {
+    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const baseRef = resolveRefInput(input.baseRef, loaded.branchNames);
     const headRef = resolveRefInput(input.headRef, loaded.branchNames);
     const [baseOid, headOid] = await Promise.all([

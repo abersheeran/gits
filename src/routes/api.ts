@@ -25,7 +25,6 @@ import { ActionsService } from "../services/actions-service";
 import { AuthService } from "../services/auth-service";
 import { RepositoryMetadataService } from "../services/repository-metadata-service";
 import {
-  RepositoryBrowserService,
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError,
   type RepositoryCompareResult,
@@ -35,8 +34,7 @@ import { IssueService, type IssueListState } from "../services/issue-service";
 import {
   PullRequestMergeBranchNotFoundError,
   PullRequestMergeConflictError,
-  PullRequestMergeNotSupportedError,
-  PullRequestMergeService
+  PullRequestMergeNotSupportedError
 } from "../services/pull-request-merge-service";
 import {
   DuplicateOpenPullRequestError,
@@ -44,8 +42,8 @@ import {
   type PullRequestListState
 } from "../services/pull-request-service";
 import { enrichPullRequestReviewThreads } from "../services/pull-request-review-thread-anchor-service";
+import { createRepositoryObjectClient } from "../services/repository-object";
 import { RepositoryService } from "../services/repository-service";
-import { StorageService } from "../services/storage-service";
 import { WorkflowTaskFlowService } from "../services/workflow-task-flow-service";
 import type {
   ActionAgentType,
@@ -1088,34 +1086,18 @@ function buildInteractivePullRequestAgentPrompt(input: {
 }
 
 async function resolveDefaultBranchTarget(
-  storageService: StorageService,
-  owner: string,
-  repo: string
+  repositoryClient: ReturnType<typeof createRepositoryObjectClient>,
+  repository: Pick<RepositoryRecord, "id" | "owner_username" | "name">
 ): Promise<{ ref: string | null; sha: string | null }> {
-  let headRaw: string | null = null;
-  let headRefs: Array<{ name: string; oid: string }> = [];
   try {
-    [headRaw, headRefs] = await Promise.all([
-      storageService.readHead(owner, repo),
-      storageService.listHeadRefs(owner, repo)
-    ]);
+    return await repositoryClient.resolveDefaultBranchTarget({
+      repositoryId: repository.id,
+      owner: repository.owner_username,
+      repo: repository.name
+    });
   } catch {
     return { ref: null, sha: null };
   }
-  if (headRefs.length === 0) {
-    return { ref: null, sha: null };
-  }
-
-  const headRef = headRaw?.startsWith("ref: ") ? headRaw.slice("ref: ".length).trim() : null;
-  let selected = headRef ? headRefs.find((item) => item.name === headRef) : undefined;
-  if (!selected) {
-    selected = headRefs.find((item) => item.name === "refs/heads/main") ?? headRefs[0];
-  }
-
-  return {
-    ref: selected?.name ?? null,
-    sha: selected?.oid ?? null
-  };
 }
 
 function buildIssueCreatedAgentPrompt(input: {
@@ -1778,9 +1760,9 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
 const router = new Hono<AppEnv>();
 
 function createWorkflowTaskFlowService(
-  env: Pick<AppEnv["Bindings"], "DB" | "GIT_BUCKET">
+  env: Pick<AppEnv["Bindings"], "DB" | "REPOSITORY_OBJECTS">
 ): WorkflowTaskFlowService {
-  return new WorkflowTaskFlowService(env.DB, new StorageService(env.GIT_BUCKET));
+  return new WorkflowTaskFlowService(env.DB, createRepositoryObjectClient(env));
 }
 
 async function reconcileIssueNumbers(args: {
@@ -2171,8 +2153,12 @@ router.get("/repos/:owner/:repo/branches", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const branches = await storageService.listHeadRefs(owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const branches = await repositoryClient.listHeadRefs({
+    repositoryId: repository.id,
+    owner,
+    repo
+  });
   return c.json({ branches });
 });
 
@@ -2188,7 +2174,7 @@ router.get("/repos/:owner/:repo", optionalSession, async (c) => {
     ...(sessionUser ? { userId: sessionUser.id } : {})
   });
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const repositoryClient = createRepositoryObjectClient(c.env);
   const issueService = new IssueService(c.env.DB);
   const pullRequestService = new PullRequestService(c.env.DB);
   const detailInput: { owner: string; repo: string; ref?: string } = {
@@ -2206,7 +2192,10 @@ router.get("/repos/:owner/:repo", optionalSession, async (c) => {
     canCreateIssueOrPullRequest,
     canManageActions
   ] = await Promise.all([
-    browserService.getRepositoryDetail(detailInput),
+    repositoryClient.getRepositoryDetail({
+      repositoryId: repository.id,
+      ...detailInput
+    }),
     issueService.countOpenIssues(repository.id),
     pullRequestService.countOpenPullRequests(repository.id),
     repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id),
@@ -2241,7 +2230,7 @@ router.get("/repos/:owner/:repo/commits", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const repositoryClient = createRepositoryObjectClient(c.env);
   const historyInput: { owner: string; repo: string; ref?: string; limit: number } = {
     owner,
     repo,
@@ -2251,7 +2240,10 @@ router.get("/repos/:owner/:repo/commits", optionalSession, async (c) => {
   if (historyRef) {
     historyInput.ref = historyRef;
   }
-  const history = await browserService.listCommitHistory(historyInput);
+  const history = await repositoryClient.listCommitHistory({
+    repositoryId: repository.id,
+    ...historyInput
+  });
 
   return c.json(history);
 });
@@ -2272,9 +2264,14 @@ router.get("/repos/:owner/:repo/commits/:oid", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
   try {
-    const commit = await browserService.getCommitDetail({ owner, repo, oid });
+    const repositoryClient = createRepositoryObjectClient(c.env);
+    const commit = await repositoryClient.getCommitDetail({
+      repositoryId: repository.id,
+      owner,
+      repo,
+      oid
+    });
     return c.json(commit);
   } catch {
     throw new HTTPException(404, { message: "Commit not found" });
@@ -2297,10 +2294,11 @@ router.get("/repos/:owner/:repo/history", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const repositoryClient = createRepositoryObjectClient(c.env);
   try {
     const historyRef = c.req.query("ref");
-    const history = await browserService.listPathHistory({
+    const history = await repositoryClient.listPathHistory({
+      repositoryId: repository.id,
       owner,
       repo,
       path,
@@ -2333,9 +2331,10 @@ router.get("/repos/:owner/:repo/compare", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
   try {
-    const comparison = await browserService.compareRefs({
+    const repositoryClient = createRepositoryObjectClient(c.env);
+    const comparison = await repositoryClient.compareRefs({
+      repositoryId: repository.id,
       owner,
       repo,
       baseRef,
@@ -2362,7 +2361,7 @@ router.get("/repos/:owner/:repo/contents", optionalSession, async (c) => {
     throw new HTTPException(404, { message: "Repository not found" });
   }
 
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+  const repositoryClient = createRepositoryObjectClient(c.env);
   const browseInput: { owner: string; repo: string; ref?: string; path?: string } = {
     owner,
     repo
@@ -2377,7 +2376,10 @@ router.get("/repos/:owner/:repo/contents", optionalSession, async (c) => {
   }
 
   try {
-    const contents = await browserService.browseRepositoryContents(browseInput);
+    const contents = await repositoryClient.browseRepositoryContents({
+      repositoryId: repository.id,
+      ...browseInput
+    });
     return c.json(contents);
   } catch (error) {
     if (error instanceof RepositoryBrowseInvalidPathError) {
@@ -2583,8 +2585,8 @@ router.post("/repos/:owner/:repo/issues", requireSession, async (c) => {
     issueAcceptanceCriteria: issue.acceptance_criteria,
     comments: []
   });
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
   const requestOrigin = new URL(c.req.url).origin;
 
   await triggerActionWorkflows({
@@ -2765,8 +2767,8 @@ router.patch("/repos/:owner/:repo/issues/:number", requireSession, async (c) => 
   }
   const hasActionsMention = containsActionsMention({ title: issue.title, body: issue.body });
   if (!hadActionsMention && hasActionsMention) {
-    const storageService = new StorageService(c.env.GIT_BUCKET);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+    const repositoryClient = createRepositoryObjectClient(c.env);
+    const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
     await triggerMentionActionRun({
       env: c.env,
       ...executionCtxArg(c),
@@ -2838,8 +2840,8 @@ router.post("/repos/:owner/:repo/issues/:number/comments", requireSession, async
     issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
   const requestOrigin = new URL(c.req.url).origin;
 
   if (!isActionsComment) {
@@ -2949,8 +2951,8 @@ router.post("/repos/:owner/:repo/issues/:number/assign-agent", requireSession, a
     issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
   const agentType = input.agentType ?? "codex";
 
   const execution = await triggerInteractiveAgentSession({
@@ -3033,8 +3035,8 @@ router.post("/repos/:owner/:repo/issues/:number/resume-agent", requireSession, a
     issueAcceptanceCriteria: issue.acceptance_criteria,
     comments
   });
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const defaultBranchTarget = await resolveDefaultBranchTarget(storageService, owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
   const agentType = input.agentType ?? "codex";
 
   const execution = await triggerInteractiveAgentSession({
@@ -3326,7 +3328,8 @@ router.get("/repos/:owner/:repo/pulls/:number/review-threads", optionalSession, 
   }
 
   const reviewThreads = await enrichPullRequestReviewThreads({
-    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    browserService: createRepositoryObjectClient(c.env),
+    repositoryId: repository.id,
     owner,
     repo,
     pullRequest,
@@ -3388,8 +3391,9 @@ router.post("/repos/:owner/:repo/pulls/:number/review-threads", requireSession, 
   if (pullRequest.state !== "open") {
     throw new HTTPException(409, { message: "Pull request must be open to create a review thread" });
   }
-  const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
-  const comparison = await browserService.compareRefs({
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const comparison = await repositoryClient.compareRefs({
+    repositoryId: repository.id,
     owner,
     repo,
     baseRef: pullRequest.base_ref,
@@ -3425,7 +3429,8 @@ router.post("/repos/:owner/:repo/pulls/:number/review-threads", requireSession, 
     suggestion
   });
   const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
-    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    browserService: repositoryClient,
+    repositoryId: repository.id,
     owner,
     repo,
     pullRequest,
@@ -3502,11 +3507,12 @@ router.post(
     if (existingThread.status === "resolved") {
       throw new HTTPException(409, { message: "Resolved review threads cannot be updated" });
     }
-    const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+    const repositoryClient = createRepositoryObjectClient(c.env);
     const [threadWithAnchor] =
       input.suggestedCode !== undefined
         ? await enrichPullRequestReviewThreads({
-            browserService,
+            browserService: repositoryClient,
+            repositoryId: repository.id,
             owner,
             repo,
             pullRequest,
@@ -3551,7 +3557,8 @@ router.post(
     }
 
     const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
-      browserService,
+      browserService: repositoryClient,
+      repositoryId: repository.id,
       owner,
       repo,
       pullRequest,
@@ -3610,7 +3617,8 @@ router.post(
     }
     if (existingThread.status === "resolved") {
       const [enrichedExistingThread] = await enrichPullRequestReviewThreads({
-        browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+        browserService: createRepositoryObjectClient(c.env),
+        repositoryId: repository.id,
         owner,
         repo,
         pullRequest,
@@ -3630,7 +3638,8 @@ router.post(
     }
 
     const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
-      browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+      browserService: createRepositoryObjectClient(c.env),
+      repositoryId: repository.id,
       owner,
       repo,
       pullRequest,
@@ -3694,7 +3703,8 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
     pullRequestService.listPullRequestReviewThreads(repository.id, number)
   ]);
   const reviewThreads = await enrichPullRequestReviewThreads({
-    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    browserService: createRepositoryObjectClient(c.env),
+    repositoryId: repository.id,
     owner,
     repo,
     pullRequest,
@@ -3818,8 +3828,12 @@ router.post("/repos/:owner/:repo/pulls", requireSession, async (c) => {
     throw new HTTPException(403, { message: "Forbidden" });
   }
 
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const branchRefs = await storageService.listHeadRefs(owner, repo);
+  const repositoryClient = createRepositoryObjectClient(c.env);
+  const branchRefs = await repositoryClient.listHeadRefs({
+    repositoryId: repository.id,
+    owner,
+    repo
+  });
   const baseRef = branchRefs.find((item) => item.name === input.baseRef);
   if (!baseRef) {
     throw new HTTPException(400, { message: "Base branch not found" });
@@ -4111,9 +4125,10 @@ router.patch("/repos/:owner/:repo/pulls/:number", requireSession, async (c) => {
     if (existingPullRequest.state !== "open") {
       throw new HTTPException(409, { message: "Only open pull requests can be merged" });
     }
-    const mergeService = new PullRequestMergeService(new StorageService(c.env.GIT_BUCKET));
     try {
-      mergeResult = await mergeService.squashMergePullRequest({
+      const repositoryClient = createRepositoryObjectClient(c.env);
+      mergeResult = await repositoryClient.squashMergePullRequest({
+        repositoryId: repository.id,
         owner,
         repo,
         pullRequest: {
@@ -5397,7 +5412,7 @@ router.post("/repos", requireSession, async (c) => {
   const name = assertString(payload.name, "name");
   assertRepositoryName(name);
   const repositoryService = new RepositoryService(c.env.DB);
-  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const repositoryClient = createRepositoryObjectClient(c.env);
   const sessionUser = mustSessionUser(c);
   let createdRepoId: string | null = null;
 
@@ -5424,11 +5439,21 @@ router.post("/repos", requireSession, async (c) => {
 
     const created = await repositoryService.createRepository(createRepoInput);
     createdRepoId = created.id;
-    await storageService.initializeRepository(sessionUser.username, name);
+    await repositoryClient.initializeRepository({
+      repositoryId: created.id,
+      owner: sessionUser.username,
+      repo: name
+    });
   } catch (error) {
     if (createdRepoId) {
       await repositoryService.deleteRepositoryById(createdRepoId).catch(() => undefined);
-      await storageService.deleteRepository(sessionUser.username, name).catch(() => undefined);
+      await repositoryClient
+        .deleteRepository({
+          repositoryId: createdRepoId,
+          owner: sessionUser.username,
+          repo: name
+        })
+        .catch(() => undefined);
     }
     if (isUniqueConstraintError(error)) {
       throw new HTTPException(409, { message: "Repository already exists" });
@@ -5445,7 +5470,7 @@ router.patch("/repos/:owner/:repo", requireSession, async (c) => {
   const payload = await parseJsonObject(c.req.raw);
   const sessionUser = mustSessionUser(c);
   const repositoryService = new RepositoryService(c.env.DB);
-  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const repositoryClient = createRepositoryObjectClient(c.env);
 
   const repository = await repositoryService.findRepository(owner, repoName);
   if (!repository) {
@@ -5474,7 +5499,12 @@ router.patch("/repos/:owner/:repo", requireSession, async (c) => {
 
   let renamed = false;
   if (nextName) {
-    await storageService.renameRepository(owner, repoName, nextName);
+    await repositoryClient.renameRepository({
+      repositoryId: repository.id,
+      owner,
+      repo: repoName,
+      nextRepo: nextName
+    });
     renamed = true;
   }
 
@@ -5486,7 +5516,14 @@ router.patch("/repos/:owner/:repo", requireSession, async (c) => {
     });
   } catch (error) {
     if (renamed && nextName) {
-      await storageService.renameRepository(owner, nextName, repoName).catch(() => undefined);
+      await repositoryClient
+        .renameRepository({
+          repositoryId: repository.id,
+          owner,
+          repo: nextName,
+          nextRepo: repoName
+        })
+        .catch(() => undefined);
     }
     if (isUniqueConstraintError(error)) {
       throw new HTTPException(409, { message: "Repository already exists" });
@@ -5502,7 +5539,7 @@ router.delete("/repos/:owner/:repo", requireSession, async (c) => {
   const repoName = c.req.param("repo");
   const sessionUser = mustSessionUser(c);
   const repositoryService = new RepositoryService(c.env.DB);
-  const storageService = new StorageService(c.env.GIT_BUCKET);
+  const repositoryClient = createRepositoryObjectClient(c.env);
 
   const repository = await repositoryService.findRepository(owner, repoName);
   if (!repository) {
@@ -5512,7 +5549,11 @@ router.delete("/repos/:owner/:repo", requireSession, async (c) => {
     throw new HTTPException(403, { message: "Forbidden" });
   }
 
-  await storageService.deleteRepository(owner, repoName);
+  await repositoryClient.deleteRepository({
+    repositoryId: repository.id,
+    owner,
+    repo: repoName
+  });
   await repositoryService.deleteRepositoryById(repository.id);
   return c.json({ ok: true });
 });

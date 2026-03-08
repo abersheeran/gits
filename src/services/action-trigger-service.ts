@@ -95,6 +95,7 @@ export async function scheduleActionRunExecution(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -277,6 +278,7 @@ export async function triggerMentionActionRun(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -344,6 +346,7 @@ export async function triggerActionWorkflows(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -430,6 +433,7 @@ export async function triggerInteractiveAgentSession(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"

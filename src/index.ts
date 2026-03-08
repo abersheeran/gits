@@ -8,6 +8,7 @@ import {
 } from "./actions/actions-container";
 import app from "./app";
 import { consumeActionRunQueueBatch } from "./services/action-run-queue-service";
+import { RepositoryObject } from "./services/repository-object";
 import type { AppBindings } from "./types";
 
 export {
@@ -16,7 +17,8 @@ export {
   ActionsContainerStandard1,
   ActionsContainerStandard2,
   ActionsContainerStandard3,
-  ActionsContainerStandard4
+  ActionsContainerStandard4,
+  RepositoryObject
 };
 
 export default {

@@ -30,9 +30,12 @@ function createService(options?: {
   } as unknown as RepositoryService;
 
   const storageService = {
+    repoPrefix: vi.fn().mockImplementation((owner: string, repo: string) => `${owner}/${repo}`),
     listRefs: vi
       .fn()
       .mockResolvedValue(options?.refs ?? [{ name: "refs/heads/main", oid: MAIN_OID }]),
+    listRepositoryKeys: vi.fn().mockResolvedValue([]),
+    getBytes: vi.fn().mockResolvedValue(null),
     listHeadRefs: vi
       .fn()
       .mockResolvedValue(options?.refs ?? [{ name: "refs/heads/main", oid: MAIN_OID }]),

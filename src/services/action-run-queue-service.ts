@@ -35,6 +35,7 @@ export async function consumeActionRunQueueMessage(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"
@@ -87,6 +88,7 @@ export async function consumeActionRunQueueBatch(input: {
     AppBindings,
     | "DB"
     | "GIT_BUCKET"
+    | "REPOSITORY_OBJECTS"
     | "JWT_SECRET"
     | "ACTIONS_RUNNER"
     | "ACTIONS_RUNNER_BASIC"

@@ -66,6 +66,58 @@ async function listFilesRecursive(fs: MutableGitFs, root: string): Promise<strin
   return files;
 }
 
+async function readTextFile(fs: MutableGitFs, path: string): Promise<string | null> {
+  try {
+    const content = await fs.promises.readFile(path, "utf8");
+    return typeof content === "string" ? content : new TextDecoder().decode(content);
+  } catch {
+    return null;
+  }
+}
+
+export async function listRepositoryRefsFromFs(args: {
+  fs: MutableGitFs;
+  gitdir: string;
+  prefix?: string;
+}): Promise<Array<{ name: string; oid: string }>> {
+  const normalizedPrefix = (args.prefix ?? "refs/")
+    .replaceAll("\\", "/")
+    .replace(/^\/+|\/+$/g, "");
+  const rootPath = `${args.gitdir}/${normalizedPrefix}`;
+  const files = await listFilesRecursive(args.fs, rootPath);
+  const refs: Array<{ name: string; oid: string }> = [];
+
+  for (const file of files) {
+    const content = await readTextFile(args.fs, file);
+    const oid = content?.trim() ?? null;
+    if (!oid || !/^[0-9a-f]{40}$/i.test(oid)) {
+      continue;
+    }
+
+    refs.push({
+      name: file.slice(args.gitdir.length + 1).replaceAll("\\", "/"),
+      oid: oid.toLowerCase()
+    });
+  }
+
+  refs.sort((left, right) => left.name.localeCompare(right.name));
+  return refs;
+}
+
+export async function syncLoadedRepositoryHeadState(
+  loaded: LoadedRepository
+): Promise<LoadedRepository> {
+  const fs = loaded.fs as MutableGitFs;
+  const headRaw = await readTextFile(fs, `${loaded.gitdir}/HEAD`);
+  loaded.head = headRaw?.trim() ?? null;
+  loaded.headRefs = await listRepositoryRefsFromFs({
+    fs,
+    gitdir: loaded.gitdir,
+    prefix: "refs/heads"
+  });
+  return loaded;
+}
+
 export async function loadRepositoryFromStorage(
   storage: StorageService,
   owner: string,
@@ -110,13 +162,13 @@ export async function loadRepositoryFromStorage(
     await writeFileRecursive(fs, `${gitdir}/HEAD`, ensureTrailingNewline(effectiveHead));
   }
 
-  return {
+  return syncLoadedRepositoryHeadState({
     fs,
     dir,
     gitdir,
     head: effectiveHead ?? null,
     headRefs
-  };
+  });
 }
 
 export async function persistRepositoryToStorage(args: {

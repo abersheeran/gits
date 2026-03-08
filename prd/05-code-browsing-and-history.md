@@ -12,6 +12,9 @@
   - 默认分支
   - 分支列表
   - README 渲染
+- 单仓库缓存协调：
+  - 仓库详情、contents、commits、history、compare 全部经由 `RepositoryObject`
+  - 同一仓库的多个并发浏览请求共享同一次 repo hydrate
 - 文件与目录浏览：
   - tree / blob 路由
   - 文本文件预览
@@ -60,9 +63,9 @@
 
 ### 当前已实现流程
 
-1. 用户进入仓库后可以浏览树、文件、README。
-2. 用户可以查看提交历史、单提交详情和 compare diff。
-3. PR 页面复用了结构化 diff 结果，用于创建 anchored review thread。
+1. 用户进入仓库后，Worker 按 `repository.id` 将浏览请求路由到单仓库 `RepositoryObject`。
+2. `RepositoryObject` 复用已 hydrate 的内存仓库，返回树、文件、README、提交历史和 compare diff。
+3. PR 页面复用了同一仓库缓存下的结构化 diff 结果，用于创建和重锚 anchored review thread。
 
 ### 目标流程
 
@@ -84,6 +87,7 @@
 ## 6. 关键代码文件
 
 - `src/services/repository-browser-service.ts`
+- `src/services/repository-object.ts`
 - `src/routes/api.ts`
 - `web/src/pages/repository-page.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
@@ -94,6 +98,7 @@
 - 当前没有全文搜索。
 - 当前没有 Context Bundle。
 - 当前代码浏览更多还是“仓库页面”，还不是“任务上下文页面”。
+- 当前浏览缓存只在单个 `RepositoryObject` 实例内存中生效；实例回收后会重新从 R2 hydrate。
 
 下一步优先级：
 

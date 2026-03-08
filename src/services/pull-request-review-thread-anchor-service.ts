@@ -1,4 +1,4 @@
-import { RepositoryBrowserService, type RepositoryCompareResult } from "./repository-browser-service";
+import type { RepositoryCompareResult } from "./repository-browser-service";
 import type {
   PullRequestRecord,
   PullRequestReviewThreadAnchorRecord,
@@ -6,6 +6,16 @@ import type {
 } from "../types";
 
 type AnchorLocation = Omit<PullRequestReviewThreadAnchorRecord, "status" | "patchset_changed" | "message">;
+
+export type RepositoryComparisonReader = {
+  compareRefs(input: {
+    repositoryId: string;
+    owner: string;
+    repo: string;
+    baseRef: string;
+    headRef: string;
+  }): Promise<RepositoryCompareResult>;
+};
 
 function buildAnchorLabel(args: {
   path: string;
@@ -172,7 +182,8 @@ function mapLineNumberAcrossComparison(
 }
 
 async function remapAnchorLocation(args: {
-  browserService: RepositoryBrowserService;
+  browserService: RepositoryComparisonReader;
+  repositoryId: string;
   owner: string;
   repo: string;
   pullRequest: PullRequestRecord;
@@ -196,6 +207,7 @@ async function remapAnchorLocation(args: {
     args.comparisonCache.get(cacheKey) ??
     args.browserService
       .compareRefs({
+        repositoryId: args.repositoryId,
         owner: args.owner,
         repo: args.repo,
         baseRef: fromOid,
@@ -232,7 +244,8 @@ async function remapAnchorLocation(args: {
 }
 
 export async function enrichPullRequestReviewThreads(args: {
-  browserService: RepositoryBrowserService;
+  browserService: RepositoryComparisonReader;
+  repositoryId: string;
   owner: string;
   repo: string;
   pullRequest: PullRequestRecord;
@@ -245,6 +258,7 @@ export async function enrichPullRequestReviewThreads(args: {
     if (!currentComparisonPromise) {
       currentComparisonPromise = args.browserService
         .compareRefs({
+          repositoryId: args.repositoryId,
           owner: args.owner,
           repo: args.repo,
           baseRef: args.pullRequest.base_ref,
@@ -308,6 +322,7 @@ export async function enrichPullRequestReviewThreads(args: {
 
       const remappedLocation = await remapAnchorLocation({
         browserService: args.browserService,
+        repositoryId: args.repositoryId,
         owner: args.owner,
         repo: args.repo,
         pullRequest: args.pullRequest,

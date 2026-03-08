@@ -47,6 +47,10 @@
 	"durable_objects": {
 		"bindings": [
 			{
+				"name": "REPOSITORY_OBJECTS",
+				"class_name": "RepositoryObject"
+			},
+			{
 				"name": "ACTIONS_RUNNER",
 				"class_name": "ActionsContainer"
 			},
@@ -87,6 +91,12 @@
 				"ActionsContainerStandard2",
 				"ActionsContainerStandard3",
 				"ActionsContainerStandard4"
+			]
+		},
+		{
+			"tag": "repository-object-v1",
+			"new_sqlite_classes": [
+				"RepositoryObject"
 			]
 		}
 	],

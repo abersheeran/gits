@@ -16,6 +16,10 @@
   - `info/refs`
   - `git-upload-pack`
   - `git-receive-pack`
+- 单仓库单实例 Durable Object：
+  - `RepositoryObject` 以 `repository.id` 作为稳定 key
+  - 同一仓库的 Smart HTTP 读写与 Git 计算统一在同一个 DO 中执行
+  - DO 仅保留实例内内存缓存，冷启动时再从 R2 hydrate
 - R2 持久化：
   - `HEAD`
   - `refs/*`
@@ -31,6 +35,17 @@
 - 对象：`<owner>/<repo>/objects/aa/bbbbb...`
 
 ## 4. 面向主工作流仍需补足
+
+### 4.0 当前架构边界
+
+当前 Git 托管链路已经变成明确的两层：
+
+- Worker 负责鉴权、参数校验、D1 元数据和 workflow 编排。
+- `RepositoryObject` 负责仓库 hydrate、Git 协议处理、对象写回和同仓库缓存复用。
+
+这解决了“同一页面多个请求重复从 R2 重建仓库”的问题，但也引入了一条明确前提：
+
+- 仓库存储写入必须经由当前 Worker/DO 路径完成，不能再假设有外部进程直接改同一份 R2 数据。
 
 ### 4.1 Agent 生成提交的 provenance 还不够完整
 
@@ -52,9 +67,11 @@
 
 ### 当前已实现流程
 
-1. 客户端通过 Smart HTTP 读取 refs 和对象。
-2. Push 时服务端解析命令、接收 pack、写入对象和 refs。
-3. Push 成功后触发后续自动化。
+1. Worker 完成 Git 鉴权与仓库读写权限判断。
+2. Worker 按 `repository.id` 路由到单仓库 `RepositoryObject`。
+3. `RepositoryObject` 从 R2 hydrate 仓库到内存，并复用后续同仓库请求。
+4. Push 时 DO 解析命令、接收 pack、写入对象和 refs，并将最新 refs 回传 Worker。
+5. Push 成功后 Worker 根据更新后的 refs 触发后续自动化。
 
 ### 目标流程
 
@@ -73,6 +90,7 @@
 ## 7. 关键代码文件
 
 - `src/routes/git.ts`
+- `src/services/repository-object.ts`
 - `src/services/git-service.ts`
 - `src/services/git-protocol.ts`
 - `src/services/git-upload-pack-negotiation.ts`
@@ -83,6 +101,7 @@
 ## 8. 当前边界与下一步
 
 - 当前只支持 HTTP Git 远端。
+- 当前 Git 仓库缓存只保存在 `RepositoryObject` 实例内存中，不落 DO storage 快照。
 - Push provenance 还没有直接体现在提交和 PR 主界面中。
 - Git 存储层还没有把提交、artifact、Session 做更直接的关联输出。
 

@@ -2,6 +2,8 @@ import * as git from "isomorphic-git";
 import {
   loadRepositoryFromStorage,
   persistRepositoryToStorage,
+  syncLoadedRepositoryHeadState,
+  type LoadedRepository,
   type MutableGitFs
 } from "./git-repo-loader";
 import { StorageService } from "./storage-service";
@@ -74,13 +76,14 @@ export class PullRequestMergeService {
     }
   }
 
-  async squashMergePullRequest(input: {
+  private async squashMergePullRequestWithLoadedRepository(input: {
     owner: string;
     repo: string;
     pullRequest: PullRequestRecord;
     mergedBy: AuthUser;
+    loaded: LoadedRepository;
   }): Promise<PullRequestSquashMergeResult> {
-    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
+    const loaded = input.loaded;
     const baseOid = await this.resolveRequiredRef({
       fs: loaded.fs,
       dir: loaded.dir,
@@ -143,6 +146,7 @@ export class PullRequestMergeService {
         owner: input.owner,
         repo: input.repo
       });
+      await syncLoadedRepositoryHeadState(loaded);
 
       return {
         baseOid: mergeCommitOid,
@@ -159,5 +163,28 @@ export class PullRequestMergeService {
       }
       throw error;
     }
+  }
+
+  async squashMergePullRequest(input: {
+    owner: string;
+    repo: string;
+    pullRequest: PullRequestRecord;
+    mergedBy: AuthUser;
+  }): Promise<PullRequestSquashMergeResult> {
+    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
+    return this.squashMergePullRequestWithLoadedRepository({
+      ...input,
+      loaded
+    });
+  }
+
+  async squashMergePullRequestWithLoaded(input: {
+    owner: string;
+    repo: string;
+    pullRequest: PullRequestRecord;
+    mergedBy: AuthUser;
+    loaded: LoadedRepository;
+  }): Promise<PullRequestSquashMergeResult> {
+    return this.squashMergePullRequestWithLoadedRepository(input);
   }
 }

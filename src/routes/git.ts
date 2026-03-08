@@ -3,10 +3,9 @@ import { HTTPException } from "hono/http-exception";
 import { optionalSession, requireGitBasicAuth } from "../middleware/auth";
 import { isZeroOid, parseReceivePackRequest } from "../services/git-protocol";
 import { triggerActionWorkflows } from "../services/action-trigger-service";
-import { GitService } from "../services/git-service";
+import { createRepositoryObjectClient } from "../services/repository-object";
 import { RepositoryService } from "../services/repository-service";
-import { StorageService } from "../services/storage-service";
-import type { AppEnv, GitServiceName } from "../types";
+import type { AppEnv, AuthUser, GitServiceName, RepositoryRecord } from "../types";
 
 function parseService(raw: string | undefined): GitServiceName {
   if (raw !== "git-upload-pack" && raw !== "git-receive-pack") {
@@ -37,6 +36,48 @@ function executionCtxArg(source: {
 }): { executionCtx: ExecutionContext } | Record<string, never> {
   const executionCtx = getOptionalExecutionCtx(source);
   return executionCtx ? { executionCtx } : {};
+}
+
+function throwGitAuthChallenge(message: string): never {
+  throw new HTTPException(401, {
+    message,
+    res: new Response("Authentication required", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="Git service"'
+      }
+    })
+  });
+}
+
+async function resolveGitRepositoryAccess(args: {
+  repositoryService: RepositoryService;
+  owner: string;
+  repo: string;
+  user?: AuthUser;
+  write?: boolean;
+}): Promise<RepositoryRecord> {
+  const repository = await args.repositoryService.findRepository(args.owner, args.repo);
+  if (!repository) {
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  const canRead = await args.repositoryService.canReadRepository(repository, args.user?.id);
+  if (!canRead) {
+    if (!args.user && repository.is_private !== 0) {
+      throwGitAuthChallenge("Authentication required");
+    }
+    throw new HTTPException(404, { message: "Repository not found" });
+  }
+
+  if (args.write) {
+    const canWrite = await args.repositoryService.canWriteRepository(repository, args.user?.id);
+    if (!canWrite) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+  }
+
+  return repository;
 }
 
 const MAX_UPLOAD_PACK_BODY_BYTES = 8 * 1024 * 1024;
@@ -103,26 +144,21 @@ router.get("/:owner/:repo/info/refs", optionalSession, async (c) => {
   }
 
   const user = c.get("basicAuthUser") ?? c.get("sessionUser");
-  const serviceImpl = new GitService(
-    new RepositoryService(c.env.DB),
-    new StorageService(c.env.GIT_BUCKET)
-  );
+  const repositoryService = new RepositoryService(c.env.DB);
+  const repository = await resolveGitRepositoryAccess({
+    repositoryService,
+    owner,
+    repo,
+    ...(user ? { user } : {}),
+    ...(service === "git-receive-pack" ? { write: true } : {})
+  });
 
-  const requestInput: {
-    owner: string;
-    repo: string;
-    service: GitServiceName;
-    user?: (typeof user);
-  } = {
+  return createRepositoryObjectClient(c.env).handleInfoRefs({
+    repositoryId: repository.id,
     owner,
     repo,
     service
-  };
-  if (user) {
-    requestInput.user = user;
-  }
-
-  return serviceImpl.handleInfoRefs(requestInput);
+  });
 });
 
 router.post("/:owner/:repo/git-upload-pack", optionalSession, async (c) => {
@@ -139,28 +175,22 @@ router.post("/:owner/:repo/git-upload-pack", optionalSession, async (c) => {
     await requireGitBasicAuth(c, async () => undefined);
   }
 
-  const serviceImpl = new GitService(
-    new RepositoryService(c.env.DB),
-    new StorageService(c.env.GIT_BUCKET)
-  );
+  const repositoryService = new RepositoryService(c.env.DB);
   const body = await readBodyWithLimit(c, uploadPackBodyLimit(c));
 
   const user = c.get("basicAuthUser") ?? c.get("sessionUser");
-  const requestInput: {
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-    user?: (typeof user);
-  } = {
+  const repository = await resolveGitRepositoryAccess({
+    repositoryService,
+    owner,
+    repo,
+    ...(user ? { user } : {})
+  });
+  return createRepositoryObjectClient(c.env).handleUploadPack({
+    repositoryId: repository.id,
     owner,
     repo,
     body
-  };
-  if (user) {
-    requestInput.user = user;
-  }
-
-  return serviceImpl.handleUploadPack(requestInput);
+  });
 });
 
 router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => {
@@ -172,10 +202,7 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
     throw new HTTPException(415, { message: "Unsupported content type" });
   }
 
-  const serviceImpl = new GitService(
-    new RepositoryService(c.env.DB),
-    new StorageService(c.env.GIT_BUCKET)
-  );
+  const repositoryService = new RepositoryService(c.env.DB);
   const body = await readBodyWithLimit(c, receivePackBodyLimit(c));
   let receivePackRequest: ReturnType<typeof parseReceivePackRequest> | null = null;
   try {
@@ -185,33 +212,32 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
   }
 
   const user = c.get("basicAuthUser");
-  const requestInput: {
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-    user?: (typeof user);
-  } = {
+  const repository = await resolveGitRepositoryAccess({
+    repositoryService,
+    owner,
+    repo,
+    ...(user ? { user } : {}),
+    write: true
+  });
+  const receivePackResult = await createRepositoryObjectClient(c.env).handleReceivePack({
+    repositoryId: repository.id,
     owner,
     repo,
     body
-  };
-  if (user) {
-    requestInput.user = user;
-  }
-
-  const response = await serviceImpl.handleReceivePack(requestInput);
-  if (!response.ok || !receivePackRequest || !user) {
+  });
+  const response = receivePackResult.response;
+  if (
+    !response.ok ||
+    !receivePackRequest ||
+    !user ||
+    !receivePackResult.repositoryUpdated
+  ) {
     return response;
   }
 
-  const repositoryService = new RepositoryService(c.env.DB);
-  const repository = await repositoryService.findRepository(owner, repo);
-  if (!repository) {
-    return response;
-  }
-  const storageService = new StorageService(c.env.GIT_BUCKET);
-  const refs = await storageService.listRefs(owner, repo, "refs/");
-  const refsByName = new Map(refs.map((ref) => [ref.name, ref.oid]));
+  const refsByName = new Map(
+    receivePackResult.updatedRefs.map((ref) => [ref.name, ref.oid] as const)
+  );
 
   for (const command of receivePackRequest.commands) {
     if (isZeroOid(command.newOid)) {

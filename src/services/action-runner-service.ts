@@ -12,7 +12,7 @@ import {
   extractValidationReportFromText,
   parseAgentSessionValidationReport
 } from "./agent-session-validation-report";
-import { StorageService } from "./storage-service";
+import { createRepositoryObjectClient } from "./repository-object";
 import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 import { createSecretRedactor } from "../utils/secret-redaction";
 
@@ -520,6 +520,7 @@ export async function executeActionRun(input: {
   env: {
     DB: D1Database;
     GIT_BUCKET: R2Bucket;
+    REPOSITORY_OBJECTS: DurableObjectNamespace;
     JWT_SECRET: string;
     ACTIONS_RUNNER?: DurableObjectNamespace;
     ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
@@ -548,7 +549,7 @@ export async function executeActionRun(input: {
   const agentSessionService = new AgentSessionService(input.env.DB);
   const workflowTaskFlowService = new WorkflowTaskFlowService(
     input.env.DB,
-    new StorageService(input.env.GIT_BUCKET)
+    createRepositoryObjectClient(input.env)
   );
   const recordRunObservability = async (
     args: Parameters<AgentSessionService["recordRunObservability"]>[0]

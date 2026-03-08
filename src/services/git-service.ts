@@ -11,7 +11,13 @@ import {
   parseReceivePackRequest,
   parseUploadPackRequest
 } from "./git-protocol";
-import { loadRepositoryFromStorage, persistRepositoryToStorage } from "./git-repo-loader";
+import {
+  listRepositoryRefsFromFs,
+  loadRepositoryFromStorage,
+  persistRepositoryToStorage,
+  syncLoadedRepositoryHeadState,
+  type LoadedRepository
+} from "./git-repo-loader";
 import { ProtocolError, UnsupportedFeatureError } from "./git-errors";
 import {
   computeCommitSetForPack,
@@ -263,17 +269,17 @@ export class GitService {
     await args.fs.promises.writeFile(`${args.gitdir}/HEAD`, `ref: ${nextHead}\n`);
   }
 
-  async handleInfoRefs(args: RefsArgs): Promise<Response> {
-    await this.resolveRepo(args, args.service === "git-receive-pack");
-
-    const refs = await this.storage.listRefs(args.owner, args.repo, "refs/");
-    const storedHead = await this.storage.readHead(args.owner, args.repo);
-    const { headRef, headOid } = resolveHeadRef(refs, storedHead);
+  private buildInfoRefsResponse(args: {
+    service: GitServiceName;
+    refs: Array<{ name: string; oid: string }>;
+    storedHead: string | null;
+  }): Response {
+    const { headRef, headOid } = resolveHeadRef(args.refs, args.storedHead);
     const capabilities = capabilityListFor(args.service, headRef);
     const advertisedRefs =
       headOid !== null
-        ? [{ name: "HEAD", oid: headOid }, ...refs]
-        : refs;
+        ? [{ name: "HEAD", oid: headOid }, ...args.refs]
+        : args.refs;
     const chunks: Uint8Array[] = [
       encodeTextPktLine(`# service=${args.service}\n`),
       encodeFlushPktLine()
@@ -306,9 +312,10 @@ export class GitService {
     });
   }
 
-  async handleUploadPack(args: UploadPackArgs): Promise<Response> {
-    await this.resolveRepo(args, false);
-
+  private async executeUploadPack(args: {
+    body: ArrayBuffer;
+    loaded: LoadedRepository;
+  }): Promise<Response> {
     let capabilities: Set<string> | undefined;
     try {
       const request = parseUploadPackRequest(args.body);
@@ -318,19 +325,18 @@ export class GitService {
         throw new ProtocolError(`deepen exceeds maximum (${MAX_DEEPEN})`);
       }
 
-      const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
       const cache: Record<string, unknown> = {};
       const resolvedWants = await resolveWants({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
+        fs: args.loaded.fs,
+        dir: args.loaded.dir,
+        gitdir: args.loaded.gitdir,
         wants: request.wants,
         cache
       });
       const common = await findCommonHaves({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
+        fs: args.loaded.fs,
+        dir: args.loaded.dir,
+        gitdir: args.loaded.gitdir,
         wantCommits: resolvedWants.commitWants,
         haves: request.haves,
         cache
@@ -344,9 +350,9 @@ export class GitService {
       }
 
       const commitSelection = await computeCommitSetForPack({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
+        fs: args.loaded.fs,
+        dir: args.loaded.dir,
+        gitdir: args.loaded.gitdir,
         wantCommits: resolvedWants.commitWants,
         commonOids: common,
         ...(request.deepen !== undefined ? { deepen: request.deepen } : {}),
@@ -355,9 +361,9 @@ export class GitService {
         cache
       });
       const packObjectOids = await computeObjectClosureForPack({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
+        fs: args.loaded.fs,
+        dir: args.loaded.dir,
+        gitdir: args.loaded.gitdir,
         commitOids: commitSelection.commitOids,
         extraOids: resolvedWants.extraObjectWants,
         ...(packFilter ? { filter: packFilter } : {}),
@@ -367,9 +373,9 @@ export class GitService {
       let packfile: Uint8Array | undefined;
       try {
         const pack = await git.packObjects({
-          fs: loaded.fs as never,
-          dir: loaded.dir,
-          gitdir: loaded.gitdir,
+          fs: args.loaded.fs as never,
+          dir: args.loaded.dir,
+          gitdir: args.loaded.gitdir,
           oids: packObjectOids,
           write: false,
           cache
@@ -412,26 +418,32 @@ export class GitService {
     }
   }
 
-  async handleReceivePack(args: ReceivePackArgs): Promise<Response> {
-    await this.resolveRepo(args, true);
-
+  private async executeReceivePack(args: {
+    owner: string;
+    repo: string;
+    body: ArrayBuffer;
+    loaded: LoadedRepository;
+  }): Promise<{
+    repositoryUpdated: boolean;
+    response: Response;
+    updatedRefs: Array<{ name: string; oid: string }>;
+  }> {
     let capabilities: Set<string> | undefined;
     try {
       const request = parseReceivePackRequest(args.body);
       capabilities = request.capabilities;
-      const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
-      const fs = loaded.fs as MutableFs;
+      const fs = args.loaded.fs as MutableFs;
 
       const hasWriteCommand = request.commands.some((command) => !isZeroOid(command.newOid));
       if (hasWriteCommand) {
         if (!request.packfile || request.packfile.byteLength === 0) {
           throw new ProtocolError("missing packfile");
         }
-        const packDir = `${loaded.gitdir}/objects/pack`;
+        const packDir = `${args.loaded.gitdir}/objects/pack`;
         const packFilename = `pack-${crypto.randomUUID().replaceAll("-", "")}.pack`;
         const packPath = `${packDir}/${packFilename}`;
-        const relativeGitdir = loaded.gitdir.startsWith(`${loaded.dir}/`)
-          ? loaded.gitdir.slice(loaded.dir.length + 1)
+        const relativeGitdir = args.loaded.gitdir.startsWith(`${args.loaded.dir}/`)
+          ? args.loaded.gitdir.slice(args.loaded.dir.length + 1)
           : ".git";
         const packFilepath = `${relativeGitdir}/objects/pack/${packFilename}`;
 
@@ -440,9 +452,9 @@ export class GitService {
 
         try {
           await git.indexPack({
-            fs: loaded.fs as never,
-            dir: loaded.dir,
-            gitdir: loaded.gitdir,
+            fs: args.loaded.fs as never,
+            dir: args.loaded.dir,
+            gitdir: args.loaded.gitdir,
             filepath: packFilepath
           });
         } catch (error) {
@@ -456,7 +468,11 @@ export class GitService {
               message: reason
             }))
           });
-          return this.receivePackResponse(payload);
+          return {
+            repositoryUpdated: false,
+            response: this.receivePackResponse(payload),
+            updatedRefs: []
+          };
         }
       }
 
@@ -488,9 +504,9 @@ export class GitService {
         let currentRefValue: string | null = null;
         try {
           currentRefValue = await git.resolveRef({
-            fs: loaded.fs as never,
-            dir: loaded.dir,
-            gitdir: loaded.gitdir,
+            fs: args.loaded.fs as never,
+            dir: args.loaded.dir,
+            gitdir: args.loaded.gitdir,
             ref: command.refName
           });
         } catch {
@@ -510,9 +526,9 @@ export class GitService {
         if (!isZeroOid(command.newOid)) {
           try {
             const object = await git.readObject({
-              fs: loaded.fs as never,
-              dir: loaded.dir,
-              gitdir: loaded.gitdir,
+              fs: args.loaded.fs as never,
+              dir: args.loaded.dir,
+              gitdir: args.loaded.gitdir,
               oid: command.newOid
             });
             if (command.refName.startsWith("refs/heads/") && object.type !== "commit") {
@@ -544,18 +560,22 @@ export class GitService {
           capabilities: request.capabilities,
           refStatuses
         });
-        return this.receivePackResponse(payload);
+        return {
+          repositoryUpdated: false,
+          response: this.receivePackResponse(payload),
+          updatedRefs: []
+        };
       }
 
       for (const command of request.commands) {
         if (isZeroOid(command.newOid)) {
-          await fs.promises.rm(`${loaded.gitdir}/${command.refName}`, { force: true });
+          await fs.promises.rm(`${args.loaded.gitdir}/${command.refName}`, { force: true });
           continue;
         }
         await git.writeRef({
-          fs: loaded.fs as never,
-          dir: loaded.dir,
-          gitdir: loaded.gitdir,
+          fs: args.loaded.fs as never,
+          dir: args.loaded.dir,
+          gitdir: args.loaded.gitdir,
           ref: command.refName,
           value: command.newOid,
           force: true
@@ -564,21 +584,31 @@ export class GitService {
 
       await this.ensureHeadAfterReceivePack({
         fs,
-        gitdir: loaded.gitdir
+        gitdir: args.loaded.gitdir
       });
       await persistRepositoryToStorage({
         storage: this.storage,
         fs,
-        gitdir: loaded.gitdir,
+        gitdir: args.loaded.gitdir,
         owner: args.owner,
         repo: args.repo
+      });
+      await syncLoadedRepositoryHeadState(args.loaded);
+      const updatedRefs = await listRepositoryRefsFromFs({
+        fs,
+        gitdir: args.loaded.gitdir,
+        prefix: "refs"
       });
 
       const payload = buildReceivePackReport({
         capabilities: request.capabilities,
         refStatuses
       });
-      return this.receivePackResponse(payload);
+      return {
+        repositoryUpdated: true,
+        response: this.receivePackResponse(payload),
+        updatedRefs
+      };
     } catch (error) {
       if (error instanceof ProtocolError) {
         const payload = buildReceivePackReport({
@@ -586,12 +616,85 @@ export class GitService {
           unpackError: error.message,
           refStatuses: []
         });
-        return this.receivePackResponse(payload);
+        return {
+          repositoryUpdated: false,
+          response: this.receivePackResponse(payload),
+          updatedRefs: []
+        };
       }
       if (error instanceof HTTPException) {
         throw error;
       }
       throw new HTTPException(500, { message: "receive-pack failed" });
     }
+  }
+
+  async handleInfoRefs(args: RefsArgs): Promise<Response> {
+    await this.resolveRepo(args, args.service === "git-receive-pack");
+
+    const refs = await this.storage.listRefs(args.owner, args.repo, "refs/");
+    const storedHead = await this.storage.readHead(args.owner, args.repo);
+    return this.buildInfoRefsResponse({
+      service: args.service,
+      refs,
+      storedHead
+    });
+  }
+
+  async handleInfoRefsWithLoaded(args: {
+    loaded: LoadedRepository;
+    service: GitServiceName;
+  }): Promise<Response> {
+    const refs = await listRepositoryRefsFromFs({
+      fs: args.loaded.fs as MutableFs,
+      gitdir: args.loaded.gitdir,
+      prefix: "refs"
+    });
+    return this.buildInfoRefsResponse({
+      service: args.service,
+      refs,
+      storedHead: args.loaded.head
+    });
+  }
+
+  async handleUploadPack(args: UploadPackArgs): Promise<Response> {
+    await this.resolveRepo(args, false);
+    const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
+    return this.executeUploadPack({
+      body: args.body,
+      loaded
+    });
+  }
+
+  async handleUploadPackWithLoaded(args: {
+    body: ArrayBuffer;
+    loaded: LoadedRepository;
+  }): Promise<Response> {
+    return this.executeUploadPack(args);
+  }
+
+  async handleReceivePack(args: ReceivePackArgs): Promise<Response> {
+    await this.resolveRepo(args, true);
+    const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
+    const result = await this.executeReceivePack({
+      owner: args.owner,
+      repo: args.repo,
+      body: args.body,
+      loaded
+    });
+    return result.response;
+  }
+
+  async handleReceivePackWithLoaded(args: {
+    owner: string;
+    repo: string;
+    body: ArrayBuffer;
+    loaded: LoadedRepository;
+  }): Promise<{
+    repositoryUpdated: boolean;
+    response: Response;
+    updatedRefs: Array<{ name: string; oid: string }>;
+  }> {
+    return this.executeReceivePack(args);
   }
 }

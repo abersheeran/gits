@@ -2,12 +2,8 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
-import {
-  PullRequestMergeConflictError,
-  PullRequestMergeService
-} from "../services/pull-request-merge-service";
-import { RepositoryBrowserService } from "../services/repository-browser-service";
-import { StorageService } from "../services/storage-service";
+import { PullRequestMergeConflictError } from "../services/pull-request-merge-service";
+import { RepositoryObjectClient } from "../services/repository-object";
 import { WorkflowTaskFlowService } from "../services/workflow-task-flow-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
@@ -24,6 +20,9 @@ function createBaseEnv(db: D1Database): AppEnv["Bindings"] {
   return {
     DB: db,
     GIT_BUCKET: {} as R2Bucket,
+    REPOSITORY_OBJECTS: {
+      getByName: vi.fn()
+    } as unknown as DurableObjectNamespace,
     JWT_SECRET: "test-secret",
     APP_ORIGIN: "http://localhost:8787"
   };
@@ -789,10 +788,10 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(StorageService.prototype, "readHead").mockResolvedValue("ref: refs/heads/main\n");
-    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
-      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
-    ]);
+    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
+      ref: "refs/heads/main",
+      sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    });
     const enqueueRun = vi.fn(async () => undefined);
     const now = Date.now();
     let createdRunPrompt = "";
@@ -981,10 +980,10 @@ describe("API issues and pull requests", () => {
     const reconcileIssueTaskStatus = vi
       .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
       .mockResolvedValue(reconciledIssue);
-    vi.spyOn(StorageService.prototype, "readHead").mockResolvedValue("ref: refs/heads/main\n");
-    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
-      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
-    ]);
+    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
+      ref: "refs/heads/main",
+      sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    });
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("workflow-interactive")
       .mockReturnValueOnce("run-issue-assign")
@@ -1192,7 +1191,7 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -1472,7 +1471,7 @@ describe("API issues and pull requests", () => {
       id: "actions-system-user",
       username: "actions"
     });
-    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -1750,7 +1749,7 @@ describe("API issues and pull requests", () => {
 
   it("re-anchors review threads after newer pull request commits", async () => {
     const compareRefs = vi
-      .spyOn(RepositoryBrowserService.prototype, "compareRefs")
+      .spyOn(RepositoryObjectClient.prototype, "compareRefs")
       .mockResolvedValueOnce({
         baseRef: "refs/heads/main",
         headRef: "refs/heads/feature",
@@ -1921,12 +1920,14 @@ describe("API issues and pull requests", () => {
     expect(body.reviewThreads[0]?.anchor?.start_line).toBe(14);
     expect(body.reviewThreads[0]?.anchor?.hunk_header).toBe("@@ -14,1 +14,1 @@");
     expect(compareRefs).toHaveBeenNthCalledWith(1, {
+      repositoryId: "repo-1",
       owner: "alice",
       repo: "demo",
       baseRef: "refs/heads/main",
       headRef: "refs/heads/feature"
     });
     expect(compareRefs).toHaveBeenNthCalledWith(2, {
+      repositoryId: "repo-1",
       owner: "alice",
       repo: "demo",
       baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1935,7 +1936,7 @@ describe("API issues and pull requests", () => {
   });
 
   it("marks review threads stale when they no longer map to the current diff", async () => {
-    vi.spyOn(RepositoryBrowserService.prototype, "compareRefs")
+    vi.spyOn(RepositoryObjectClient.prototype, "compareRefs")
       .mockResolvedValueOnce({
         baseRef: "refs/heads/main",
         headRef: "refs/heads/feature",
@@ -2109,7 +2110,7 @@ describe("API issues and pull requests", () => {
     const reconcileIssuesForPullRequest = vi
       .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssuesForPullRequest")
       .mockResolvedValue([]);
-    const compareRefs = vi.spyOn(RepositoryBrowserService.prototype, "compareRefs").mockResolvedValue({
+    const compareRefs = vi.spyOn(RepositoryObjectClient.prototype, "compareRefs").mockResolvedValue({
       baseRef: "refs/heads/main",
       headRef: "refs/heads/feature",
       baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2264,6 +2265,7 @@ describe("API issues and pull requests", () => {
       "const value = normalizePath(path);"
     );
     expect(compareRefs).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
       owner: "alice",
       repo: "demo",
       baseRef: "refs/heads/main",
@@ -2495,7 +2497,7 @@ describe("API issues and pull requests", () => {
       username: "bob"
     });
     const compareRefs = vi
-      .spyOn(RepositoryBrowserService.prototype, "compareRefs")
+      .spyOn(RepositoryObjectClient.prototype, "compareRefs")
       .mockResolvedValueOnce({
         baseRef: "refs/heads/main",
         headRef: "refs/heads/feature",
@@ -3317,7 +3319,7 @@ describe("API issues and pull requests", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(StorageService.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -3399,7 +3401,7 @@ describe("API issues and pull requests", () => {
       id: "owner-1",
       username: "alice"
     });
-    vi.spyOn(PullRequestMergeService.prototype, "squashMergePullRequest").mockResolvedValue({
+    vi.spyOn(RepositoryObjectClient.prototype, "squashMergePullRequest").mockResolvedValue({
       baseOid: "cccccccccccccccccccccccccccccccccccccccc",
       headOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       mergeCommitOid: "cccccccccccccccccccccccccccccccccccccccc",
@@ -3492,7 +3494,7 @@ describe("API issues and pull requests", () => {
       id: "owner-1",
       username: "alice"
     });
-    vi.spyOn(PullRequestMergeService.prototype, "squashMergePullRequest").mockRejectedValue(
+    vi.spyOn(RepositoryObjectClient.prototype, "squashMergePullRequest").mockRejectedValue(
       new PullRequestMergeConflictError()
     );
     const db = createMockD1Database([

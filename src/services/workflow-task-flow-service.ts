@@ -13,11 +13,8 @@ import { ActionsService } from "./actions-service";
 import { AgentSessionService } from "./agent-session-service";
 import { IssueService } from "./issue-service";
 import { PullRequestService } from "./pull-request-service";
-import {
-  RepositoryBrowserService,
-  type RepositoryCompareResult
-} from "./repository-browser-service";
-import { StorageService } from "./storage-service";
+import type { RepositoryCompareResult } from "./repository-browser-service";
+import type { RepositoryComparisonReader } from "./pull-request-review-thread-anchor-service";
 
 type LatestSourceExecutionState =
   | "missing"
@@ -103,17 +100,17 @@ export class WorkflowTaskFlowService {
 
   private readonly pullRequestService: PullRequestService;
 
-  private readonly browserService: RepositoryBrowserService;
+  private readonly browserService: RepositoryComparisonReader;
 
   constructor(
     private readonly db: D1Database,
-    storage: StorageService
+    browserService: RepositoryComparisonReader
   ) {
     this.actionsService = new ActionsService(db);
     this.agentSessionService = new AgentSessionService(db);
     this.issueService = new IssueService(db);
     this.pullRequestService = new PullRequestService(db);
-    this.browserService = new RepositoryBrowserService(storage);
+    this.browserService = browserService;
   }
 
   private async listLatestSourceState(
@@ -147,6 +144,7 @@ export class WorkflowTaskFlowService {
   ): Promise<Pick<RepositoryCompareResult, "mergeable"> | null> {
     try {
       const comparison = await this.browserService.compareRefs({
+        repositoryId: repository.id,
         owner: repository.owner_username,
         repo: repository.name,
         baseRef: pullRequest.base_ref,

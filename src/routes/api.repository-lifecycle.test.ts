@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
-import { StorageService } from "../services/storage-service";
+import { RepositoryObjectClient } from "../services/repository-object";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import type { AppEnv } from "../types";
 import apiRoutes from "./api";
@@ -18,6 +18,9 @@ function createBaseEnv(db: D1Database): AppEnv["Bindings"] {
   return {
     DB: db,
     GIT_BUCKET: {} as R2Bucket,
+    REPOSITORY_OBJECTS: {
+      getByName: vi.fn()
+    } as unknown as DurableObjectNamespace,
     JWT_SECRET: "test-secret",
     APP_ORIGIN: "http://localhost:8787"
   };
@@ -47,7 +50,7 @@ describe("API repository lifecycle and permission matrix", () => {
       username: "alice"
     });
     const renameSpy = vi
-      .spyOn(StorageService.prototype, "renameRepository")
+      .spyOn(RepositoryObjectClient.prototype, "renameRepository")
       .mockResolvedValue(undefined);
     const db = createMockD1Database([
       {
@@ -80,8 +83,22 @@ describe("API repository lifecycle and permission matrix", () => {
 
     expect(response.status).toBe(409);
     expect(renameSpy).toHaveBeenCalledTimes(2);
-    expect(renameSpy.mock.calls[0]).toEqual(["alice", "demo", "renamed"]);
-    expect(renameSpy.mock.calls[1]).toEqual(["alice", "renamed", "demo"]);
+    expect(renameSpy.mock.calls[0]).toEqual([
+      {
+        repositoryId: "repo-1",
+        owner: "alice",
+        repo: "demo",
+        nextRepo: "renamed"
+      }
+    ]);
+    expect(renameSpy.mock.calls[1]).toEqual([
+      {
+        repositoryId: "repo-1",
+        owner: "alice",
+        repo: "renamed",
+        nextRepo: "demo"
+      }
+    ]);
   });
 
   it("updates repository metadata and storage path for owner", async () => {
@@ -90,7 +107,7 @@ describe("API repository lifecycle and permission matrix", () => {
       username: "alice"
     });
     const renameSpy = vi
-      .spyOn(StorageService.prototype, "renameRepository")
+      .spyOn(RepositoryObjectClient.prototype, "renameRepository")
       .mockResolvedValue(undefined);
     let updateParams: unknown[] = [];
     const db = createMockD1Database([
@@ -127,7 +144,12 @@ describe("API repository lifecycle and permission matrix", () => {
 
     expect(response.status).toBe(200);
     expect(renameSpy).toHaveBeenCalledTimes(1);
-    expect(renameSpy).toHaveBeenCalledWith("alice", "demo", "renamed");
+    expect(renameSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo",
+      nextRepo: "renamed"
+    });
     expect(updateParams).toEqual(["renamed", "new description", 0, "repo-1"]);
   });
 
@@ -137,7 +159,7 @@ describe("API repository lifecycle and permission matrix", () => {
       username: "alice"
     });
     const deleteStorageSpy = vi
-      .spyOn(StorageService.prototype, "deleteRepository")
+      .spyOn(RepositoryObjectClient.prototype, "deleteRepository")
       .mockResolvedValue(undefined);
     let deleted = false;
     const db = createMockD1Database([
@@ -167,7 +189,11 @@ describe("API repository lifecycle and permission matrix", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deleteStorageSpy).toHaveBeenCalledWith("alice", "demo");
+    expect(deleteStorageSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo"
+    });
     expect(deleted).toBe(true);
   });
 
@@ -177,7 +203,7 @@ describe("API repository lifecycle and permission matrix", () => {
       username: "bob"
     });
     const listBranchesSpy = vi
-      .spyOn(StorageService.prototype, "listHeadRefs")
+      .spyOn(RepositoryObjectClient.prototype, "listHeadRefs")
       .mockResolvedValue([{ name: "refs/heads/main", oid: "0123456789abcdef0123456789abcdef01234567" }]);
     const db = createMockD1Database([
       {
@@ -202,7 +228,11 @@ describe("API repository lifecycle and permission matrix", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(listBranchesSpy).toHaveBeenCalledWith("alice", "demo");
+    expect(listBranchesSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo"
+    });
   });
 
   it("blocks collaborator administration for non-admin users", async () => {

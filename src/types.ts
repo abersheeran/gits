@@ -495,6 +495,7 @@ export type AgentSessionValidationSummary = {
 export type AppBindings = {
   DB: D1Database;
   GIT_BUCKET: R2Bucket;
+  REPOSITORY_OBJECTS: DurableObjectNamespace;
   ACTIONS_RUNNER?: DurableObjectNamespace;
   ACTIONS_RUNNER_BASIC?: DurableObjectNamespace;
   ACTIONS_RUNNER_STANDARD_1?: DurableObjectNamespace;
