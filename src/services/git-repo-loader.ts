@@ -1,6 +1,12 @@
 import { Volume, createFsFromVolume } from "memfs";
 import { StorageService } from "./storage-service";
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_META_KEY = "repository-snapshot/meta";
+const SNAPSHOT_FILE_PREFIX = "repository-snapshot/files/";
+
 export type MutableGitFs = {
   promises: {
     mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
@@ -17,6 +23,17 @@ export type LoadedRepository = {
   gitdir: string;
   head: string | null;
   headRefs: Array<{ name: string; oid: string }>;
+};
+
+export type RepositorySnapshotStorage = {
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  put<T = unknown>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  list<T = unknown>(options?: { prefix?: string }): Promise<Map<string, T>>;
+};
+
+type RepositorySnapshotMeta = {
+  version: number;
 };
 
 function dirname(path: string): string {
@@ -69,10 +86,103 @@ async function listFilesRecursive(fs: MutableGitFs, root: string): Promise<strin
 async function readTextFile(fs: MutableGitFs, path: string): Promise<string | null> {
   try {
     const content = await fs.promises.readFile(path, "utf8");
-    return typeof content === "string" ? content : new TextDecoder().decode(content);
+    return typeof content === "string" ? content : textDecoder.decode(content);
   } catch {
     return null;
   }
+}
+
+function createLoadedRepositoryFs(): {
+  fs: MutableGitFs;
+  dir: string;
+  gitdir: string;
+} {
+  const volume = new Volume();
+  const fs = createFsFromVolume(volume) as unknown as MutableGitFs;
+  const dir = "/repo";
+  const gitdir = "/repo/.git";
+  return { fs, dir, gitdir };
+}
+
+function toUint8Array(value: string | ArrayBuffer | ArrayBufferView): Uint8Array {
+  if (typeof value === "string") {
+    return textEncoder.encode(value);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+}
+
+async function readFileBytes(fs: MutableGitFs, path: string): Promise<Uint8Array> {
+  const content = await fs.promises.readFile(path);
+  return toUint8Array(content);
+}
+
+function snapshotFileKey(relativePath: string): string {
+  return `${SNAPSHOT_FILE_PREFIX}${relativePath.replaceAll("\\", "/")}`;
+}
+
+function normalizeSnapshotEntry(value: unknown): Uint8Array | null {
+  if (typeof value === "string") {
+    return textEncoder.encode(value);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return null;
+}
+
+async function initializeGitdir(fs: MutableGitFs, gitdir: string): Promise<void> {
+  await fs.promises.mkdir(gitdir, { recursive: true });
+  await fs.promises.mkdir(`${gitdir}/objects`, { recursive: true });
+  await fs.promises.mkdir(`${gitdir}/refs/heads`, { recursive: true });
+}
+
+async function loadRepositoryFromSnapshot(
+  snapshotStorage: RepositorySnapshotStorage
+): Promise<LoadedRepository | null> {
+  const meta = await snapshotStorage.get<RepositorySnapshotMeta>(SNAPSHOT_META_KEY);
+  if (!meta) {
+    return null;
+  }
+  if (meta.version !== SNAPSHOT_VERSION) {
+    await clearRepositorySnapshot(snapshotStorage);
+    return null;
+  }
+
+  const entries = await snapshotStorage.list<unknown>({ prefix: SNAPSHOT_FILE_PREFIX });
+  if (entries.size === 0) {
+    return null;
+  }
+
+  const { fs, dir, gitdir } = createLoadedRepositoryFs();
+  await initializeGitdir(fs, gitdir);
+
+  for (const [key, value] of [...entries.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const relative = key.startsWith(SNAPSHOT_FILE_PREFIX)
+      ? key.slice(SNAPSHOT_FILE_PREFIX.length)
+      : key;
+    if (!relative) {
+      continue;
+    }
+    const bytes = normalizeSnapshotEntry(value);
+    if (!bytes) {
+      continue;
+    }
+    await writeFileRecursive(fs, `${gitdir}/${relative}`, bytes);
+  }
+
+  return syncLoadedRepositoryHeadState({
+    fs,
+    dir,
+    gitdir,
+    head: null,
+    headRefs: []
+  });
 }
 
 export async function listRepositoryRefsFromFs(args: {
@@ -121,16 +231,18 @@ export async function syncLoadedRepositoryHeadState(
 export async function loadRepositoryFromStorage(
   storage: StorageService,
   owner: string,
-  repo: string
+  repo: string,
+  snapshotStorage?: RepositorySnapshotStorage
 ): Promise<LoadedRepository> {
-  const volume = new Volume();
-  const fs = createFsFromVolume(volume) as unknown as MutableGitFs;
-  const dir = "/repo";
-  const gitdir = "/repo/.git";
+  if (snapshotStorage) {
+    const snapshotLoaded = await loadRepositoryFromSnapshot(snapshotStorage);
+    if (snapshotLoaded) {
+      return snapshotLoaded;
+    }
+  }
 
-  await fs.promises.mkdir(gitdir, { recursive: true });
-  await fs.promises.mkdir(`${gitdir}/objects`, { recursive: true });
-  await fs.promises.mkdir(`${gitdir}/refs/heads`, { recursive: true });
+  const { fs, dir, gitdir } = createLoadedRepositoryFs();
+  await initializeGitdir(fs, gitdir);
 
   const repoPrefix = `${storage.repoPrefix(owner, repo)}/`;
   const repoKeys = await storage.listRepositoryKeys(owner, repo);
@@ -162,13 +274,59 @@ export async function loadRepositoryFromStorage(
     await writeFileRecursive(fs, `${gitdir}/HEAD`, ensureTrailingNewline(effectiveHead));
   }
 
-  return syncLoadedRepositoryHeadState({
+  const loaded = await syncLoadedRepositoryHeadState({
     fs,
     dir,
     gitdir,
     head: effectiveHead ?? null,
     headRefs
   });
+  if (snapshotStorage) {
+    await persistRepositorySnapshot({
+      snapshotStorage,
+      fs,
+      gitdir
+    });
+  }
+  return loaded;
+}
+
+export async function clearRepositorySnapshot(
+  snapshotStorage: RepositorySnapshotStorage
+): Promise<void> {
+  const keys = await snapshotStorage.list<unknown>({ prefix: SNAPSHOT_FILE_PREFIX });
+  for (const key of keys.keys()) {
+    await snapshotStorage.delete(key);
+  }
+  await snapshotStorage.delete(SNAPSHOT_META_KEY);
+}
+
+export async function persistRepositorySnapshot(args: {
+  snapshotStorage: RepositorySnapshotStorage;
+  fs: MutableGitFs;
+  gitdir: string;
+}): Promise<void> {
+  const files = await listFilesRecursive(args.fs, args.gitdir);
+  const desiredKeys = new Set<string>();
+
+  for (const file of files) {
+    const relative = file.slice(args.gitdir.length + 1);
+    const key = snapshotFileKey(relative);
+    const content = await readFileBytes(args.fs, file);
+    desiredKeys.add(key);
+    await args.snapshotStorage.put(key, content);
+  }
+
+  const existing = await args.snapshotStorage.list<unknown>({ prefix: SNAPSHOT_FILE_PREFIX });
+  for (const key of existing.keys()) {
+    if (!desiredKeys.has(key)) {
+      await args.snapshotStorage.delete(key);
+    }
+  }
+
+  await args.snapshotStorage.put(SNAPSHOT_META_KEY, {
+    version: SNAPSHOT_VERSION
+  } satisfies RepositorySnapshotMeta);
 }
 
 export async function persistRepositoryToStorage(args: {
@@ -177,6 +335,7 @@ export async function persistRepositoryToStorage(args: {
   gitdir: string;
   owner: string;
   repo: string;
+  snapshotStorage?: RepositorySnapshotStorage;
 }): Promise<void> {
   const files = await listFilesRecursive(args.fs, args.gitdir);
   const prefix = `${args.storage.repoPrefix(args.owner, args.repo)}/`;
@@ -185,9 +344,9 @@ export async function persistRepositoryToStorage(args: {
   for (const file of files) {
     const relative = file.slice(args.gitdir.length + 1);
     const key = `${prefix}${relative}`;
-    const content = await args.fs.promises.readFile(file);
+    const content = await readFileBytes(args.fs, file);
     desiredKeys.add(key);
-    await args.storage.put(key, content as ArrayBufferView | string);
+    await args.storage.put(key, content);
   }
 
   const existing = await args.storage.listRepositoryKeys(args.owner, args.repo);
@@ -195,5 +354,13 @@ export async function persistRepositoryToStorage(args: {
     if (!desiredKeys.has(key)) {
       await args.storage.delete(key);
     }
+  }
+
+  if (args.snapshotStorage) {
+    await persistRepositorySnapshot({
+      snapshotStorage: args.snapshotStorage,
+      fs: args.fs,
+      gitdir: args.gitdir
+    });
   }
 }

@@ -14,6 +14,7 @@ import {
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError
 } from "./repository-browser-service";
+import { clearRepositorySnapshot, type RepositorySnapshotStorage } from "./git-repo-loader";
 import { GitService } from "./git-service";
 import {
   PullRequestMergeBranchNotFoundError,
@@ -187,6 +188,8 @@ async function parseRepositoryObjectError(response: Response): Promise<Repositor
 export class RepositoryObject {
   private readonly storage: StorageService;
 
+  private readonly snapshotStorage?: RepositorySnapshotStorage;
+
   private readonly browserService: RepositoryBrowserService;
 
   private readonly gitService: GitService;
@@ -206,13 +209,14 @@ export class RepositoryObject {
   private hydrateRepo: string | null = null;
 
   constructor(
-    _state: DurableObjectState<unknown>,
+    state: DurableObjectState<unknown>,
     env: AppBindings
   ) {
+    this.snapshotStorage = state.storage as RepositorySnapshotStorage;
     this.storage = new StorageService(env.GIT_BUCKET);
-    this.browserService = new RepositoryBrowserService(this.storage);
-    this.gitService = new GitService({} as never, this.storage);
-    this.mergeService = new PullRequestMergeService(this.storage);
+    this.browserService = new RepositoryBrowserService(this.storage, this.snapshotStorage);
+    this.gitService = new GitService({} as never, this.storage, this.snapshotStorage);
+    this.mergeService = new PullRequestMergeService(this.storage, this.snapshotStorage);
   }
 
   private rememberContext(
@@ -383,6 +387,9 @@ export class RepositoryObject {
             typeof payload.defaultBranch === "string" ? payload.defaultBranch : undefined
           );
           this.clearCachedContext();
+          if (this.snapshotStorage) {
+            await clearRepositorySnapshot(this.snapshotStorage);
+          }
           return jsonResponse({ ok: true }, 201);
         }
         case "rename-repository": {
@@ -400,6 +407,9 @@ export class RepositoryObject {
           const repo = String(payload.repo ?? "");
           await this.storage.deleteRepository(owner, repo);
           this.clearCachedContext(owner, repo);
+          if (this.snapshotStorage) {
+            await clearRepositorySnapshot(this.snapshotStorage);
+          }
           return jsonResponse({ ok: true });
         }
         case "squash-merge-pull-request": {

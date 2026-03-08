@@ -1,5 +1,6 @@
 import { RepositoryObject } from "../services/repository-object";
 import type { AppBindings } from "../types";
+import { createMockDurableObjectState } from "./mock-durable-object-state";
 
 function toRequest(input: RequestInfo | URL, init?: RequestInit): Request {
   if (input instanceof Request) {
@@ -12,12 +13,18 @@ export function createMockRepositoryObjectNamespace(
   getEnv: () => AppBindings
 ): DurableObjectNamespace {
   const instances = new Map<string, RepositoryObject>();
+  const states = new Map<string, DurableObjectState<unknown>>();
 
   return {
     getByName(name: string) {
+      let state = states.get(name);
+      if (!state) {
+        state = createMockDurableObjectState();
+        states.set(name, state);
+      }
       let instance = instances.get(name);
       if (!instance) {
-        instance = new RepositoryObject({} as DurableObjectState<unknown>, getEnv());
+        instance = new RepositoryObject(state, getEnv());
         instances.set(name, instance);
       }
       return {
@@ -28,4 +35,3 @@ export function createMockRepositoryObjectNamespace(
     }
   } as DurableObjectNamespace;
 }
-

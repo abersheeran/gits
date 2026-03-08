@@ -2,6 +2,7 @@ import * as git from "isomorphic-git";
 import { Volume, createFsFromVolume } from "memfs";
 import { describe, expect, it } from "vitest";
 import type { PullRequestRecord } from "../types";
+import { createMockDurableObjectState } from "../test-utils/mock-durable-object-state";
 import { MockR2Bucket } from "../test-utils/mock-r2";
 import { loadRepositoryFromStorage } from "./git-repo-loader";
 import { PullRequestMergeConflictError, PullRequestMergeService } from "./pull-request-merge-service";
@@ -47,6 +48,7 @@ async function persistGitState(fs: FsLike, gitdir: string, bucket: MockR2Bucket)
 }
 
 async function createMergeFixture(kind: "clean" | "conflict"): Promise<{
+  bucket: MockR2Bucket;
   storage: StorageService;
   pullRequest: PullRequestRecord;
   mainTip: string;
@@ -159,6 +161,7 @@ async function createMergeFixture(kind: "clean" | "conflict"): Promise<{
   const storage = new StorageService(bucket as unknown as R2Bucket);
 
   return {
+    bucket,
     storage,
     pullRequest: {
       id: "pr-1",
@@ -265,5 +268,38 @@ describe("PullRequestMergeService", () => {
       ref: "refs/heads/main"
     });
     expect(mainRef).toBe(mainTip);
+  });
+
+  it("updates the durable object snapshot after squash merge", async () => {
+    const { bucket, storage, pullRequest } = await createMergeFixture("clean");
+    const snapshotState = createMockDurableObjectState();
+    const service = new PullRequestMergeService(storage, snapshotState.storage);
+
+    const result = await service.squashMergePullRequest({
+      owner: "alice",
+      repo: "demo",
+      pullRequest,
+      mergedBy: {
+        id: "owner-1",
+        username: "alice"
+      }
+    });
+
+    bucket.clear();
+
+    const loaded = await loadRepositoryFromStorage(
+      storage,
+      "alice",
+      "demo",
+      snapshotState.storage
+    );
+    const mainRef = await git.resolveRef({
+      fs: loaded.fs as never,
+      dir: loaded.dir,
+      gitdir: loaded.gitdir,
+      ref: "refs/heads/main"
+    });
+
+    expect(mainRef).toBe(result.mergeCommitOid);
   });
 });

@@ -64,6 +64,10 @@ export class MockR2Bucket {
     this.objects.delete(key);
   }
 
+  clear(): void {
+    this.objects.clear();
+  }
+
   async list(options?: R2ListOptions): Promise<R2Objects> {
     const prefix = options?.prefix ?? "";
     const cursor = Number.parseInt(options?.cursor ?? "0", 10);

@@ -1,6 +1,6 @@
 import * as git from "isomorphic-git";
 import { createTwoFilesPatch, diffLines } from "diff";
-import { loadRepositoryFromStorage } from "./git-repo-loader";
+import { loadRepositoryFromStorage, type RepositorySnapshotStorage } from "./git-repo-loader";
 import { StorageService } from "./storage-service";
 
 const OID_REGEX = /^[0-9a-f]{40}$/i;
@@ -409,10 +409,15 @@ function parseUnifiedDiffHunks(patch: string | null): RepositoryDiffHunk[] {
 }
 
 export class RepositoryBrowserService {
-  constructor(private readonly storage: StorageService) {}
+  constructor(
+    private readonly storage: StorageService,
+    private readonly snapshotStorage?: RepositorySnapshotStorage
+  ) {}
 
   async loadRepositoryContext(owner: string, repo: string): Promise<LoadedRepositoryContext> {
-    return buildLoadedRepositoryContext(await loadRepositoryFromStorage(this.storage, owner, repo));
+    return buildLoadedRepositoryContext(
+      await loadRepositoryFromStorage(this.storage, owner, repo, this.snapshotStorage)
+    );
   }
 
   private async ensureLoadedContext(

@@ -21,7 +21,7 @@ Git 托管与存储层是整个平台的底座，职责是：
   - Actions workflow 触发编排
 - `RepositoryObject` Durable Object 负责：
   - 按 `repository.id` 定位仓库
-  - 从 R2 hydrate 仓库到内存
+  - 优先从 DO storage 快照恢复仓库，缺失时再从 R2 hydrate 到内存
   - 复用同仓库后续请求的缓存上下文
   - Git 协议处理
   - 代码浏览读操作
@@ -31,7 +31,8 @@ Git 托管与存储层是整个平台的底座，职责是：
 
 - D1 保存仓库元数据与协作对象。
 - `GIT_BUCKET` R2 保存 `HEAD`、`refs/*`、`objects/*`。
-- DO 内只保留实例期内缓存，不做持久化快照。
+- `RepositoryObject` 的 DO storage 保存仓库快照，用于实例回收后的快速恢复。
+- DO 实例内存仍保留当前热缓存；R2 继续作为长期持久化存储。
 
 ## 3. 当前已实现能力
 
@@ -90,14 +91,23 @@ Git 托管与存储层是整个平台的底座，职责是：
 1. Worker 完成 Basic Auth 和仓库写权限校验。
 2. 请求按仓库路由到 `RepositoryObject`。
 3. DO 在内存仓库上执行 `receive-pack`。
-4. 更新后的 refs 持久化回 R2。
-5. Worker 根据更新后的 ref 触发 `push` workflows。
+4. 更新后的 refs 和 objects 持久化回 R2。
+5. 同步把最新 `.git` 文件树写入 DO storage 快照。
+6. Worker 根据更新后的 ref 触发 `push` workflows。
 
 ### 5.3 代码浏览/PR compare
 
 1. 仓库页或 PR compare 请求进入 `RepositoryObject`。
-2. 如果仓库尚未 hydrate，则从 R2 加载到内存。
-3. 后续同仓库浏览请求复用已加载上下文。
+2. 如果仓库尚未 hydrate，则优先尝试从 DO storage 快照恢复。
+3. 若快照不存在，再从 R2 加载到内存，并回写一份最新快照到 DO storage。
+4. 后续同仓库浏览请求复用已加载上下文。
+
+### 5.4 DO 实例回收后的恢复
+
+1. 同一 `repository.id` 的新 `RepositoryObject` 实例启动后，先检查 DO storage 是否已有仓库快照。
+2. 若存在快照，则直接恢复 `.git` 文件树和 HEAD/ref 视图，避免重新遍历 R2。
+3. 若不存在快照，则回退到 R2 hydrate，并在首次加载完成后建立快照。
+4. 仓库删除时同步清理 DO storage 快照，避免保留陈旧仓库状态。
 
 ## 6. 当前接口
 
@@ -129,10 +139,11 @@ Git 托管与存储层是整个平台的底座，职责是：
 - Agent 已能推分支、创建 PR、记录 branch ref。
 - 但 commit 与 session 的直接映射还没有稳定回流到仓库浏览和 PR 主视图。
 
-### 8.3 仓库缓存仍是实例内存级
+### 8.3 仓库缓存已升级为内存 + DO storage 快照
 
-- 这显著减少了同仓库重复 hydrate。
-- 但实例回收后仍需重新从 R2 加载，当前没有 DO storage 快照。
+- 当前已经从“仅实例内存缓存”提升为“实例内存缓存 + DO storage 快照”。
+- 这显著减少了同仓库重复 hydrate，也减少了实例回收后的 R2 重建成本。
+- 仍然存在的边界是：首次冷启动或快照不存在时，仍需回退到 R2 hydrate。
 
 ### 8.4 Git 写入和 review 结果的链接仍不够强
 
@@ -144,3 +155,4 @@ Git 托管与存储层是整个平台的底座，职责是：
 1. 增加 commit / branch / session 的 provenance 串联能力。
 2. 在 PR 和 Session 视图中更直接展示工作分支与最近提交来源。
 3. 继续把 Git 写入结果和 validation / artifact / review 摘要连接起来。
+4. 评估 DO storage 快照的体积控制、增量更新与观测指标。

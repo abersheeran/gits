@@ -4,7 +4,8 @@ import {
   persistRepositoryToStorage,
   syncLoadedRepositoryHeadState,
   type LoadedRepository,
-  type MutableGitFs
+  type MutableGitFs,
+  type RepositorySnapshotStorage
 } from "./git-repo-loader";
 import { StorageService } from "./storage-service";
 import type { AuthUser, PullRequestRecord } from "../types";
@@ -55,7 +56,10 @@ function buildCommitIdentity(user: AuthUser) {
 }
 
 export class PullRequestMergeService {
-  constructor(private readonly storage: StorageService) {}
+  constructor(
+    private readonly storage: StorageService,
+    private readonly snapshotStorage?: RepositorySnapshotStorage
+  ) {}
 
   private async resolveRequiredRef(args: {
     fs: unknown;
@@ -144,7 +148,8 @@ export class PullRequestMergeService {
         fs: loaded.fs as MutableGitFs,
         gitdir: loaded.gitdir,
         owner: input.owner,
-        repo: input.repo
+        repo: input.repo,
+        ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
       });
       await syncLoadedRepositoryHeadState(loaded);
 
@@ -171,7 +176,12 @@ export class PullRequestMergeService {
     pullRequest: PullRequestRecord;
     mergedBy: AuthUser;
   }): Promise<PullRequestSquashMergeResult> {
-    const loaded = await loadRepositoryFromStorage(this.storage, input.owner, input.repo);
+    const loaded = await loadRepositoryFromStorage(
+      this.storage,
+      input.owner,
+      input.repo,
+      this.snapshotStorage
+    );
     return this.squashMergePullRequestWithLoadedRepository({
       ...input,
       loaded

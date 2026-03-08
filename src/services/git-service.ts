@@ -16,7 +16,8 @@ import {
   loadRepositoryFromStorage,
   persistRepositoryToStorage,
   syncLoadedRepositoryHeadState,
-  type LoadedRepository
+  type LoadedRepository,
+  type RepositorySnapshotStorage
 } from "./git-repo-loader";
 import { ProtocolError, UnsupportedFeatureError } from "./git-errors";
 import {
@@ -148,7 +149,8 @@ type MutableFs = {
 export class GitService {
   constructor(
     private readonly repositories: RepositoryService,
-    private readonly storage: StorageService
+    private readonly storage: StorageService,
+    private readonly snapshotStorage?: RepositorySnapshotStorage
   ) {}
 
   private throwGitAuthChallenge(message: string): never {
@@ -591,7 +593,8 @@ export class GitService {
         fs,
         gitdir: args.loaded.gitdir,
         owner: args.owner,
-        repo: args.repo
+        repo: args.repo,
+        ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
       });
       await syncLoadedRepositoryHeadState(args.loaded);
       const updatedRefs = await listRepositoryRefsFromFs({
@@ -659,7 +662,12 @@ export class GitService {
 
   async handleUploadPack(args: UploadPackArgs): Promise<Response> {
     await this.resolveRepo(args, false);
-    const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
+    const loaded = await loadRepositoryFromStorage(
+      this.storage,
+      args.owner,
+      args.repo,
+      this.snapshotStorage
+    );
     return this.executeUploadPack({
       body: args.body,
       loaded
@@ -675,7 +683,12 @@ export class GitService {
 
   async handleReceivePack(args: ReceivePackArgs): Promise<Response> {
     await this.resolveRepo(args, true);
-    const loaded = await loadRepositoryFromStorage(this.storage, args.owner, args.repo);
+    const loaded = await loadRepositoryFromStorage(
+      this.storage,
+      args.owner,
+      args.repo,
+      this.snapshotStorage
+    );
     const result = await this.executeReceivePack({
       owner: args.owner,
       repo: args.repo,
