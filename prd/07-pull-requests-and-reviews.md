@@ -31,6 +31,8 @@ PR 是这款产品的交付中心。
   - merge summary
   - 关联 closing Issue 的任务完成度摘要
   - Task chain / Handoff 摘要
+- PR 页面现在显式补上 emoji fallback 字体栈，标题、正文、review/comment 与输入框里的原生 emoji 可稳定显示。
+- PR 上的 Reaction 现在使用真实 emoji 呈现，而不再回退成 `heart / rocket / laugh` 这类英文标签。
 - 最新 Agent provenance 摘要
 - `review summary` 现在按 reviewer 的“当前有效决策”汇总，而不是历史累计；同一 reviewer 后续 review 会覆盖前一次决定。
 - PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
