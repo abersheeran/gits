@@ -657,23 +657,49 @@ export class PullRequestService {
     changeRequests: number;
     comments: number;
   }> {
-    const row = await this.db
+    const rows = await this.db
       .prepare(
         `SELECT
-          SUM(CASE WHEN decision = 'approve' THEN 1 ELSE 0 END) AS approvals,
-          SUM(CASE WHEN decision = 'request_changes' THEN 1 ELSE 0 END) AS change_requests,
-          SUM(CASE WHEN decision = 'comment' THEN 1 ELSE 0 END) AS comments
+          id,
+          reviewer_id,
+          decision,
+          created_at
          FROM pull_request_reviews
-         WHERE repository_id = ? AND pull_request_number = ?`
+         WHERE repository_id = ? AND pull_request_number = ?
+         ORDER BY created_at ASC, id ASC`
       )
       .bind(repositoryId, pullRequestNumber)
-      .first<{ approvals: number | null; change_requests: number | null; comments: number | null }>();
+      .all<Pick<BasePullRequestReviewRow, "id" | "reviewer_id" | "decision" | "created_at">>();
 
-    return {
-      approvals: Number(row?.approvals ?? 0),
-      changeRequests: Number(row?.change_requests ?? 0),
-      comments: Number(row?.comments ?? 0)
-    };
+    const latestByReviewer = new Map<
+      string,
+      Pick<BasePullRequestReviewRow, "id" | "reviewer_id" | "decision" | "created_at">
+    >();
+    for (const row of rows.results) {
+      const current = latestByReviewer.get(row.reviewer_id);
+      if (
+        !current ||
+        row.created_at > current.created_at ||
+        (row.created_at === current.created_at && row.id > current.id)
+      ) {
+        latestByReviewer.set(row.reviewer_id, row);
+      }
+    }
+
+    let approvals = 0;
+    let changeRequests = 0;
+    let comments = 0;
+    for (const review of latestByReviewer.values()) {
+      if (review.decision === "approve") {
+        approvals += 1;
+      } else if (review.decision === "request_changes") {
+        changeRequests += 1;
+      } else {
+        comments += 1;
+      }
+    }
+
+    return { approvals, changeRequests, comments };
   }
 
   async createPullRequestReview(input: {

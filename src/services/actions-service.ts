@@ -733,6 +733,17 @@ export class ActionsService {
     return changes > 0;
   }
 
+  async replaceRunLogs(repositoryId: string, runId: string, logs: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE action_runs
+         SET logs = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(logs, Date.now(), repositoryId, runId)
+      .run();
+  }
+
   async failPendingRunIfStillPending(
     repositoryId: string,
     runId: string,

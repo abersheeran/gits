@@ -177,6 +177,7 @@ describe("executeActionRun", () => {
     vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
       codexConfigFileContent: "",
       claudeCodeConfigFileContent: "",
@@ -284,6 +285,7 @@ describe("executeActionRun", () => {
     vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
       codexConfigFileContent: "",
       claudeCodeConfigFileContent: "",
@@ -465,11 +467,109 @@ describe("executeActionRun", () => {
     });
   });
 
+  it("records a warning when status reconciliation fails after completion", async () => {
+    vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
+    vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
+    vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
+    vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    const replaceRunLogs = vi
+      .spyOn(ActionsService.prototype, "replaceRunLogs")
+      .mockResolvedValue();
+    vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
+      codexConfigFileContent: "",
+      claudeCodeConfigFileContent: "",
+      inheritsGlobalCodexConfig: true,
+      inheritsGlobalClaudeCodeConfig: true,
+      updated_at: 1
+    });
+    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
+    const recordRunObservability = vi
+      .spyOn(AgentSessionService.prototype, "recordRunObservability")
+      .mockResolvedValue();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockRejectedValue(
+      new Error("reconcile exploded")
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const runnerFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ exitCode: 0, durationMs: 25 }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+    const stopFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json"
+        }
+      })
+    );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
+        JWT_SECRET: "test-secret",
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: (url: string, init?: RequestInit) =>
+              url.endsWith("/stop") ? stopFetch(url, init) : runnerFetch(url, init)
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      run: {
+        id: "run-6",
+        run_number: 6,
+        repository_id: "repo-1",
+        agent_type: "codex",
+        instance_type: "lite",
+        prompt: "ship it",
+        trigger_ref: "refs/heads/feature",
+        trigger_sha: "abc123",
+        trigger_source_type: "issue",
+        trigger_source_number: 42
+      },
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(replaceRunLogs).toHaveBeenCalledWith(
+      "repo-1",
+      "run-6",
+      expect.stringContaining("[status_reconciliation_warning]")
+    );
+    expect(recordRunObservability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logs: expect.stringContaining("[status_reconciliation_warning]")
+      })
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "action run status reconciliation failed",
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        runId: "run-6",
+        sourceType: "issue",
+        sourceNumber: 42,
+        error: "reconcile exploded"
+      })
+    );
+  });
+
   it("persists structured observability after a run completes", async () => {
     vi.spyOn(ActionsService.prototype, "claimQueuedRun").mockResolvedValue(1);
     vi.spyOn(ActionsService.prototype, "updateRunToRunning").mockResolvedValue(2);
     vi.spyOn(ActionsService.prototype, "updateRunningRunLogs").mockResolvedValue(true);
     vi.spyOn(ActionsService.prototype, "completeRun").mockResolvedValue();
+    vi.spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus").mockResolvedValue([]);
     vi.spyOn(ActionsService.prototype, "getRepositoryConfig").mockResolvedValue({
       codexConfigFileContent: "",
       claudeCodeConfigFileContent: "",

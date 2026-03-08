@@ -451,7 +451,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     );
   }
 
-  if (loading || !detail || !pullRequest) {
+  if (loading || !detail || !pullRequest || !taskFlow) {
     return (
       <PageLoadingState
         title="Loading pull request"
@@ -465,14 +465,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
-  const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow ?? {
-    waiting_on: "none",
-    headline: "任务链摘要暂不可用。",
-    detail: "请直接检查 review thread、验证状态与 linked issues。",
-    primary_issue_number: closingIssues[0]?.number ?? null,
-    suggested_review_thread_id:
-      sortReviewThreads(reviewThreads).find((thread) => thread.status === "open")?.id ?? null
-  };
+  const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow;
 
   async function saveMetadata() {
     if (metadataSaving) {

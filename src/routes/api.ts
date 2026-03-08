@@ -57,6 +57,7 @@ import type {
   AgentSessionSourceType,
   AppEnv,
   IssueCommentRecord,
+  IssueRecord,
   IssueState,
   IssueTaskStatus,
   MilestoneState,
@@ -1803,6 +1804,32 @@ async function reconcileIssueNumbers(args: {
   );
 }
 
+async function reconcileIssueRecords(args: {
+  workflowTaskFlowService: WorkflowTaskFlowService;
+  repository: RepositoryRecord;
+  issues: readonly IssueRecord[];
+  viewerId?: string;
+}): Promise<IssueRecord[]> {
+  if (args.issues.length === 0) {
+    return [];
+  }
+  const reconciled = await Promise.all(
+    args.issues.map((issue) =>
+      args.workflowTaskFlowService.reconcileIssueTaskStatus({
+        repository: args.repository,
+        issueNumber: issue.number,
+        ...(args.viewerId ? { viewerId: args.viewerId } : {})
+      })
+    )
+  );
+  const byNumber = new Map(
+    reconciled
+      .filter((issue): issue is IssueRecord => issue !== null)
+      .map((issue) => [issue.number, issue] as const)
+  );
+  return args.issues.map((issue) => byNumber.get(issue.number) ?? issue);
+}
+
 function sessionCookieSecure(url: string): boolean {
   return new URL(url).protocol === "https:";
 }
@@ -2386,8 +2413,15 @@ router.get("/repos/:owner/:repo/issues", optionalSession, async (c) => {
       ...(sessionUser ? { viewerId: sessionUser.id } : {})
     }
   );
-  return c.json({
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  const issues = await reconcileIssueRecords({
+    workflowTaskFlowService,
+    repository,
     issues: issuePage.items,
+    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+  });
+  return c.json({
+    issues,
     pagination: {
       total: issuePage.total,
       page: issuePage.page,
@@ -2411,12 +2445,17 @@ router.get("/repos/:owner/:repo/issues/:number", optionalSession, async (c) => {
   });
 
   const issueService = new IssueService(c.env.DB);
-  const issue = await issueService.findIssueByNumber(repository.id, number, sessionUser?.id);
+  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
+  const issue =
+    (await workflowTaskFlowService.reconcileIssueTaskStatus({
+      repository,
+      issueNumber: number,
+      ...(sessionUser ? { viewerId: sessionUser.id } : {})
+    })) ?? null;
   if (!issue) {
     throw new HTTPException(404, { message: "Issue not found" });
   }
   const linkedPullRequests = await issueService.listLinkedPullRequestsForIssue(repository.id, number);
-  const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
   const taskFlow = await workflowTaskFlowService.buildIssueTaskFlow({
     repository,
     issue,
@@ -3119,18 +3158,25 @@ router.get("/repos/:owner/:repo/pulls/:number", optionalSession, async (c) => {
     pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number)
   ]);
   const workflowTaskFlowService = createWorkflowTaskFlowService(c.env);
-  const taskFlow = await workflowTaskFlowService.buildPullRequestTaskFlow({
-    repository,
-    pullRequest,
-    closingIssueNumbers,
-    reviewSummary
-  });
   const issueService = new IssueService(c.env.DB);
+  await reconcileIssueNumbers({
+    workflowTaskFlowService,
+    repository,
+    issueNumbers: closingIssueNumbers,
+    ...(sessionUser ? { viewerId: sessionUser.id } : {})
+  });
   const closingIssues = await issueService.listIssuesByNumbers(
     repository.id,
     closingIssueNumbers,
     sessionUser?.id
   );
+  const taskFlow = await workflowTaskFlowService.buildPullRequestTaskFlow({
+    repository,
+    pullRequest,
+    closingIssueNumbers,
+    closingIssues,
+    reviewSummary
+  });
   return c.json({
     pullRequest,
     reviewSummary,

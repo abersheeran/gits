@@ -29,11 +29,11 @@
 - 已支持仓库、协作者、公开/私有仓库和基础 Git 托管。
 - 已支持 Issue 列表、详情、评论、标签、里程碑、Reaction。
 - 已支持从 Issue assign/resume Agent，并在 Issue 页展示最近 Session。
-- 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图；`issues.task_status` 会在主流程事件后自动回流。
+- 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图；`issues.task_status` 会在主流程事件后自动回流，Issue 列表/详情读路径也会先自洽再返回。
 - 已支持 PR 创建、比较、Review、Reaction、squash merge。
 - 已支持 anchored review thread、多轮 thread comments、suggested changes。
 - 已支持 review thread 在新 commit 后 re-anchor、stale 标记和 patch-set changed 展示。
-- 已支持在 PR 页面直接展示 validation summary、merge summary、Task chain / Handoff 和关联 Issue 完成度。
+- 已支持在 PR 页面直接展示 validation summary、merge summary、Task chain / Handoff 和关联 Issue 完成度；review summary 已按 reviewer 当前有效决策汇总。
 - 已支持从单条 unresolved review thread focused resume Agent。
 - 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
 - 已支持从 Issue、PR、workflow、mention、rerun、dispatch 创建 Session。
@@ -42,7 +42,7 @@
 
 ### 4.1 Review 循环还不够顺
 
-- Agent 修改 PR 后，Review 与 Session 的状态回流还不够明显。
+- Agent 修改 PR 后，Review 与 Session 的状态回流已经有了明确的主流程语义，但还缺更强的“本轮改动消化了哪些反馈”摘要。
 - review thread 已有第一版 re-anchor / stale 标记，但复杂 diff 场景下还缺更智能映射。
 
 ### 4.2 PR 的验证摘要还是首版

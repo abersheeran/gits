@@ -76,19 +76,6 @@ function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
 }
 
-function issueTaskStatusHint(status: IssueTaskStatus): string {
-  if (status === "agent-working") {
-    return "Agent 正在推进实现或整理下一次交付。";
-  }
-  if (status === "waiting-human") {
-    return "当前在等待人类补充信息、确认方案或继续评审。";
-  }
-  if (status === "done") {
-    return "任务目标已经收敛，剩余动作应当是合并或回顾。";
-  }
-  return "任务已打开，尚未进入明确的下一轮执行。";
-}
-
 function shortBranchName(ref: string): string {
   return ref.replace(/^refs\/heads\//, "");
 }
@@ -400,7 +387,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     );
   }
 
-  if (loading || !detail || !issue) {
+  if (loading || !detail || !issue || !taskFlow) {
     return (
       <PageLoadingState
         title="Loading issue"
@@ -414,13 +401,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
-  const currentTaskFlow: IssueTaskFlowRecord = taskFlow ?? {
-    status: issue.task_status,
-    waiting_on: "none",
-    headline: "任务链摘要暂不可用。",
-    detail: issueTaskStatusHint(issue.task_status),
-    driver_pull_request_number: null
-  };
+  const currentTaskFlow: IssueTaskFlowRecord = taskFlow;
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -638,7 +619,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           {issue.title} <span className="text-muted-foreground">#{issue.number}</span>
         </h1>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <IssueTaskStatusBadge status={issue.task_status} />
+          <IssueTaskStatusBadge status={currentTaskFlow.status} />
           <RepositoryStateBadge state={issue.state} kind="issue" />
           <span>{issue.author_username}</span>
           <span>opened {formatRelativeTime(issue.created_at)}</span>

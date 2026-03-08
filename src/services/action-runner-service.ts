@@ -199,6 +199,15 @@ function buildRunLogs(input: {
   return truncateLog(lines.join("\n"));
 }
 
+function appendRunLogSection(logs: string, section: string, detail: string): string {
+  const trimmedDetail = detail.trim();
+  if (!trimmedDetail) {
+    return logs;
+  }
+  const separator = logs.endsWith("\n") ? "" : "\n";
+  return truncateLog(`${logs}${separator}\n[${section}]\n${trimmedDetail}`);
+}
+
 function isStreamedRunnerResponse(response: Response): boolean {
   const contentType = response.headers.get("content-type") ?? "";
   return contentType.includes("application/x-ndjson");
@@ -550,13 +559,13 @@ export async function executeActionRun(input: {
       // Observability data is best-effort and should not change run outcomes.
     }
   };
-  const reconcileSourceTaskStatus = async (): Promise<void> => {
+  const reconcileSourceTaskStatus = async (): Promise<string | null> => {
     if (
       (input.run.trigger_source_type !== "issue" &&
         input.run.trigger_source_type !== "pull_request") ||
       input.run.trigger_source_number === null
     ) {
-      return;
+      return null;
     }
     try {
       await workflowTaskFlowService.reconcileSourceTaskStatus({
@@ -564,8 +573,17 @@ export async function executeActionRun(input: {
         sourceType: input.run.trigger_source_type,
         sourceNumber: input.run.trigger_source_number
       });
-    } catch {
-      // Status reconciliation is best-effort and should not change run outcomes.
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown reconciliation error";
+      console.error("action run status reconciliation failed", {
+        repositoryId: input.repository.id,
+        runId: input.run.id,
+        sourceType: input.run.trigger_source_type,
+        sourceNumber: input.run.trigger_source_number,
+        error: message
+      });
+      return `source=${input.run.trigger_source_type} #${input.run.trigger_source_number}: ${message}`;
     }
   };
   const finalizeRun = async (args: {
@@ -579,13 +597,19 @@ export async function executeActionRun(input: {
       logs: args.logs,
       exitCode: args.exitCode ?? null
     });
+    const reconciliationWarning = await reconcileSourceTaskStatus();
+    const finalLogs = reconciliationWarning
+      ? appendRunLogSection(args.logs, "status_reconciliation_warning", reconciliationWarning)
+      : args.logs;
+    if (finalLogs !== args.logs) {
+      await actionsService.replaceRunLogs(input.repository.id, input.run.id, finalLogs);
+    }
     await recordRunObservability({
       repositoryId: input.repository.id,
       runId: input.run.id,
-      logs: args.logs,
+      logs: finalLogs,
       ...(args.result ? { result: args.result } : {})
     });
-    await reconcileSourceTaskStatus();
   };
   const containerInstance = `action-run-${input.run.id}`;
   const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;

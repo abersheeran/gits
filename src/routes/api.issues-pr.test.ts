@@ -270,6 +270,28 @@ describe("API issues and pull requests", () => {
 
   it("returns issue detail with linked pull requests", async () => {
     const now = Date.now();
+    const reconcileIssueTaskStatus = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
+      .mockResolvedValue({
+        id: "issue-1",
+        repository_id: "repo-1",
+        number: 1,
+        author_id: "owner-1",
+        author_username: "alice",
+      title: "Need login fix",
+      body: "body",
+      state: "open",
+      task_status: "agent-working",
+      acceptance_criteria: "- login succeeds\n- error state is visible",
+      comment_count: 0,
+      labels: [],
+      assignees: [],
+      milestone: null,
+      reactions: [],
+      created_at: now,
+        updated_at: now,
+        closed_at: null
+      });
     vi.spyOn(WorkflowTaskFlowService.prototype, "buildIssueTaskFlow").mockResolvedValue({
       status: "agent-working",
       waiting_on: "agent",
@@ -339,7 +361,7 @@ describe("API issues and pull requests", () => {
         driver_pull_request_number: number | null;
       };
     };
-    expect(body.issue.task_status).toBe("waiting-human");
+    expect(body.issue.task_status).toBe("agent-working");
     expect(body.issue.acceptance_criteria).toContain("login succeeds");
     expect(body.linkedPullRequests).toHaveLength(1);
     expect(body.linkedPullRequests[0]?.number).toBe(7);
@@ -348,6 +370,10 @@ describe("API issues and pull requests", () => {
     expect(body.taskFlow.status).toBe("agent-working");
     expect(body.taskFlow.waiting_on).toBe("agent");
     expect(body.taskFlow.driver_pull_request_number).toBe(7);
+    expect(reconcileIssueTaskStatus).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      issueNumber: 1
+    });
   });
 
   it("allows collaborators to update issue task status and acceptance criteria", async () => {
@@ -1243,6 +1269,28 @@ describe("API issues and pull requests", () => {
 
   it("returns pull request detail with linked closing issues", async () => {
     const now = Date.now();
+    const reconcileIssueTaskStatus = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
+      .mockResolvedValue({
+        id: "issue-3",
+        repository_id: "repo-1",
+        number: 3,
+        author_id: "owner-1",
+        author_username: "alice",
+        title: "Fix login",
+        body: "body",
+        state: "open",
+        task_status: "waiting-human",
+        acceptance_criteria: "- login succeeds",
+        comment_count: 0,
+        labels: [],
+        assignees: [],
+        milestone: null,
+        reactions: [],
+        created_at: now - 5_000,
+        updated_at: now - 1_000,
+        closed_at: null
+      });
     vi.spyOn(WorkflowTaskFlowService.prototype, "buildPullRequestTaskFlow").mockResolvedValue({
       waiting_on: "human",
       headline: "当前 PR 已进入待人工审校/合并阶段。",
@@ -1278,12 +1326,15 @@ describe("API issues and pull requests", () => {
         })
       },
       {
-        when: "SUM(CASE WHEN decision = 'approve'",
-        first: () => ({
-          approvals: 1,
-          change_requests: 0,
-          comments: 0
-        })
+        when: "FROM pull_request_reviews",
+        all: () => [
+          {
+            id: "review-1",
+            reviewer_id: "user-2",
+            decision: "approve",
+            created_at: now
+          }
+        ]
       },
       {
         when: "FROM pull_request_closing_issues",
@@ -1334,9 +1385,35 @@ describe("API issues and pull requests", () => {
     expect(body.taskFlow.waiting_on).toBe("human");
     expect(body.taskFlow.primary_issue_number).toBe(3);
     expect(body.taskFlow.suggested_review_thread_id).toBe("thread-1");
+    expect(reconcileIssueTaskStatus).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      issueNumber: 3
+    });
   });
 
   it("lists issues for readable repositories", async () => {
+    const reconcileIssueTaskStatus = vi
+      .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
+      .mockResolvedValue({
+        id: "issue-1",
+        repository_id: "repo-1",
+        number: 1,
+        author_id: "owner-1",
+        author_username: "alice",
+        title: "Issue one",
+        body: "body",
+        state: "open",
+        task_status: "waiting-human",
+        acceptance_criteria: "",
+        comment_count: 0,
+        labels: [],
+        assignees: [],
+        milestone: null,
+        reactions: [],
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        closed_at: null
+      });
     const db = createMockD1Database([
       {
         when: "WHERE u.username = ? AND r.name = ?",
@@ -1368,10 +1445,17 @@ describe("API issues and pull requests", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { issues: Array<{ number: number; title: string }> };
+    const body = (await response.json()) as {
+      issues: Array<{ number: number; title: string; task_status: string }>;
+    };
     expect(body.issues).toHaveLength(1);
     expect(body.issues[0]?.number).toBe(1);
     expect(body.issues[0]?.title).toBe("Issue one");
+    expect(body.issues[0]?.task_status).toBe("waiting-human");
+    expect(reconcileIssueTaskStatus).toHaveBeenCalledWith({
+      repository: expect.objectContaining({ id: "repo-1" }),
+      issueNumber: 1
+    });
   });
 
   it("creates pull requests as actions when token requests actions identity", async () => {
@@ -1558,12 +1642,15 @@ describe("API issues and pull requests", () => {
         })
       },
       {
-        when: "SUM(CASE WHEN decision = 'approve'",
-        first: () => ({
-          approvals: 1,
-          change_requests: 0,
-          comments: 0
-        })
+        when: "FROM pull_request_reviews",
+        all: () => [
+          {
+            id: "review-1",
+            reviewer_id: "user-2",
+            decision: "approve",
+            created_at: now
+          }
+        ]
       }
     ]);
 

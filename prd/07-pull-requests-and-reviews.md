@@ -32,8 +32,10 @@ PR 是这款产品的交付中心。
   - 关联 closing Issue 的任务完成度摘要
   - Task chain / Handoff 摘要
 - 最新 Agent provenance 摘要
+- `review summary` 现在按 reviewer 的“当前有效决策”汇总，而不是历史累计；同一 reviewer 后续 review 会覆盖前一次决定。
 - PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
 - PR validation summary 现在会优先消费 Agent runtime 主动输出的 machine-readable validation report，并在缺失时回退到 rule-based 检测。
+- 主流程里的“验证成功”当前明确按最新 run / linked session 的最终状态解释：只有 `success` 才允许 PR 进入 `waiting-human`，`queued/running` 视为进行中，`failed/cancelled/null` 视为仍需 Agent 继续推进。
 - 结构化 validation report 已开始支持 `skipped`，可区分“故意未执行”与“仍在运行/等待结果”。
 - 结构化 validation report 现在支持同 kind 多条 check，并通过 `scope` 表达 unit / integration 这类 multi-step validation。
 - 结构化 validation report 现在支持 `partial`，用于表达“部分成功但仍需人类重点审校”的检查结果。
@@ -56,7 +58,9 @@ PR 是这款产品的交付中心。
   - `detail`
   - `primaryIssueNumber`
   - `suggestedReviewThreadId`
+- `GET pull request detail` 现在会在返回前先重算并回写关联 closing issues 的任务状态，因此 `closingIssues[].task_status`、`primaryIssueNumber` 和 `taskFlow` 在同一次响应里保持一致。
 - 当存在 unresolved review thread 时，PR 侧边栏主 CTA 会默认继续最早的 open thread；否则继续整个 PR。
+- `primaryIssueNumber` 不再直接取第一个 closing issue，而是优先选择仍然 open 且尚未 `done` 的关联 Issue；没有时再退回到其他 open issue，最后才退回最小 issue number。
 - 合并：
   - 当前支持 squash merge
   - 合并后自动关闭关联 Issue
@@ -179,7 +183,7 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 - 当前只有 squash merge。
 - PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report；skipped 已从 pending 中拆分出来，同 kind 多 step 可通过 scope 呈现，partial 也可直接显示给评审者。
 - PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
-- PR detail 已具备第一版 Task chain / Handoff 摘要，并把继续 Agent 的默认入口统一到同一套语义。
+- PR detail 已具备第一版 Task chain / Handoff 摘要，并把继续 Agent 的默认入口统一到同一套语义；当前 driver issue / review thread 的选择规则也已经确定化。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：

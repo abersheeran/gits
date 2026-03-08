@@ -7,6 +7,7 @@ import type {
   PullRequestReviewThreadRecord,
   RepositoryRecord
 } from "../types";
+import { createMockD1Database } from "../test-utils/mock-d1";
 import { ActionsService } from "./actions-service";
 import { AgentSessionService } from "./agent-session-service";
 import { StorageService } from "./storage-service";
@@ -158,7 +159,7 @@ function buildReviewThread(overrides?: Partial<PullRequestReviewThreadRecord>): 
 }
 
 function createService(): WorkflowTaskFlowService {
-  return new WorkflowTaskFlowService({} as D1Database, new StorageService({} as R2Bucket));
+  return new WorkflowTaskFlowService(createMockD1Database([]), new StorageService({} as R2Bucket));
 }
 
 describe("WorkflowTaskFlowService", () => {
@@ -212,6 +213,23 @@ describe("WorkflowTaskFlowService", () => {
     expect(flow.waiting_on).toBe("human");
   });
 
+  it("keeps issues on the agent when the latest direct execution failed", async () => {
+    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
+      buildRun("failed", 20)
+    ]);
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
+
+    const flow = await createService().buildIssueTaskFlow({
+      repository: buildRepository(),
+      issue: buildIssue(),
+      linkedPullRequests: []
+    });
+
+    expect(flow.status).toBe("agent-working");
+    expect(flow.waiting_on).toBe("agent");
+    expect(flow.headline).toContain("failed");
+  });
+
   it("keeps pull requests on the agent when review threads are still open", async () => {
     vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
       buildRun("success", 10)
@@ -222,6 +240,7 @@ describe("WorkflowTaskFlowService", () => {
       repository: buildRepository(),
       pullRequest: buildLinkedPullRequest(),
       closingIssueNumbers: [1],
+      closingIssues: [buildIssue()],
       reviewSummary: { approvals: 1, changeRequests: 0, comments: 0 },
       reviewThreads: [
         buildReviewThread({ id: "thread-2", created_at: 20 }),
@@ -244,6 +263,7 @@ describe("WorkflowTaskFlowService", () => {
       repository: buildRepository(),
       pullRequest: buildLinkedPullRequest(),
       closingIssueNumbers: [1],
+      closingIssues: [buildIssue()],
       reviewSummary: { approvals: 1, changeRequests: 0, comments: 0 },
       reviewThreads: [],
       comparison: { mergeable: "mergeable" }
@@ -263,6 +283,7 @@ describe("WorkflowTaskFlowService", () => {
       repository: buildRepository(),
       pullRequest: buildLinkedPullRequest(),
       closingIssueNumbers: [1],
+      closingIssues: [buildIssue()],
       reviewSummary: { approvals: 1, changeRequests: 0, comments: 0 },
       reviewThreads: [],
       comparison: { mergeable: "mergeable" }
@@ -280,6 +301,7 @@ describe("WorkflowTaskFlowService", () => {
       repository: buildRepository(),
       pullRequest: buildLinkedPullRequest({ state: "merged" }),
       closingIssueNumbers: [1],
+      closingIssues: [buildIssue()],
       reviewSummary: { approvals: 1, changeRequests: 0, comments: 0 },
       reviewThreads: [],
       comparison: { mergeable: "mergeable" }
@@ -291,22 +313,30 @@ describe("WorkflowTaskFlowService", () => {
 
   it("prioritizes agent-blocked pull requests when multiple linked pull requests are open", async () => {
     const service = createService();
-    vi.spyOn(service, "buildPullRequestTaskFlow").mockImplementation(async ({ pullRequest }) => {
+    vi.spyOn(service as any, "analyzePullRequestTaskFlow").mockImplementation(async ({ pullRequest }) => {
       if (pullRequest.number === 2) {
         return {
-          waiting_on: "agent",
-          headline: "PR #2 needs agent work",
-          detail: "Handle review feedback first.",
-          primary_issue_number: 1,
-          suggested_review_thread_id: "thread-2"
+          reason: "review-thread",
+          earliestOpenThreadCreatedAt: 5,
+          flow: {
+            waiting_on: "agent",
+            headline: "PR #2 needs agent work",
+            detail: "Handle review feedback first.",
+            primary_issue_number: 1,
+            suggested_review_thread_id: "thread-2"
+          }
         };
       }
       return {
-        waiting_on: "human",
-        headline: "PR #1 is ready for review",
-        detail: "A human can decide whether to merge.",
-        primary_issue_number: 1,
-        suggested_review_thread_id: null
+        reason: "waiting-human",
+        earliestOpenThreadCreatedAt: null,
+        flow: {
+          waiting_on: "human",
+          headline: "PR #1 is ready for review",
+          detail: "A human can decide whether to merge.",
+          primary_issue_number: 1,
+          suggested_review_thread_id: null
+        }
       };
     });
 
@@ -321,5 +351,28 @@ describe("WorkflowTaskFlowService", () => {
 
     expect(flow.status).toBe("agent-working");
     expect(flow.driver_pull_request_number).toBe(2);
+  });
+
+  it("prefers the first open non-done closing issue as the primary issue", async () => {
+    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
+      buildRun("success", 10)
+    ]);
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
+
+    const flow = await createService().buildPullRequestTaskFlow({
+      repository: buildRepository(),
+      pullRequest: buildLinkedPullRequest(),
+      closingIssueNumbers: [1, 2, 3],
+      closingIssues: [
+        buildIssue({ number: 1, state: "closed", task_status: "done" }),
+        buildIssue({ number: 2, state: "open", task_status: "waiting-human" }),
+        buildIssue({ number: 3, state: "open", task_status: "done" })
+      ],
+      reviewSummary: { approvals: 1, changeRequests: 0, comments: 0 },
+      reviewThreads: [],
+      comparison: { mergeable: "mergeable" }
+    });
+
+    expect(flow.primary_issue_number).toBe(2);
   });
 });
