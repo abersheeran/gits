@@ -1,81 +1,69 @@
 # 代码浏览与历史 PRD
 
-## 1. 模块目标
+## 1. 模块定位
 
-代码浏览模块的目标只有一个：让人类评审和 Agent 执行都能更快理解当前仓库上下文。
+代码浏览层的职责不是做完整 IDE，而是给两类使用者提供足够上下文：
 
-它是 `Issue -> PR -> Review -> Merge` 这条主工作流的上下文层。
+- 人类在仓库页和 PR 页面理解代码、历史与 diff。
+- Agent 在 review、Issue、PR 之间切换时拿到可靠的仓库现状。
 
-## 2. 当前能力基线
+它是 `Issue -> PR -> Review -> Merge` 的上下文底座。
 
-- 仓库主页：
-  - 默认分支
-  - 分支列表
-  - README 渲染
-- 单仓库缓存协调：
-  - 仓库详情、contents、commits、history、compare 全部经由 `RepositoryObject`
-  - 同一仓库的多个并发浏览请求共享同一次 repo hydrate
-- 文件与目录浏览：
-  - tree / blob 路由
-  - 文本文件预览
-  - 文本代码预览现在统一使用 Monaco read-only viewer，替换原本逐行 `pre` 渲染
-  - Monaco viewer 按组件挂载时 lazy load，而不是仓库页面初始化时整包注入
-  - 二进制文件元信息
-- 历史能力：
-  - 分支提交历史
-  - 单路径历史
-  - 单提交详情
-  - 分支比较与 diff
-  - commit / compare diff 现在统一使用 Monaco Diff Editor 渲染
-  - ahead / behind
-  - mergeability 估算
-- Diff 结构化输出：
-  - hunk
-  - line
-  - 行级锚点可供 Review Thread 使用
+## 2. 当前已实现能力
 
-## 3. 面向主工作流仍需补足
+### 2.1 仓库主页
 
-### 3.1 基础代码搜索
+- 默认分支解析
+- 分支列表
+- README 渲染
+- clone URL 展示
+- open issue / open pull request 计数
 
-当前人类和 Agent 都还缺一个最基础的入口：
+### 2.2 文件与目录浏览
 
-- 根据文件名、关键字快速找代码
-- 根据 Issue 或 Review 内容找到相关文件
+- `tree / blob` 路由
+- 目录树浏览
+- 文本文件预览
+- 二进制文件元信息
+- 最新提交摘要展示
+- 文本查看统一使用 Monaco 只读 viewer，按需懒加载
 
-这是当前最明确的缺口。
+### 2.3 历史与比较
 
-### 3.2 轻量 Context Bundle
+- 分支 commit 历史
+- 单路径历史
+- 单提交详情
+- compare diff
+- ahead / behind
+- mergeability 估算
+- 统一 diff 结构：
+  - `change`
+  - `hunk`
+  - `line`
 
-当 Agent 从 Issue 或 PR 进入执行时，平台还不能稳定提供一个轻量上下文包，至少应包含：
+### 2.4 为评审复用的 diff 能力
 
-- 相关文件候选
-- 相关 diff
-- 相关 review thread
-- 最近一次 Session 的关键产物
+- PR 页直接复用 compare 结构化结果
+- Review thread 锚点依赖文件路径、range 和 hunk header
+- 新 commit 后的 thread re-anchor 与 stale 判断依赖 compare 结果再次映射
 
-### 3.3 评审友好的永久定位
+## 3. 当前实现方式
 
-现在已经有行级 thread，但还缺更通用的：
+- 仓库详情、contents、commits、commit detail、history、compare 都通过 `RepositoryObject` 访问。
+- 同一仓库的多个浏览请求共享一次 hydrate 后的内存上下文。
+- `RepositoryBrowserService` 负责文件读取、README 识别、commit 摘要、compare 与 diff 结构化。
+- 前端仓库页同时承担：
+  - 仓库首页
+  - tree/blob 浏览
+  - commit/history/compare 入口
 
-- 永久链接
-- 明确的文件片段定位
-- 从浏览视图跳回 Issue / PR 上下文
+## 4. 当前关键流程
 
-## 4. 关键流程
-
-### 当前已实现流程
-
-1. 用户进入仓库后，Worker 按 `repository.id` 将浏览请求路由到单仓库 `RepositoryObject`。
-2. `RepositoryObject` 复用已 hydrate 的内存仓库，返回树、文件、README、提交历史和 compare diff。
-3. PR 页面复用了同一仓库缓存下的结构化 diff 结果，用于创建和重锚 anchored review thread。
-
-### 目标流程
-
-1. 人类在 Issue 中描述问题。
-2. Agent 进入执行前，平台自动整理相关代码上下文。
-3. 人类在 PR 中查看 diff、历史和测试结果。
-4. Agent 根据 review thread 继续修改代码。
+1. 用户进入仓库页或 PR compare。
+2. Worker 以 `repository.id` 路由到对应 `RepositoryObject`。
+3. `RepositoryObject` 如有缓存则直接复用，否则从 R2 hydrate 仓库。
+4. 浏览服务返回树、文件预览、commit 历史或 compare 结果。
+5. PR 评审与 review thread 重锚继续消费同一份 diff 结构。
 
 ## 5. 当前接口
 
@@ -94,21 +82,39 @@
 - `src/routes/api.ts`
 - `web/src/pages/repository-page.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
+- `web/src/components/repository/repository-change-diff-editor.tsx`
 - `web/src/components/ui/monaco-text-viewer.tsx`
 - `web/src/lib/monaco.ts`
 - `web/src/lib/api.ts`
 
-## 7. 当前边界与下一步
+## 7. 当前边界与缺口
 
-- 当前没有全文搜索。
-- 当前没有 Context Bundle。
-- 当前代码浏览更多还是“仓库页面”，还不是“任务上下文页面”。
-- 当前浏览缓存只在单个 `RepositoryObject` 实例内存中生效；实例回收后会重新从 R2 hydrate。
-- Monaco 目前先覆盖只读查看面；编辑配置和表单输入仍沿用现有 `Textarea`。
-- Monaco 运行时与 worker 已拆到懒加载 chunk，但打开大型 diff 时仍会产生明显前端下载体积。
+### 7.1 还没有代码搜索
 
-下一步优先级：
+- 当前没有按文件名、关键字或符号搜索代码的能力。
+- Issue 和 review 反馈还不能自动反推出相关文件候选。
+
+### 7.2 还没有面向任务的 Context Bundle
+
+当前浏览层能返回仓库事实，但还不能直接整理为 Agent 更好消费的上下文包，例如：
+
+- 候选文件
+- 相关 diff
+- 相关 review thread
+- 最近一次 session 的关键 artifact
+
+### 7.3 永久定位能力不足
+
+- 已有 review thread 锚点。
+- 但还缺面向浏览视图的 permalink、文件片段定位和从代码视图跳回任务上下文的更通用能力。
+
+### 7.4 浏览层仍偏“仓库页”
+
+- 现在的代码浏览是仓库中心视角。
+- 还不是 Issue / PR / Review 中的任务中心视角。
+
+## 8. 下一步优先级
 
 1. 增加基础代码搜索。
 2. 增加面向 Issue / PR / Review 的轻量 Context Bundle。
-3. 增加文件片段永久定位，并把代码浏览与 Issue / PR 导航更紧地串起来。
+3. 增加更稳定的文件片段永久定位，并把代码浏览与任务页面导航更紧地连起来。

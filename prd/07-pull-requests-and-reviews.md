@@ -1,148 +1,108 @@
 # Pull Request 与评审 PRD
 
-## 1. 模块目标
+## 1. 模块定位
 
-PR 是这款产品的交付中心。
+PR 是当前产品里的交付中心和评审中心。
 
-它要承载的是一条非常具体的协作链：
+它承载的不是抽象审批流，而是一条非常具体的闭环：
 
-1. Agent 基于 Issue 发起 PR。
-2. 人类和 Agent 一起看代码 diff、review thread、测试产物。
-3. Agent 根据反馈持续更新 PR。
-4. 人类最终决定是否合并。
+1. Agent 或人类基于 Issue 发起 PR。
+2. 人类查看 diff、validation summary 和 review thread。
+3. Agent 根据 thread 或 PR 级 handoff 继续修改。
+4. 人类决定是否 squash merge。
 
-因此，PR 页面最重要的不是复杂治理，而是让“看改动、提反馈、继续修改、确认合并”足够顺。
+因此，PR 页最重要的是把“看改动、提反馈、继续修改、确认合并”组织成一条顺畅路径。
 
-## 2. 当前能力基线
+## 2. 当前已实现能力
 
-- PR 列表与详情。
-- 创建 PR：
-  - 选择 `baseRef` / `headRef`
-  - draft
-  - 关联关闭 Issue
-  - 标签、里程碑、指派人、请求评审人
-- PR 详情：
-  - compare 结果
-  - ahead / behind
-  - mergeability
-  - 文件 diff
-  - PR diff 现在统一使用 Monaco Diff Editor，并保留行号点击选区与 review thread 行级提示
-  - diff viewer 在真正渲染文本 diff 前不会加载 Monaco runtime
-  - review summary
-  - validation summary
-  - merge summary
-  - 关联 closing Issue 的任务完成度摘要
-  - Task chain / Handoff 摘要
-- PR 页面现在显式补上 emoji fallback 字体栈，标题、正文、review/comment 与输入框里的原生 emoji 可稳定显示。
-- PR 上的 Reaction 现在使用真实 emoji 呈现，而不再回退成 `heart / rocket / laugh` 这类英文标签。
-- 最新 Agent provenance 摘要
-- `review summary` 现在按 reviewer 的“当前有效决策”汇总，而不是历史累计；同一 reviewer 后续 review 会覆盖前一次决定。
-- PR validation summary 已开始按 tests / build / lint 规则化拆分，并优先展示更值得人类先看的 artifact。
-- PR validation summary 现在会优先消费 Agent runtime 主动输出的 machine-readable validation report，并在缺失时回退到 rule-based 检测。
-- 主流程里的“验证成功”当前明确按最新 run / linked session 的最终状态解释：只有 `success` 才允许 PR 进入 `waiting-human`，`queued/running` 视为进行中，`failed/cancelled/null` 视为仍需 Agent 继续推进。
-- 结构化 validation report 已开始支持 `skipped`，可区分“故意未执行”与“仍在运行/等待结果”。
-- 结构化 validation report 现在支持同 kind 多条 check，并通过 `scope` 表达 unit / integration 这类 multi-step validation。
-- 结构化 validation report 现在支持 `partial`，用于表达“部分成功但仍需人类重点审校”的检查结果。
-- Review：
+### 2.1 PR 创建与元数据
+
+- PR 列表与详情
+- 选择 `baseRef / headRef`
+- draft
+- closing issues
+- labels、milestone、assignees、requested reviewers
+- 阻止同一 `head/base` 组合的重复 open PR
+
+### 2.2 PR 详情
+
+- compare 结果
+- ahead / behind
+- mergeability
+- 文件 diff
+- review summary
+- validation summary
+- merge summary
+- closing issues 完成度摘要
+- `taskFlow` / handoff 摘要
+- 最新 run/session provenance 摘要
+
+### 2.3 Review
+
+- review 决策：
   - `comment`
   - `approve`
   - `request_changes`
-- Review Thread：
-  - anchored 到真实 diff hunk / compare range
-  - 支持多轮 comments
-  - 支持 suggested changes
-  - `open / resolved`
-  - 新 commit 后自动 re-anchor
-  - 无法映射到当前 diff 时标记 stale
-  - 显示 patch-set changed 状态
-  - 支持从单条 unresolved thread focused resume Agent
-- PR detail 现在返回 `taskFlow`，至少包含：
-  - `waitingOn`
-  - `headline`
-  - `detail`
-  - `primaryIssueNumber`
-  - `suggestedReviewThreadId`
-- `GET pull request detail` 现在会在返回前先重算并回写关联 closing issues 的任务状态，因此 `closingIssues[].task_status`、`primaryIssueNumber` 和 `taskFlow` 在同一次响应里保持一致。
-- 当存在 unresolved review thread 时，PR 侧边栏主 CTA 会默认继续最早的 open thread；否则继续整个 PR。
-- `primaryIssueNumber` 不再直接取第一个 closing issue，而是优先选择仍然 open 且尚未 `done` 的关联 Issue；没有时再退回到其他 open issue，最后才退回最小 issue number。
-- PR 侧边栏现在把最近 session、验证摘要、highlighted artifacts 和继续 Agent 的主入口收拢到统一的 `Agent handoff` 面板，而不再拆成多块 provenance / session / CTA。
-- PR 页现在只展示 review / validation / handoff 决策相关的 Session 摘要；prompt、stdout/stderr 和全文日志仍以 Session detail / Actions 页为主入口。
-- 合并：
-  - 当前支持 squash merge
-  - 合并后自动关闭关联 Issue
+- review summary 按 reviewer 当前有效决策汇总，而不是历史累计
 
-## 3. 当前工作流
+### 2.4 Review Thread
 
-当前已经能跑通下面这条链：
+- anchored 到真实 diff path/range/hunk
+- 多轮 comments
+- suggested changes
+- `open / resolved`
+- 支持从单条 unresolved thread focused resume agent
+- 新 commit 后会给出锚点状态：
+  - `current`
+  - `reanchored`
+  - `stale`
+- 同时显示 `patchset_changed`
 
-1. Agent 创建或更新分支。
-2. Agent 发起 PR。
-3. 人类在 diff 上创建 review thread。
-4. Agent 从 thread focused resume。
-5. PR 页面会把 linked issue、review/validation 与下一步 handoff 收拢到统一摘要区。
-6. 人类最终合并 PR。
+### 2.5 Merge
 
-现在 PR 的评审连续性已经有了第一版 patch-set 感知。
+- 当前只支持 squash merge
+- 合并后自动关闭关联 closing issues
+- merge 成功会触发对应 `push` workflow
 
-## 4. 面向主工作流仍需补足
+## 3. 当前 handoff 与状态语义
 
-### 4.1 Review 线程连续性已经有第一版，但仍偏保守
+PR detail 会返回 `taskFlow`，当前主要回答：
 
-当前 thread 已支持：
+- 现在是在等 agent 还是等人类
+- 当前主导的关联 issue 是哪一个
+- 如果要继续 agent，应该继续整个 PR 还是优先继续某条 review thread
 
-- 新 commit 后的重新锚定
-- stale thread 标记
-- patch-set changed 状态展示
+已确定的关键规则：
 
-但这套连续性仍偏保守，还缺：
+- 如果有 unresolved review thread，主 CTA 默认继续最早的 open thread
+- 如果没有 unresolved thread，则继续整个 PR
+- `primaryIssueNumber` 优先选择仍 open 且未 `done` 的 closing issue
+- PR detail 返回前会先重算并回写关联 closing issue 的 task status，保证 PR 与 Issue 侧状态一致
 
-- rename / 更复杂 diff 场景下的锚点延续
-- 跨非连续行变更的更智能 range 映射
-- 更明确的“本次 Agent 修改消化了哪些 thread”回流
+## 4. 当前验证摘要
 
-### 4.2 验证摘要已经进入结构化阶段，但仍可继续增强
+PR 页面已经直接消费 run/session 的验证信息：
 
-现在 PR 页面已经能直接展示最近验证状态、关键 artifact 摘要、最近一次 Agent 修改摘要和 merge summary。
-runtime 也开始要求 Agent 在退出前输出 machine-readable validation report，后端会抽取并优先用于 tests / build / lint 摘要；当前已支持 skipped、partial 和 scoped multi-step checks。
+- 优先使用 runtime 输出的 structured validation report
+- 缺失时回退到日志规则识别
+- 当前可结构化展示：
+  - tests
+  - build
+  - lint
+  - `skipped`
+  - `partial`
+  - scoped multi-step checks
+- highlighted artifacts 会按失败/通过上下文与检查命中结果做优先级排序
 
-但这套结构化验证结果还缺更完整的覆盖，例如：
+## 5. 当前关键流程
 
-- 对 artifact 做更稳定的优先级排序
-- 自动提炼更明确的人类审校摘要
-
-### 4.3 Issue 与 PR 的双向关联已有主链路摘要，但仍可继续增强
-
-当前已经支持：
-
-- `primaryIssueNumber` 级别的任务链摘要
-- PR review / validation / merge 结果对 Issue `task_status` 的自动回写
-- sidebar 主 CTA 与 thread focused resume 的统一 handoff 语义
-
-但还缺：
-
-- 更明确的“当前 PR 正在解决 Issue 的哪部分反馈”语义压缩
-- 更稳定的“本次 Agent 修改消化了哪些 thread”回流
-
-## 5. 关键流程
-
-### 当前已实现流程
-
-1. 创建 PR 时校验 base/head。
-2. 系统阻止同一 `head/base` 组合的重复未关闭 PR。
-3. PR 页面可展示 compare、reviews、review threads、validation summary、merge summary、Task chain / Handoff、Agent provenance。
-4. 用户可从 thread 直接继续 Agent；当存在 unresolved thread 时，侧边栏主 CTA 默认继续最早的一条 open thread。
-5. 新 commit 后，thread 会尝试重新锚定到当前 diff；无法锚定时明确标记 stale。
-6. review / thread / resume-agent / close / merge / action run 完成后，会自动回写关联 Issue 的 `task_status`。
-7. 合并成功后自动关闭关联 Issue。
-
-### 目标流程
-
-1. Agent 基于 Issue 提交 PR。
-2. 人类在 PR 中评审代码和测试产物。
-3. Agent 根据 review thread 继续修改。
-4. 新 commit 后 review thread 连续映射到最新 patch-set。
-5. PR 页面持续汇总“最新改动 + 最新验证 + 最新反馈 + 关联 Issue 完成度 + 当前 handoff”。
-6. 人类完成最终合并。
+1. Agent 推分支并创建 PR。
+2. PR 创建时触发 `pull_request_created` workflow。
+3. 人类在 PR diff 上创建 review、review thread 和 suggested changes。
+4. Agent 从 PR 级或 thread 级入口继续执行。
+5. 新 commit 后，thread 尝试映射到当前 patch set。
+6. review、thread、run、merge 结果持续回流到 PR handoff 和关联 Issue task status。
+7. 人类完成 squash merge。
 
 ## 6. 当前接口
 
@@ -161,7 +121,7 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 - `GET /api/repos/:owner/:repo/pulls/provenance/latest`
 - `GET /api/repos/:owner/:repo/compare`
 
-## 7. 当前数据
+## 7. 当前数据模型
 
 - `pull_requests`
 - `pull_request_reviews`
@@ -176,28 +136,42 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 ## 8. 关键代码文件
 
 - `src/services/pull-request-service.ts`
+- `src/services/pull-request-review-thread-anchor-service.ts`
 - `src/services/pull-request-merge-service.ts`
 - `src/services/repository-browser-service.ts`
 - `src/services/agent-session-validation-summary.ts`
+- `src/services/workflow-task-flow-service.ts`
 - `src/routes/api.ts`
 - `web/src/pages/pull-request-detail-page.tsx`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`
-- `web/src/components/ui/monaco-text-viewer.tsx`
+- `web/src/components/repository/repository-change-diff-editor.tsx`
 - `web/src/lib/monaco.ts`
 
-## 9. 当前边界与下一步
+## 9. 当前边界与缺口
+
+### 9.1 review thread 连续性仍偏保守
+
+- 已支持 current / reanchored / stale。
+- 但 rename、复杂 diff、跨不连续 range 的映射仍不够强。
+
+### 9.2 validation summary 仍是第一版 review 摘要
+
+- 已经能展示 tests/build/lint 与重点 artifact。
+- 但还缺更稳定的人类审校摘要和“先看什么”的明确排序。
+
+### 9.3 handoff 已有规则，但反馈消化表达仍不足
+
+- 已能告诉用户继续哪条 thread 或整个 PR。
+- 但还缺“本轮 Agent 修改消化了哪些 thread/哪部分 Issue 反馈”的压缩表达。
+
+### 9.4 merge 策略仍然最小化
 
 - 当前只有 squash merge。
-- PR 页面已具备 tests / build / lint validation summary 和 merge summary，并开始优先消费 runtime-emitted structured validation report；skipped 已从 pending 中拆分出来，同 kind 多 step 可通过 scope 呈现，partial 也可直接显示给评审者。
-- PR provenance 已支持批量读取，以便把来源 Issue 中的关联 PR 验证结果直接回流。
-- PR detail 已具备第一版 Task chain / Handoff 摘要，并把继续 Agent 的默认入口统一到同一套语义；当前 driver issue / review thread 的选择规则也已经确定化。
-- PR 页的 polling 现在会同时刷新 detail / reviews / review threads / provenance，避免 handoff 摘要与 review 统计不同步。
-- thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
-- diff 视觉层已经统一切到 Monaco，但 review thread 的 richer inline card 仍主要依赖下方 thread 列表与 hover 提示，而不是在 diff 中内嵌大块正文。
+- 没有 rebase merge、merge commit、分支保护等更复杂策略。
 
-下一步优先级：
+## 10. 下一步优先级
 
-1. 继续扩展结构化验证结果的 artifact 优先级和人类审校摘要提炼。
-2. 提升 review thread 在 rename / 复杂 patch-set 下的锚点映射质量。
-3. 继续增强“本轮 Agent 修改消化了哪些反馈”的回流表达。
+1. 继续增强 validation summary 和 artifact 的 review-oriented 摘要能力。
+2. 提升 review thread 在 rename / 复杂 patch set 下的锚点映射质量。
+3. 增强“本轮修改消化了哪些反馈”的回流表达。

@@ -1,84 +1,103 @@
 # Git 托管与存储 PRD
 
-## 1. 模块目标
+## 1. 模块定位
 
-这个模块的职责是为人类和 Agent 提供稳定可用的 Git 远端：
+Git 托管与存储层是整个平台的底座，职责是：
 
-- 可以 clone / fetch / push。
-- 可以让 Agent 推工作分支。
-- 可以把提交、分支和 Session 之间的关系存下来。
+- 为人类和 Agent 提供可用的 clone / fetch / push 远端。
+- 把 Git 对象、引用和默认分支持久化到对象存储。
+- 为代码浏览、PR compare、review thread 重锚和 squash merge 提供统一仓库读写入口。
 
-它不承担复杂的策略治理职责。
+当前重点是“可用、可追踪、可复用”，不是复杂 Git 策略控制台。
 
-## 2. 当前能力基线
+## 2. 当前架构
 
-- Git Smart HTTP：
-  - `info/refs`
-  - `git-upload-pack`
-  - `git-receive-pack`
-- 单仓库单实例 Durable Object：
-  - `RepositoryObject` 以 `repository.id` 作为稳定 key
-  - 同一仓库的 Smart HTTP 读写与 Git 计算统一在同一个 DO 中执行
-  - DO 仅保留实例内内存缓存，冷启动时再从 R2 hydrate
-- R2 持久化：
-  - `HEAD`
-  - `refs/*`
-  - `objects/*`
-- Push 成功后会触发匹配的 Actions 工作流。
-- 创建仓库时初始化默认分支 `main`。
+### 2.1 两层执行模型
 
-## 3. 当前存储模型
+- Worker 负责：
+  - 鉴权
+  - 请求参数校验
+  - D1 仓库元数据查询
+  - Actions workflow 触发编排
+- `RepositoryObject` Durable Object 负责：
+  - 按 `repository.id` 定位仓库
+  - 从 R2 hydrate 仓库到内存
+  - 复用同仓库后续请求的缓存上下文
+  - Git 协议处理
+  - 代码浏览读操作
+  - squash merge
+
+### 2.2 存储介质
+
+- D1 保存仓库元数据与协作对象。
+- `GIT_BUCKET` R2 保存 `HEAD`、`refs/*`、`objects/*`。
+- DO 内只保留实例期内缓存，不做持久化快照。
+
+## 3. 当前已实现能力
+
+### 3.1 Smart HTTP
+
+- `info/refs`
+- `git-upload-pack`
+- `git-receive-pack`
+
+### 3.2 fetch / clone 能力
+
+- advertise refs
+- `want / have / done` negotiation
+- pack 生成
+- shallow clone 参数：
+  - `deepen`
+  - `deepen-since`
+  - `deepen-not`
+- object filter：
+  - `blob:none`
+  - `blob:limit=<n>`
+
+### 3.3 push 能力
+
+- pkt-line 命令解析
+- pack 接收与索引
+- ref 更新校验
+- `report-status` 响应
+- 写回 R2 后同步更新 HEAD/ref 视图
+- push 成功后触发匹配的 `push` workflow
+
+### 3.4 merge 能力
+
+- PR 合并目前仅支持 squash merge
+- merge 在 `RepositoryObject` 内完成，结果回写仓库对象并更新引用
+
+## 4. 当前存储模型
 
 - 仓库前缀：`<owner>/<repo>/`
 - HEAD：`<owner>/<repo>/HEAD`
 - 引用：`<owner>/<repo>/refs/...`
 - 对象：`<owner>/<repo>/objects/aa/bbbbb...`
 
-## 4. 面向主工作流仍需补足
+创建仓库时会初始化默认分支 `main`，后续默认分支解析优先读取 HEAD，再回退到 `refs/heads/main` 或首个可用 head ref。
 
-### 4.0 当前架构边界
+## 5. 当前关键流程
 
-当前 Git 托管链路已经变成明确的两层：
+### 5.1 仓库初始化
 
-- Worker 负责鉴权、参数校验、D1 元数据和 workflow 编排。
-- `RepositoryObject` 负责仓库 hydrate、Git 协议处理、对象写回和同仓库缓存复用。
+1. 创建仓库时写入 D1。
+2. Git 存储初始化 HEAD 和 `refs/heads/main`。
+3. 仓库页、Git 路由和 compare 读取开始可用。
 
-这解决了“同一页面多个请求重复从 R2 重建仓库”的问题，但也引入了一条明确前提：
+### 5.2 Git push
 
-- 仓库存储写入必须经由当前 Worker/DO 路径完成，不能再假设有外部进程直接改同一份 R2 数据。
+1. Worker 完成 Basic Auth 和仓库写权限校验。
+2. 请求按仓库路由到 `RepositoryObject`。
+3. DO 在内存仓库上执行 `receive-pack`。
+4. 更新后的 refs 持久化回 R2。
+5. Worker 根据更新后的 ref 触发 `push` workflows。
 
-### 4.1 Agent 生成提交的 provenance 还不够完整
+### 5.3 代码浏览/PR compare
 
-当前 Agent 已能推分支和创建 PR，但还需要更明确地回答：
-
-- 这个 commit 来自哪个 Session
-- 这个分支是为哪个 Issue / PR 创建的
-- 最近一次交付对应哪些测试与 artifact
-
-### 4.2 Git 写入结果还没和评审页面紧密连接
-
-用户在 PR 页面看到的是 diff 和 review thread，但还缺少对“这次 push 带来了什么验证结果”的直接映射。
-
-### 4.3 Agent 分支语义还不够清楚
-
-当前系统已经能生成和更新工作分支，但还没有一套更清晰的展示方式，让用户在 Issue / PR / Session 中看出当前正在推进的是哪条分支。
-
-## 5. 关键流程
-
-### 当前已实现流程
-
-1. Worker 完成 Git 鉴权与仓库读写权限判断。
-2. Worker 按 `repository.id` 路由到单仓库 `RepositoryObject`。
-3. `RepositoryObject` 从 R2 hydrate 仓库到内存，并复用后续同仓库请求。
-4. Push 时 DO 解析命令、接收 pack、写入对象和 refs，并将最新 refs 回传 Worker。
-5. Push 成功后 Worker 根据更新后的 refs 触发后续自动化。
-
-### 目标流程
-
-1. Agent 从 Issue 或 PR 启动 Session。
-2. Agent 在工作分支上提交代码并推送。
-3. 用户在 PR 中看到这些提交与对应的验证结果。
-4. 人类完成最终合并。
+1. 仓库页或 PR compare 请求进入 `RepositoryObject`。
+2. 如果仓库尚未 hydrate，则从 R2 加载到内存。
+3. 后续同仓库浏览请求复用已加载上下文。
 
 ## 6. 当前接口
 
@@ -98,15 +117,30 @@
 - `src/services/storage-service.ts`
 - `src/middleware/auth.ts`
 
-## 8. 当前边界与下一步
+## 8. 当前边界与缺口
 
-- 当前只支持 HTTP Git 远端。
-- 当前 Git 仓库缓存只保存在 `RepositoryObject` 实例内存中，不落 DO storage 快照。
-- Push provenance 还没有直接体现在提交和 PR 主界面中。
-- Git 存储层还没有把提交、artifact、Session 做更直接的关联输出。
+### 8.1 Git 接入方式仍有限
 
-下一步优先级：
+- 当前 Git 接入方式明确限定为 HTTP Git；由于 Workers 无法支持 SSH 协议服务，SSH 不在当前能力边界内。
+- 当前没有分支保护、签名策略、server-side hook policy 等治理能力。
 
-1. 增加 commit 与 Session 的 provenance 关联能力。
-2. 在 PR 和 Session 视图里更直接展示工作分支与提交来源。
-3. 为测试结果和关键 artifact 提供与提交关联的展示入口。
+### 8.2 provenance 仍主要停留在 run/session 层
+
+- Agent 已能推分支、创建 PR、记录 branch ref。
+- 但 commit 与 session 的直接映射还没有稳定回流到仓库浏览和 PR 主视图。
+
+### 8.3 仓库缓存仍是实例内存级
+
+- 这显著减少了同仓库重复 hydrate。
+- 但实例回收后仍需重新从 R2 加载，当前没有 DO storage 快照。
+
+### 8.4 Git 写入和 review 结果的链接仍不够强
+
+- push 可以触发 workflow。
+- 但“这次 push 产出了哪组验证结果、解决了哪些 review 反馈”还没有在 Git 视角下形成稳定摘要。
+
+## 9. 下一步优先级
+
+1. 增加 commit / branch / session 的 provenance 串联能力。
+2. 在 PR 和 Session 视图中更直接展示工作分支与最近提交来源。
+3. 继续把 Git 写入结果和 validation / artifact / review 摘要连接起来。

@@ -1,98 +1,129 @@
 # gits PRD 索引
 
+本文基于当前代码实现重写，目标是让 `prd/` 成为“现状说明 + 下一步边界”的文档，而不是功能愿景堆叠。
+
 ## 1. 产品定义
 
-`gits` 当前的产品目标不是一个强调治理、审批、控制台和企业配置的 Git 平台。
+`gits` 不是面向企业治理的 Git 平台。
 
-它是一个面向 Agent 协作的软件交付平台，核心工作流只有一条：
+它是一个把 Git 托管、Issue、Pull Request、Review 和 Agent Runtime 串成一条交付链的 Agent 协作平台。当前产品主线是：
 
-1. 人类发现产品问题。
-2. 人类创建 Issue。
-3. Agent 在 Issue 中和人类持续交流，澄清问题、补充计划、推进实现。
-4. Agent 基于 Issue 发起 PR。
-5. 人类与 Agent 围绕 PR、代码 diff 和测试产物反复审校。
-6. Agent 根据反馈继续修改 PR。
-7. 人类确认后合并 PR。
+1. 人类创建仓库并提交 Issue。
+2. Issue 作为任务中心，沉淀问题描述、验收标准和对话历史。
+3. Agent 从 Issue、PR 或 review feedback 进入一次可追踪的 `Agent Session`。
+4. Agent 推分支、创建或更新 PR，并回写评论、验证结果和交付摘要。
+5. 人类在 PR 中查看 diff、review thread、validation summary 和 merge summary。
+6. Agent 根据 review thread 或 PR 级 handoff 继续修改。
+7. 人类确认后完成 squash merge，关联 Issue 收敛到完成状态。
 
-因此，所有 PRD 都应围绕这条链路服务，而不是围绕复杂的治理系统服务。
+产品重点不是“多系统治理”，而是把 `Issue -> Session -> PR -> Review -> Merge` 这条链路做顺。
 
-## 2. 核心对象
+## 2. 当前系统事实
 
-- `Repository`：代码与分支的容器。
-- `Issue`：任务入口和人机对话面。
-- `Pull Request`：代码交付和评审入口。
-- `Review Thread`：围绕具体 diff 的修改反馈。
-- `Agent Session`：一次可追踪的执行与回写过程。
+- 后端是 Cloudflare Workers + Hono API。
+- 前端是 React SPA，核心页面包括首页、Dashboard、仓库页、Issue、PR、Actions 和 Session detail。
+- 元数据存储在 D1。
+- Git 对象与引用存储在 `GIT_BUCKET` R2。
+- run/session 全量日志与全文 artifact 存储在 `ACTION_LOGS_BUCKET` R2；D1 只保留 excerpt 与元数据。
+- 每个仓库由一个 `RepositoryObject` Durable Object 负责 hydrate、Git 协议处理、浏览缓存和 squash merge。
+- Agent 执行通过 Queue + Cloudflare Containers 调度，支持多种容器实例规格。
 
-## 3. 当前已落地骨架
+## 3. 核心对象
 
-- 已支持仓库、协作者、公开/私有仓库和基础 Git 托管。
-- 已支持 Issue 列表、详情、评论、标签、里程碑、Reaction。
-- 已支持从 Issue assign/resume Agent，并在 Issue 页展示最近 Session。
-- 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图；`issues.task_status` 会在主流程事件后自动回流，Issue 列表/详情读路径也会先自洽再返回。
-- 已支持 PR 创建、比较、Review、Reaction、squash merge。
-- 已支持 anchored review thread、多轮 thread comments、suggested changes。
-- 已支持 review thread 在新 commit 后 re-anchor、stale 标记和 patch-set changed 展示。
-- 已支持在 PR 页面直接展示 validation summary、merge summary、Task chain / Handoff 和关联 Issue 完成度；review summary 已按 reviewer 当前有效决策汇总。
-- 已支持从单条 unresolved review thread focused resume Agent。
-- 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
-- 已开始把 Agent Session 界面按“任务决策摘要”和“按需展开正文”重新分层：Issue / PR / Actions 展示摘要，Session detail 与单独日志接口负责全文。
-- 已把 stdout / stderr / run full logs 从 D1 移出；D1 只保留 excerpt 与元数据，全文日志落到专用 R2。
-- 已支持从 Issue、PR、workflow、mention、rerun、dispatch 创建 Session。
+| 对象 | 当前职责 |
+| --- | --- |
+| `User` | 登录主体、仓库 owner、协作者和 Agent 委托来源 |
+| `Repository` | Git 远端、权限边界和 Issue/PR/Actions 容器 |
+| `Issue` | 任务入口、讨论面、验收标准与任务状态中心 |
+| `Pull Request` | 代码交付中心，承载 compare、review、validation、merge |
+| `Review Thread` | 围绕 diff 行区间的反馈单元，可随 patch set 尝试重锚 |
+| `Action Workflow` | 自动化触发规则，决定何时创建 run |
+| `Action Run` | 一次实际执行任务，承载状态、日志 excerpt、配置与来源事件 |
+| `Agent Session` | 一次可追踪的 Agent 执行上下文，沉淀 timeline、artifact、usage、intervention |
 
-## 4. 当前真正的缺口
+## 4. 当前主工作流
 
-### 4.1 Review 循环还不够顺
+### 4.1 任务入口
 
-- Agent 修改 PR 后，Review 与 Session 的状态回流已经有了明确的主流程语义，但还缺更强的“本轮改动消化了哪些反馈”摘要。
-- review thread 已有第一版 re-anchor / stale 标记，但复杂 diff 场景下还缺更智能映射。
+- Issue 支持标题、正文、评论、标签、里程碑、指派人、Reaction。
+- Issue 支持独立 `acceptance_criteria`。
+- `issues.task_status` 当前使用 `open / agent-working / waiting-human / done` 四态。
+- Issue 列表和详情在返回前会按主流程重算相关状态，避免列表与详情分叉。
 
-### 4.2 PR 的验证摘要还是首版
+### 4.2 交付入口
 
-- 当前已能在 PR 中直接看最近验证状态、关键 artifact 和 merge summary。
-- 但还缺更结构化的测试/构建拆分，以及更稳定的人类审校摘要提炼。
+- PR 支持从 `baseRef / headRef` 创建，支持 draft、closing issues、labels、milestone、assignees、reviewers。
+- PR 详情聚合 compare、reviews、review threads、validation summary、merge summary 和 handoff。
+- Review thread 支持 anchored range、suggested changes、多轮 comment、resolve，以及新 commit 后的 `current / reanchored / stale` 状态。
+- 当前合并策略只有 squash merge。
 
-### 4.3 Agent 上下文供给还偏弱
+### 4.3 执行入口
 
-- 还缺基础代码搜索。
-- 还缺面向 Issue / PR / Review 的轻量 Context Bundle。
-- Agent 进入 Session 前，还不能稳定拿到“相关文件候选 + 历史摘要 + 最近验证结果”。
+- Agent 可以由 workflow、mention、rerun、dispatch、issue assign/resume、pull request resume 创建 session。
+- Session 与 run 可双向关联；Issue、PR、Actions 页面会展示摘要，Session detail 负责全文回看。
+- runtime 会提取 machine-readable validation report；缺失时回退到日志规则归纳。
 
-### 4.4 Session 连续性还不够强
+## 5. 跨模块约束
 
-- Issue 对话、PR Review、Agent 修改记录已经有了第一版统一任务链与 handoff 摘要。
-- 但用户仍需要更稳定的“上一轮 Agent 实际交付了什么”压缩视图，以及更强的上下文 bundle。
+- Issue 是任务中心，PR 是交付中心，Session/Run 是执行中心。
+- Git 读写、代码浏览和 merge 统一通过 `RepositoryObject`，避免同仓库并发请求重复从 R2 hydrate。
+- 主流程状态不是独立工作流引擎；当前主要通过 `issues.task_status` 和 `taskFlow` 计算结果表达。
+- Session/run 不只是 observability 对象，也是 Issue/PR 状态回流的触发点。
+- 全量日志与全文 artifact 不留在 D1，D1 只保留摘要层和索引层数据。
 
-## 5. 模块划分
+## 6. 模块划分
 
-| 功能块 | 在主工作流中的职责 | 文档 |
+| 模块 | 当前职责 | 文档 |
 | --- | --- | --- |
-| 认证与访问控制 | 让人类、协作者和 Agent Session 能安全访问仓库与 API | `02-auth-and-access.md` |
-| 仓库管理与协作 | 提供最小可用的仓库、协作者和默认协作边界 | `03-repository-management-and-collaboration.md` |
-| Git 托管与存储 | 提供 clone/fetch/push 与 Session 关联的提交存储 | `04-git-hosting-and-storage.md` |
-| 代码浏览与历史 | 为人类评审和 Agent 执行提供代码上下文 | `05-code-browsing-and-history.md` |
-| Issue 与讨论 | 作为任务入口和人机协作对话面 | `06-issues-and-discussions.md` |
-| Pull Request 与评审 | 作为代码交付、评审和修改循环中心 | `07-pull-requests-and-reviews.md` |
-| Actions 与 Agent Runtime | 承载 Agent Session 的执行、回写和可观测性 | `08-actions-and-ai-automation.md` |
+| 认证与访问控制 | 统一人类、Git 客户端和 Agent Runtime 的身份与权限边界 | `02-auth-and-access.md` |
+| 仓库管理与协作 | 管理仓库生命周期、协作者和基础协作边界 | `03-repository-management-and-collaboration.md` |
+| Git 托管与存储 | 提供 Smart HTTP、R2 Git 存储、DO 仓库缓存和 merge 能力 | `04-git-hosting-and-storage.md` |
+| 代码浏览与历史 | 提供树、文件、历史、commit、compare 与 review 可复用 diff 结构 | `05-code-browsing-and-history.md` |
+| Issue 与讨论 | 承载任务描述、验收标准、讨论、任务状态和 Agent 入口 | `06-issues-and-discussions.md` |
+| Pull Request 与评审 | 承载交付、review、validation、merge 和 handoff | `07-pull-requests-and-reviews.md` |
+| Actions 与 Agent Runtime | 承载 workflow、run、session、执行调度和可观测性 | `08-actions-and-ai-automation.md` |
 
-## 6. 当前优先级
+## 7. 当前缺口
+
+### 7.1 代码上下文供给仍偏弱
+
+- 还没有基础代码搜索。
+- 还没有面向 Issue / PR / Review 的轻量 Context Bundle。
+- Agent 进入 session 前拿到的“相关文件 + 相关 thread + 最近验证摘要”仍不够稳定。
+
+### 7.2 Review 闭环仍偏保守
+
+- thread 已支持第一版 re-anchor，但复杂 diff、rename 和更长 range 的映射仍不够强。
+- PR 还缺更明确的“本轮修改消化了哪些反馈”摘要。
+
+### 7.3 provenance 仍以会话级为主
+
+- 已能看到 run/session 来源、分支和 trigger ref。
+- 但 commit 级 provenance 还没有稳定回流到代码浏览和 PR 主界面。
+
+### 7.4 仓库基础能力仍保持最小集
+
+- 仓库模型永久限定为个人仓库，不设计组织/团队模型。
+- 当前没有默认分支切换能力。
+- 当前 Git 接入方式明确限定为 HTTP Git；由于 Workers 无法支持 SSH 协议服务，SSH 不属于当前待补能力。
+
+## 8. 当前优先级
 
 ### P0
 
-- 把 `Issue -> PR -> Review -> Merge` 这条主链路做顺。
-- 让 Issue 成为任务中心。
-- 让 PR 成为交付与评审中心。
-- 让 Agent Session 成为这条链路的可追踪执行载体。
+- 让 `Issue -> PR -> Review -> Merge` 成为最顺手的一条主链路。
+- 让 Issue 的 task center 和 PR 的 handoff 成为默认工作面。
+- 让 run/session 的摘要层比日志层更先被人类消费。
 
 ### P1
 
-- 增加代码搜索和轻量 Context Bundle。
-- 把验证结果和 artifact 更直接地并入 Issue 主界面。
-- 强化 thread 在多次提交之间的连续性。
+- 增加代码搜索和上下文 bundle。
+- 提升 review thread 在复杂 patch set 下的连续性。
+- 强化 validation summary 和 artifact 的 review-oriented 摘要表达。
 
-## 7. 推荐阅读顺序
+## 9. 推荐阅读顺序
 
-1. 先看 `06-issues-and-discussions.md`，理解任务入口。
-2. 再看 `07-pull-requests-and-reviews.md`，理解交付与评审循环。
-3. 再看 `08-actions-and-ai-automation.md`，理解 Session 如何驱动执行。
-4. 最后看 `02`、`03`、`04`、`05`，补齐支撑层能力。
+1. 先看 `06-issues-and-discussions.md`，理解任务入口和状态回流。
+2. 再看 `07-pull-requests-and-reviews.md`，理解交付、评审和 handoff。
+3. 再看 `08-actions-and-ai-automation.md`，理解 run/session 如何驱动执行。
+4. 最后看 `02`、`03`、`04`、`05`，补齐权限、仓库、Git 与代码浏览支撑层。
