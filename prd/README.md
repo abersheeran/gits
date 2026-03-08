@@ -32,6 +32,7 @@
 - 已支持 Issue 任务状态、验收标准，以及关联 PR 的统一任务视图。
 - 已支持 PR 创建、比较、Review、Reaction、squash merge。
 - 已支持 anchored review thread、多轮 thread comments、suggested changes。
+- 已支持 review thread 在新 commit 后 re-anchor、stale 标记和 patch-set changed 展示。
 - 已支持在 PR 页面直接展示 validation summary、merge summary 和关联 Issue 完成度。
 - 已支持从单条 unresolved review thread focused resume Agent。
 - 已引入 `Agent Session` 作为一等对象，并沉淀 timeline、artifact、usage、intervention。
@@ -41,9 +42,8 @@
 
 ### 4.1 Review 循环还不够顺
 
-- thread 在新 commit 后还缺更稳定的重新锚定。
-- 还缺 stale thread 标记和更明确的 patch-set 感知。
 - Agent 修改 PR 后，Review 与 Session 的状态回流还不够明显。
+- review thread 已有第一版 re-anchor / stale 标记，但复杂 diff 场景下还缺更智能映射。
 
 ### 4.2 PR 的验证摘要还是首版
 

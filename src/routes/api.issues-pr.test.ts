@@ -1423,6 +1423,359 @@ describe("API issues and pull requests", () => {
     expect(body.reviewThreads[0]?.comments).toHaveLength(1);
   });
 
+  it("re-anchors review threads after newer pull request commits", async () => {
+    const compareRefs = vi
+      .spyOn(RepositoryBrowserService.prototype, "compareRefs")
+      .mockResolvedValueOnce({
+        baseRef: "refs/heads/main",
+        headRef: "refs/heads/feature",
+        baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mergeable: "mergeable",
+        aheadBy: 2,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            additions: 1,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -14,1 +14,1 @@\n const value = normalizePath(path);",
+            hunks: [
+              {
+                header: "@@ -14,1 +14,1 @@",
+                oldStart: 14,
+                oldLines: 1,
+                newStart: 14,
+                newLines: 1,
+                lines: [
+                  {
+                    kind: "context",
+                    content: "const value = normalizePath(path);",
+                    oldLineNumber: 14,
+                    newLineNumber: 14
+                  }
+                ]
+              }
+            ],
+            oldContent: "const value = normalizePath(path);",
+            newContent: "const value = normalizePath(path);"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headRef: "cccccccccccccccccccccccccccccccccccccccc",
+        baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        mergeable: "mergeable",
+        aheadBy: 1,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 2,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            additions: 2,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -1,0 +1,2 @@\n+const prelude = true;\n+const shifted = true;",
+            hunks: [
+              {
+                header: "@@ -1,0 +1,2 @@",
+                oldStart: 1,
+                oldLines: 0,
+                newStart: 1,
+                newLines: 2,
+                lines: [
+                  {
+                    kind: "add",
+                    content: "const prelude = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 1
+                  },
+                  {
+                    kind: "add",
+                    content: "const shifted = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 2
+                  }
+                ]
+              }
+            ],
+            oldContent: "",
+            newContent: "const prelude = true;\nconst shifted = true;"
+          }
+        ]
+      });
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "cccccccccccccccccccccccccccccccccccccccc",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "ORDER BY\n           CASE WHEN t.status = 'open' THEN 0 ELSE 1 END",
+        all: () =>
+          [
+            buildPullRequestReviewThreadRow({
+              head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              line: 12,
+              start_line: 12,
+              end_line: 12,
+              hunk_header: "@@ -12,1 +12,1 @@"
+            })
+          ]
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [buildPullRequestReviewThreadCommentRow()]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      reviewThreads: Array<{
+        anchor?: {
+          status: string;
+          patchset_changed: boolean;
+          start_line: number | null;
+          hunk_header: string | null;
+        };
+      }>;
+    };
+    expect(body.reviewThreads[0]?.anchor?.status).toBe("reanchored");
+    expect(body.reviewThreads[0]?.anchor?.patchset_changed).toBe(true);
+    expect(body.reviewThreads[0]?.anchor?.start_line).toBe(14);
+    expect(body.reviewThreads[0]?.anchor?.hunk_header).toBe("@@ -14,1 +14,1 @@");
+    expect(compareRefs).toHaveBeenNthCalledWith(1, {
+      owner: "alice",
+      repo: "demo",
+      baseRef: "refs/heads/main",
+      headRef: "refs/heads/feature"
+    });
+    expect(compareRefs).toHaveBeenNthCalledWith(2, {
+      owner: "alice",
+      repo: "demo",
+      baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      headRef: "cccccccccccccccccccccccccccccccccccccccc"
+    });
+  });
+
+  it("marks review threads stale when they no longer map to the current diff", async () => {
+    vi.spyOn(RepositoryBrowserService.prototype, "compareRefs")
+      .mockResolvedValueOnce({
+        baseRef: "refs/heads/main",
+        headRef: "refs/heads/feature",
+        baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mergeable: "mergeable",
+        aheadBy: 2,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            additions: 1,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -30,1 +30,1 @@\n const unrelated = true;",
+            hunks: [
+              {
+                header: "@@ -30,1 +30,1 @@",
+                oldStart: 30,
+                oldLines: 1,
+                newStart: 30,
+                newLines: 1,
+                lines: [
+                  {
+                    kind: "context",
+                    content: "const unrelated = true;",
+                    oldLineNumber: 30,
+                    newLineNumber: 30
+                  }
+                ]
+              }
+            ],
+            oldContent: "const unrelated = true;",
+            newContent: "const unrelated = true;"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headRef: "cccccccccccccccccccccccccccccccccccccccc",
+        baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        mergeable: "mergeable",
+        aheadBy: 1,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 0,
+        deletions: 1,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            additions: 0,
+            deletions: 1,
+            isBinary: false,
+            patch: "@@ -12,1 +12,0 @@\n-const value = path;",
+            hunks: [
+              {
+                header: "@@ -12,1 +12,0 @@",
+                oldStart: 12,
+                oldLines: 1,
+                newStart: 12,
+                newLines: 0,
+                lines: [
+                  {
+                    kind: "delete",
+                    content: "const value = path;",
+                    oldLineNumber: 12,
+                    newLineNumber: null
+                  }
+                ]
+              }
+            ],
+            oldContent: "const value = path;",
+            newContent: ""
+          }
+        ]
+      });
+    const now = Date.now();
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: 0 })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "cccccccccccccccccccccccccccccccccccccccc",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "ORDER BY\n           CASE WHEN t.status = 'open' THEN 0 ELSE 1 END",
+        all: () =>
+          [
+            buildPullRequestReviewThreadRow({
+              head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              line: 12,
+              start_line: 12,
+              end_line: 12,
+              hunk_header: "@@ -12,1 +12,1 @@"
+            })
+          ]
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [buildPullRequestReviewThreadCommentRow()]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      reviewThreads: Array<{
+        anchor?: {
+          status: string;
+          patchset_changed: boolean;
+          start_line: number | null;
+          message: string;
+        };
+      }>;
+    };
+    expect(body.reviewThreads[0]?.anchor?.status).toBe("stale");
+    expect(body.reviewThreads[0]?.anchor?.patchset_changed).toBe(true);
+    expect(body.reviewThreads[0]?.anchor?.start_line).toBeNull();
+    expect(body.reviewThreads[0]?.anchor?.message).toContain("no longer maps");
+  });
+
   it("allows collaborators to create pull request review threads", async () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "user-2",
@@ -1785,6 +2138,344 @@ describe("API issues and pull requests", () => {
     expect(body.comment.suggestion?.code).toBe("const value = normalizePath(path);");
     expect(body.reviewThread.id).toBe("thread-1");
     expect(body.reviewThread.comments).toHaveLength(2);
+  });
+
+  it("re-anchors suggested changes when replying after newer pull request commits", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    const compareRefs = vi
+      .spyOn(RepositoryBrowserService.prototype, "compareRefs")
+      .mockResolvedValueOnce({
+        baseRef: "refs/heads/main",
+        headRef: "refs/heads/feature",
+        baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mergeable: "mergeable",
+        aheadBy: 2,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            additions: 1,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -14,1 +14,1 @@\n const value = normalizePath(path);",
+            hunks: [
+              {
+                header: "@@ -14,1 +14,1 @@",
+                oldStart: 14,
+                oldLines: 1,
+                newStart: 14,
+                newLines: 1,
+                lines: [
+                  {
+                    kind: "context",
+                    content: "const value = normalizePath(path);",
+                    oldLineNumber: 14,
+                    newLineNumber: 14
+                  }
+                ]
+              }
+            ],
+            oldContent: "const value = normalizePath(path);",
+            newContent: "const value = normalizePath(path);"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headRef: "cccccccccccccccccccccccccccccccccccccccc",
+        baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        mergeable: "mergeable",
+        aheadBy: 1,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 2,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            additions: 2,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -1,0 +1,2 @@\n+const prelude = true;\n+const shifted = true;",
+            hunks: [
+              {
+                header: "@@ -1,0 +1,2 @@",
+                oldStart: 1,
+                oldLines: 0,
+                newStart: 1,
+                newLines: 2,
+                lines: [
+                  {
+                    kind: "add",
+                    content: "const prelude = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 1
+                  },
+                  {
+                    kind: "add",
+                    content: "const shifted = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 2
+                  }
+                ]
+              }
+            ],
+            oldContent: "",
+            newContent: "const prelude = true;\nconst shifted = true;"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        baseRef: "refs/heads/main",
+        headRef: "refs/heads/feature",
+        baseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        mergeable: "mergeable",
+        aheadBy: 2,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 1,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            additions: 1,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -14,1 +14,1 @@\n const value = normalizePath(path);",
+            hunks: [
+              {
+                header: "@@ -14,1 +14,1 @@",
+                oldStart: 14,
+                oldLines: 1,
+                newStart: 14,
+                newLines: 1,
+                lines: [
+                  {
+                    kind: "context",
+                    content: "const value = normalizePath(path);",
+                    oldLineNumber: 14,
+                    newLineNumber: 14
+                  }
+                ]
+              }
+            ],
+            oldContent: "const value = normalizePath(path);",
+            newContent: "const value = normalizePath(path);"
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        baseRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headRef: "cccccccccccccccccccccccccccccccccccccccc",
+        baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        headOid: "cccccccccccccccccccccccccccccccccccccccc",
+        mergeBaseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        mergeable: "mergeable",
+        aheadBy: 1,
+        behindBy: 0,
+        filesChanged: 1,
+        additions: 2,
+        deletions: 0,
+        commits: [],
+        changes: [
+          {
+            path: "src/app.ts",
+            previousPath: null,
+            status: "modified",
+            mode: "100644",
+            previousMode: "100644",
+            oid: "cccccccccccccccccccccccccccccccccccccccc",
+            previousOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            additions: 2,
+            deletions: 0,
+            isBinary: false,
+            patch: "@@ -1,0 +1,2 @@\n+const prelude = true;\n+const shifted = true;",
+            hunks: [
+              {
+                header: "@@ -1,0 +1,2 @@",
+                oldStart: 1,
+                oldLines: 0,
+                newStart: 1,
+                newLines: 2,
+                lines: [
+                  {
+                    kind: "add",
+                    content: "const prelude = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 1
+                  },
+                  {
+                    kind: "add",
+                    content: "const shifted = true;",
+                    oldLineNumber: null,
+                    newLineNumber: 2
+                  }
+                ]
+              }
+            ],
+            oldContent: "",
+            newContent: "const prelude = true;\nconst shifted = true;"
+          }
+        ]
+      });
+    const now = Date.now();
+    let insertedSuggestedStartLine: number | null = null;
+    let insertedSuggestedEndLine: number | null = null;
+    let insertedSuggestedSide: string | null = null;
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE pr.repository_id = ? AND pr.number = ?",
+        first: () => ({
+          id: "pr-1",
+          repository_id: "repo-1",
+          number: 1,
+          author_id: "owner-1",
+          author_username: "alice",
+          title: "Improve README",
+          body: "",
+          state: "open",
+          base_ref: "refs/heads/main",
+          head_ref: "refs/heads/feature",
+          base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          head_oid: "cccccccccccccccccccccccccccccccccccccccc",
+          merge_commit_oid: null,
+          created_at: now,
+          updated_at: now,
+          closed_at: null,
+          merged_at: null
+        })
+      },
+      {
+        when: "WHERE t.repository_id = ? AND t.pull_request_number = ? AND t.id = ?",
+        first: () =>
+          buildPullRequestReviewThreadRow({
+            head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            start_side: "head",
+            start_line: 12,
+            end_side: "head",
+            end_line: 12,
+            hunk_header: "@@ -12,1 +12,1 @@"
+          })
+      },
+      {
+        when: "INSERT INTO pull_request_review_thread_comments",
+        run: (params) => {
+          insertedSuggestedStartLine = params[7] as number | null;
+          insertedSuggestedEndLine = params[8] as number | null;
+          insertedSuggestedSide = params[9] as string | null;
+          return { success: true };
+        }
+      },
+      {
+        when: "WHERE c.repository_id = ? AND c.pull_request_number = ? AND c.thread_id = ? AND c.id = ?",
+        first: () =>
+          buildPullRequestReviewThreadCommentRow({
+            id: "thread-comment-2",
+            body: "Use normalizePath here.",
+            suggested_start_line: 14,
+            suggested_end_line: 14,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);"
+          })
+      },
+      {
+        when: "UPDATE pull_request_review_threads",
+        run: () => ({ success: true })
+      },
+      {
+        when: "FROM pull_request_review_thread_comments c",
+        all: () => [
+          buildPullRequestReviewThreadCommentRow(),
+          buildPullRequestReviewThreadCommentRow({
+            id: "thread-comment-2",
+            body: "Use normalizePath here.",
+            suggested_start_line: 14,
+            suggested_end_line: 14,
+            suggested_side: "head",
+            suggested_code: "const value = normalizePath(path);",
+            created_at: now + 1_000,
+            updated_at: now + 1_000
+          })
+        ]
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls/1/review-threads/thread-1/comments", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          body: "Use normalizePath here.",
+          suggestedCode: "const value = normalizePath(path);"
+        })
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      reviewThread: {
+        anchor?: { status: string; start_line: number | null };
+        comments: Array<{ id: string; suggestion: { start_line: number; code: string } | null }>;
+      };
+      comment: {
+        suggestion: { start_line: number; code: string } | null;
+      };
+    };
+    expect(insertedSuggestedStartLine).toBe(14);
+    expect(insertedSuggestedEndLine).toBe(14);
+    expect(insertedSuggestedSide).toBe("head");
+    expect(body.comment.suggestion?.start_line).toBe(14);
+    expect(body.reviewThread.anchor?.status).toBe("reanchored");
+    expect(body.reviewThread.anchor?.start_line).toBe(14);
+    expect(body.reviewThread.comments[1]?.suggestion?.code).toBe(
+      "const value = normalizePath(path);"
+    );
+    expect(compareRefs).toHaveBeenCalledTimes(4);
   });
 
   it("resumes a pull request agent from an open review thread", async () => {

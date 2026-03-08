@@ -177,12 +177,68 @@ function shortOid(oid: string | null | undefined): string {
   return oid ? oid.slice(0, 7) : "-";
 }
 
-function formatReviewThreadAnchor(thread: PullRequestReviewThreadRecord): string {
+function formatReviewThreadRangeLabel(args: {
+  path: string;
+  startLine: number | null;
+  endLine: number | null;
+  side: PullRequestReviewThreadSide;
+}): string {
+  if (args.startLine === null || args.endLine === null) {
+    return `${args.path} (unmapped ${args.side})`;
+  }
   const range =
-    thread.start_line === thread.end_line
-      ? String(thread.start_line)
-      : `${thread.start_line}-${thread.end_line}`;
-  return `${thread.path}:${range} (${thread.start_side})`;
+    args.startLine === args.endLine ? String(args.startLine) : `${args.startLine}-${args.endLine}`;
+  return `${args.path}:${range} (${args.side})`;
+}
+
+function formatOriginalReviewThreadAnchor(thread: PullRequestReviewThreadRecord): string {
+  return formatReviewThreadRangeLabel({
+    path: thread.path,
+    startLine: thread.start_line,
+    endLine: thread.end_line,
+    side: thread.start_side
+  });
+}
+
+function getCurrentReviewThreadAnchor(thread: PullRequestReviewThreadRecord) {
+  if (thread.anchor) {
+    if (
+      thread.anchor.status === "stale" ||
+      thread.anchor.start_line === null ||
+      thread.anchor.end_line === null
+    ) {
+      return null;
+    }
+    return thread.anchor;
+  }
+  return {
+    path: thread.path,
+    line: thread.line,
+    side: thread.side,
+    start_side: thread.start_side,
+    start_line: thread.start_line,
+    end_side: thread.end_side,
+    end_line: thread.end_line,
+    hunk_header: thread.hunk_header
+  };
+}
+
+function formatReviewThreadAnchor(thread: PullRequestReviewThreadRecord): string {
+  const currentAnchor = getCurrentReviewThreadAnchor(thread);
+  if (!currentAnchor) {
+    return formatOriginalReviewThreadAnchor(thread);
+  }
+  return formatReviewThreadRangeLabel({
+    path: currentAnchor.path,
+    startLine: currentAnchor.start_line,
+    endLine: currentAnchor.end_line,
+    side: currentAnchor.start_side
+  });
+}
+
+function canSuggestChangeOnReviewThread(thread: PullRequestReviewThreadRecord): boolean {
+  const currentAnchor = getCurrentReviewThreadAnchor(thread);
+  return currentAnchor?.start_side === "head";
 }
 
 function formatSelectedReviewRange(range: SelectedReviewRange): string {
@@ -607,7 +663,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
     const trimmedBody = (threadReplyBodies[thread.id] ?? "").trim();
     const trimmedSuggestedCode =
-      thread.start_side === "head" ? (threadReplySuggestedCodes[thread.id] ?? "").trim() : "";
+      canSuggestChangeOnReviewThread(thread)
+        ? (threadReplySuggestedCodes[thread.id] ?? "").trim()
+        : "";
     if (!trimmedBody && !trimmedSuggestedCode) {
       setError("Review thread replies require either a comment or suggested code.");
       return;
@@ -638,15 +696,16 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
   function renderInlineReviewThreads(context: RepositoryDiffLineRenderContext) {
     const matchingThreads = reviewThreads.filter((thread) => {
-      if (thread.path !== context.change.path) {
+      const currentAnchor = getCurrentReviewThreadAnchor(thread);
+      if (!currentAnchor || currentAnchor.path !== context.change.path) {
         return false;
       }
-      if (thread.hunk_header && thread.hunk_header !== context.hunk.header) {
+      if (currentAnchor.hunk_header && currentAnchor.hunk_header !== context.hunk.header) {
         return false;
       }
       const lineNumber =
-        thread.end_side === "base" ? context.line.oldLineNumber : context.line.newLineNumber;
-      return lineNumber !== null && lineNumber === thread.end_line;
+        currentAnchor.end_side === "base" ? context.line.oldLineNumber : context.line.newLineNumber;
+      return lineNumber !== null && lineNumber === currentAnchor.end_line;
     });
 
     if (matchingThreads.length === 0) {
@@ -662,6 +721,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           >
             <span className="font-medium text-foreground">{thread.status}</span>{" "}
             <span>{formatReviewThreadAnchor(thread)}</span>
+            {thread.anchor?.status === "reanchored" ? (
+              <span className="ml-1 text-foreground">reanchored</span>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1266,6 +1328,15 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                       <Badge variant={thread.status === "open" ? "secondary" : "outline"}>
                         {thread.status}
                       </Badge>
+                      {thread.anchor?.status === "reanchored" ? (
+                        <Badge variant="outline">reanchored</Badge>
+                      ) : null}
+                      {thread.anchor?.status === "stale" ? (
+                        <Badge variant="destructive">stale</Badge>
+                      ) : null}
+                      {thread.anchor?.patchset_changed ? (
+                        <Badge variant="outline">new commits</Badge>
+                      ) : null}
                       <span>{thread.author_username}</span>
                       <span>{formatReviewThreadAnchor(thread)}</span>
                       {thread.base_oid && thread.head_oid ? (
@@ -1273,10 +1344,22 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                           {shortOid(thread.base_oid)}..{shortOid(thread.head_oid)}
                         </span>
                       ) : null}
-                      {thread.hunk_header ? <span>{thread.hunk_header}</span> : null}
+                      {(thread.anchor?.hunk_header ?? thread.hunk_header) ? (
+                        <span>{thread.anchor?.hunk_header ?? thread.hunk_header}</span>
+                      ) : null}
                       <span>created {formatRelativeTime(thread.created_at)}</span>
                       <span>{formatDateTime(thread.created_at)}</span>
                     </div>
+                    {thread.anchor ? (
+                      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        {thread.anchor.status !== "current" || thread.anchor.patchset_changed ? (
+                          <p>{thread.anchor.message}</p>
+                        ) : null}
+                        {thread.anchor.status !== "current" ? (
+                          <p>Original anchor: {formatOriginalReviewThreadAnchor(thread)}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="mt-3 space-y-3">
                       {thread.comments.map((comment) => (
                         <div key={comment.id} className="rounded-md border bg-background/80 p-3">
@@ -1334,11 +1417,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                   }))
                                 }
                                 rows={5}
-                                disabled={thread.start_side !== "head"}
+                                disabled={!canSuggestChangeOnReviewThread(thread)}
                                 placeholder={
-                                  thread.start_side === "head"
+                                  canSuggestChangeOnReviewThread(thread)
                                     ? "Optional replacement code for this anchored range"
-                                    : "Suggested changes are only available for head-side ranges"
+                                    : thread.anchor?.status === "stale"
+                                      ? "Suggested changes are disabled until this thread maps to the current diff"
+                                      : "Suggested changes are only available for head-side ranges"
                                 }
                               />
                             </div>

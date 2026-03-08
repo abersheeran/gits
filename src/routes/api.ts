@@ -42,6 +42,7 @@ import {
   PullRequestService,
   type PullRequestListState
 } from "../services/pull-request-service";
+import { enrichPullRequestReviewThreads } from "../services/pull-request-review-thread-anchor-service";
 import { RepositoryService } from "../services/repository-service";
 import { StorageService } from "../services/storage-service";
 import type {
@@ -958,6 +959,7 @@ function buildPullRequestReviewThreadHistory(input: {
       | "end_side"
       | "end_line"
       | "hunk_header"
+      | "anchor"
       | "comments"
     >
   >;
@@ -968,6 +970,7 @@ function buildPullRequestReviewThreadHistory(input: {
 
   return input.threads
     .map((thread) => {
+      const anchor = thread.anchor;
       const anchorLabel =
         thread.start_line === thread.end_line && thread.start_side === thread.end_side
           ? `${thread.path}:${thread.start_line} (${thread.start_side})`
@@ -982,6 +985,20 @@ function buildPullRequestReviewThreadHistory(input: {
       }
       if (thread.hunk_header) {
         sections.push(`  hunk: ${thread.hunk_header}`);
+      }
+      if (anchor) {
+        sections.push(`  anchor_status: ${anchor.status}`);
+        if (anchor.patchset_changed) {
+          sections.push("  patchset: newer commits detected");
+        }
+        if (anchor.start_line !== null && anchor.end_line !== null) {
+          const currentAnchorLabel =
+            anchor.start_line === anchor.end_line && anchor.start_side === anchor.end_side
+              ? `${anchor.path}:${anchor.start_line} (${anchor.start_side})`
+              : `${anchor.path}:${anchor.start_line}-${anchor.end_line} (${anchor.start_side})`;
+          sections.push(`  current_location: ${currentAnchorLabel}`);
+        }
+        sections.push(`  anchor_note: ${anchor.message}`);
       }
 
       if (thread.comments.length === 0) {
@@ -3122,7 +3139,13 @@ router.get("/repos/:owner/:repo/pulls/:number/review-threads", optionalSession, 
     throw new HTTPException(404, { message: "Pull request not found" });
   }
 
-  const reviewThreads = await pullRequestService.listPullRequestReviewThreads(repository.id, number);
+  const reviewThreads = await enrichPullRequestReviewThreads({
+    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    owner,
+    repo,
+    pullRequest,
+    threads: await pullRequestService.listPullRequestReviewThreads(repository.id, number)
+  });
   return c.json({ reviewThreads });
 });
 
@@ -3215,7 +3238,14 @@ router.post("/repos/:owner/:repo/pulls/:number/review-threads", requireSession, 
     hunkHeader: input.hunkHeader,
     suggestion
   });
-  return c.json({ reviewThread }, 201);
+  const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
+    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    owner,
+    repo,
+    pullRequest,
+    threads: [reviewThread]
+  });
+  return c.json({ reviewThread: enrichedReviewThread ?? reviewThread }, 201);
 });
 
 router.post(
@@ -3280,6 +3310,30 @@ router.post(
     if (existingThread.status === "resolved") {
       throw new HTTPException(409, { message: "Resolved review threads cannot be updated" });
     }
+    const browserService = new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET));
+    const [threadWithAnchor] =
+      input.suggestedCode !== undefined
+        ? await enrichPullRequestReviewThreads({
+            browserService,
+            owner,
+            repo,
+            pullRequest,
+            threads: [existingThread]
+          })
+        : [existingThread];
+    const suggestedAnchor = threadWithAnchor?.anchor;
+    if (
+      input.suggestedCode !== undefined &&
+      (!suggestedAnchor ||
+        suggestedAnchor.status === "stale" ||
+        suggestedAnchor.start_side !== "head" ||
+        suggestedAnchor.start_line === null ||
+        suggestedAnchor.end_line === null)
+    ) {
+      throw new HTTPException(409, {
+        message: "Suggested changes require a review thread that still maps to the current head diff"
+      });
+    }
 
     const comment = await pullRequestService.createPullRequestReviewThreadComment({
       repositoryId: repository.id,
@@ -3289,9 +3343,9 @@ router.post(
       authorId: sessionUser.id,
       body: input.body ?? "",
       suggestion: buildPullRequestReviewThreadSuggestion({
-        side: existingThread.start_side,
-        startLine: existingThread.start_line,
-        endLine: existingThread.end_line,
+        side: suggestedAnchor?.start_side ?? existingThread.start_side,
+        startLine: suggestedAnchor?.start_line ?? existingThread.start_line,
+        endLine: suggestedAnchor?.end_line ?? existingThread.end_line,
         ...(input.suggestedCode !== undefined ? { suggestedCode: input.suggestedCode } : {})
       })
     });
@@ -3304,7 +3358,15 @@ router.post(
       throw new HTTPException(404, { message: "Review thread not found" });
     }
 
-    return c.json({ comment, reviewThread }, 201);
+    const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
+      browserService,
+      owner,
+      repo,
+      pullRequest,
+      threads: [reviewThread]
+    });
+
+    return c.json({ comment, reviewThread: enrichedReviewThread ?? reviewThread }, 201);
   }
 );
 
@@ -3348,7 +3410,14 @@ router.post(
       throw new HTTPException(404, { message: "Review thread not found" });
     }
     if (existingThread.status === "resolved") {
-      return c.json({ reviewThread: existingThread });
+      const [enrichedExistingThread] = await enrichPullRequestReviewThreads({
+        browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+        owner,
+        repo,
+        pullRequest,
+        threads: [existingThread]
+      });
+      return c.json({ reviewThread: enrichedExistingThread ?? existingThread });
     }
 
     const reviewThread = await pullRequestService.resolvePullRequestReviewThread({
@@ -3361,7 +3430,15 @@ router.post(
       throw new HTTPException(404, { message: "Review thread not found" });
     }
 
-    return c.json({ reviewThread });
+    const [enrichedReviewThread] = await enrichPullRequestReviewThreads({
+      browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+      owner,
+      repo,
+      pullRequest,
+      threads: [reviewThread]
+    });
+
+    return c.json({ reviewThread: enrichedReviewThread ?? reviewThread });
   }
 );
 
@@ -3406,10 +3483,17 @@ router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, as
     throw new HTTPException(409, { message: "Pull request must be open to resume an agent" });
   }
 
-  const [reviews, reviewThreads] = await Promise.all([
+  const [reviews, rawReviewThreads] = await Promise.all([
     pullRequestService.listPullRequestReviews(repository.id, number),
     pullRequestService.listPullRequestReviewThreads(repository.id, number)
   ]);
+  const reviewThreads = await enrichPullRequestReviewThreads({
+    browserService: new RepositoryBrowserService(new StorageService(c.env.GIT_BUCKET)),
+    owner,
+    repo,
+    pullRequest,
+    threads: rawReviewThreads
+  });
   const focusedThread = input.threadId
     ? reviewThreads.find((thread) => thread.id === input.threadId) ?? null
     : null;

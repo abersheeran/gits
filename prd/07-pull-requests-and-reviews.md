@@ -40,6 +40,9 @@ PR 是这款产品的交付中心。
   - 支持多轮 comments
   - 支持 suggested changes
   - `open / resolved`
+  - 新 commit 后自动 re-anchor
+  - 无法映射到当前 diff 时标记 stale
+  - 显示 patch-set changed 状态
   - 支持从单条 unresolved thread focused resume Agent
 - 合并：
   - 当前支持 squash merge
@@ -55,17 +58,23 @@ PR 是这款产品的交付中心。
 4. Agent 从 thread focused resume。
 5. 人类最终合并 PR。
 
-但 PR 的评审连续性还不够强。
+现在 PR 的评审连续性已经有了第一版 patch-set 感知。
 
 ## 4. 面向主工作流仍需补足
 
-### 4.1 Review 线程在多次提交之间还不够稳定
+### 4.1 Review 线程连续性已经有第一版，但仍偏保守
 
-当前 thread 已锚定到真实 diff，但还缺：
+当前 thread 已支持：
 
 - 新 commit 后的重新锚定
 - stale thread 标记
-- 更明确的 patch-set 变化感知
+- patch-set changed 状态展示
+
+但这套连续性仍偏保守，还缺：
+
+- rename / 更复杂 diff 场景下的锚点延续
+- 跨非连续行变更的更智能 range 映射
+- 更明确的“本次 Agent 修改消化了哪些 thread”回流
 
 ### 4.2 验证摘要已经有第一版，但仍偏轻量
 
@@ -93,15 +102,17 @@ PR 是这款产品的交付中心。
 2. 系统阻止同一 `head/base` 组合的重复未关闭 PR。
 3. PR 页面可展示 compare、reviews、review threads、validation summary、merge summary、Agent provenance。
 4. 用户可从 thread 直接继续 Agent。
-5. 合并成功后自动关闭关联 Issue。
+5. 新 commit 后，thread 会尝试重新锚定到当前 diff；无法锚定时明确标记 stale。
+6. 合并成功后自动关闭关联 Issue。
 
 ### 目标流程
 
 1. Agent 基于 Issue 提交 PR。
 2. 人类在 PR 中评审代码和测试产物。
 3. Agent 根据 review thread 继续修改。
-4. PR 页面持续汇总“最新改动 + 最新验证 + 最新反馈 + 关联 Issue 完成度”。
-5. 人类完成最终合并。
+4. 新 commit 后 review thread 连续映射到最新 patch-set。
+5. PR 页面持续汇总“最新改动 + 最新验证 + 最新反馈 + 关联 Issue 完成度”。
+6. 人类完成最终合并。
 
 ## 6. 当前接口
 
@@ -144,10 +155,10 @@ PR 是这款产品的交付中心。
 
 - 当前只有 squash merge。
 - PR 页面已具备第一版 validation summary 和 merge summary。
-- thread 在新 commit 后还缺更稳定的连续性处理。
+- thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
 
 下一步优先级：
 
-1. 增强 thread 在多次提交之间的重新锚定与 stale 标记。
-2. 把 PR 和来源 Issue 之间的状态回流做得更明显。
-3. 把验证摘要进一步结构化成更适合评审的测试/构建视图。
+1. 把 PR 和来源 Issue 之间的状态回流做得更明显。
+2. 把验证摘要进一步结构化成更适合评审的测试/构建视图。
+3. 提升 review thread 在 rename / 复杂 patch-set 下的锚点映射质量。

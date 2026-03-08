@@ -368,6 +368,22 @@ export type PullRequestReviewThreadSuggestionRecord = {
   code: string;
 };
 
+export type PullRequestReviewThreadAnchorStatus = "current" | "reanchored" | "stale";
+
+export type PullRequestReviewThreadAnchorRecord = {
+  status: PullRequestReviewThreadAnchorStatus;
+  patchset_changed: boolean;
+  path: string;
+  line: number | null;
+  side: PullRequestReviewThreadSide;
+  start_side: PullRequestReviewThreadSide;
+  start_line: number | null;
+  end_side: PullRequestReviewThreadSide;
+  end_line: number | null;
+  hunk_header: string | null;
+  message: string;
+};
+
 export type PullRequestReviewThreadCommentRecord = {
   id: string;
   repository_id: string;
@@ -403,6 +419,7 @@ export type PullRequestReviewThreadRecord = {
   status: PullRequestReviewThreadStatus;
   resolved_by: string | null;
   resolved_by_username: string | null;
+  anchor?: PullRequestReviewThreadAnchorRecord;
   comments: PullRequestReviewThreadCommentRecord[];
   created_at: number;
   updated_at: number;
