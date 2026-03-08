@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import type { ActionRunRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export function actionStatusDotClass(status: ActionRunRecord["status"]): string {
+function actionStatusDotClass(status: ActionRunRecord["status"]): string {
   if (status === "success") {
     return "bg-emerald-500";
   }

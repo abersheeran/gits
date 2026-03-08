@@ -80,4 +80,32 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
+
+  .monaco-editor .gits-monaco-selected-line {
+    background: rgba(17, 24, 39, 0.08);
+  }
+
+  .monaco-editor .gits-monaco-selected-line-number {
+    color: #111827;
+    font-weight: 600;
+  }
+
+  .monaco-editor .gits-monaco-selected-line-decoration {
+    border-left: 3px solid #111827;
+    margin-left: 2px;
+  }
+
+  .monaco-editor .gits-monaco-thread-line {
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  .monaco-editor .gits-monaco-thread-line-number {
+    color: #1d4ed8;
+    font-weight: 600;
+  }
+
+  .monaco-editor .gits-monaco-thread-line-decoration {
+    border-left: 3px solid #2563eb;
+    margin-left: 2px;
+  }
 }

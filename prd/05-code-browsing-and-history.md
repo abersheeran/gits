@@ -18,12 +18,15 @@
 - 文件与目录浏览：
   - tree / blob 路由
   - 文本文件预览
+  - 文本代码预览现在统一使用 Monaco read-only viewer，替换原本逐行 `pre` 渲染
+  - Monaco viewer 按组件挂载时 lazy load，而不是仓库页面初始化时整包注入
   - 二进制文件元信息
 - 历史能力：
   - 分支提交历史
   - 单路径历史
   - 单提交详情
   - 分支比较与 diff
+  - commit / compare diff 现在统一使用 Monaco Diff Editor 渲染
   - ahead / behind
   - mergeability 估算
 - Diff 结构化输出：
@@ -91,6 +94,8 @@
 - `src/routes/api.ts`
 - `web/src/pages/repository-page.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
+- `web/src/components/ui/monaco-text-viewer.tsx`
+- `web/src/lib/monaco.ts`
 - `web/src/lib/api.ts`
 
 ## 7. 当前边界与下一步
@@ -99,6 +104,8 @@
 - 当前没有 Context Bundle。
 - 当前代码浏览更多还是“仓库页面”，还不是“任务上下文页面”。
 - 当前浏览缓存只在单个 `RepositoryObject` 实例内存中生效；实例回收后会重新从 R2 hydrate。
+- Monaco 目前先覆盖只读查看面；编辑配置和表单输入仍沿用现有 `Textarea`。
+- Monaco 运行时与 worker 已拆到懒加载 chunk，但打开大型 diff 时仍会产生明显前端下载体积。
 
 下一步优先级：
 

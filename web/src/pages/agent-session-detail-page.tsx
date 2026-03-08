@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageLoadingState } from "@/components/ui/loading-state";
+import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   cancelRepositoryAgentSession,
@@ -417,9 +418,15 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                   </Button>
                 </div>
                 {promptExpanded ? (
-                  <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                    {session.prompt || "(empty prompt)"}
-                  </pre>
+                  <MonacoTextViewer
+                    value={session.prompt || "(empty prompt)"}
+                    path={`agent-session/${session.id}/prompt.txt`}
+                    scope="agent-session-prompt"
+                    className="mt-3"
+                    minHeight={140}
+                    maxHeight={320}
+                    wrap="on"
+                  />
                 ) : null}
               </div>
             </CardContent>
@@ -619,9 +626,15 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                             ? "Showing compact excerpt from the session summary."
                             : "Showing full content loaded from object storage."}
                         </p>
-                        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs text-muted-foreground">
-                          {fullContent ?? artifact.content_text}
-                        </pre>
+                        <MonacoTextViewer
+                          value={fullContent ?? artifact.content_text}
+                          path={`agent-session/${sessionDetail.session.id}/artifact-${artifact.id}-${artifact.title}.log`}
+                          scope="agent-session-artifact"
+                          className="mt-3"
+                          minHeight={180}
+                          maxHeight={520}
+                          wrap="on"
+                        />
                       </section>
                     );
                   })}

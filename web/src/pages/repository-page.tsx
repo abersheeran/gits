@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import {
   Select,
   SelectContent,
@@ -213,7 +214,6 @@ function RepositoryContentsPanel({
   onOpenHistory?: () => void;
 }) {
   if (contents.kind === "blob" && contents.file) {
-    const lines = contents.file.content?.split("\n") ?? [];
     return (
       <section className="min-w-0 border-b xl:border-b-0 xl:border-r">
         <header className="flex items-center gap-3 border-b px-4 py-3 text-sm font-medium">
@@ -271,17 +271,14 @@ function RepositoryContentsPanel({
             当前文件为二进制内容，暂不支持在线文本预览。
           </div>
         ) : (
-          <div className="overflow-x-auto bg-background">
-            <ol className="min-w-full divide-y font-mono text-xs leading-5">
-              {lines.map((line, index) => (
-                <li key={index} className="grid grid-cols-[auto_minmax(0,1fr)]">
-                  <span className="select-none border-r bg-muted/40 px-3 py-0.5 text-right text-muted-foreground">
-                    {index + 1}
-                  </span>
-                  <pre className="overflow-x-auto whitespace-pre px-3 py-0.5 text-foreground">{line || " "}</pre>
-                </li>
-              ))}
-            </ol>
+          <div className="p-4">
+            <MonacoTextViewer
+              value={contents.file.content ?? ""}
+              path={contents.file.path}
+              scope="repository-blob"
+              minHeight={260}
+              maxHeight={860}
+            />
           </div>
         )}
       </section>

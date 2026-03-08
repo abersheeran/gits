@@ -7,7 +7,7 @@ import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { ReactionStrip } from "@/components/repository/reaction-strip";
 import {
   RepositoryDiffView,
-  type RepositoryDiffLineRenderContext,
+  type RepositoryDiffLineDecoration,
   type RepositoryDiffLineTarget
 } from "@/components/repository/repository-diff-view";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
+import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { PendingButton } from "@/components/ui/pending-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -225,6 +226,53 @@ function formatSelectedReviewRange(range: SelectedReviewRange): string {
   const lineLabel =
     range.startLine === range.endLine ? String(range.startLine) : `${range.startLine}-${range.endLine}`;
   return `${range.path}:${lineLabel} (${range.side})`;
+}
+
+function buildReviewThreadLineDecorations(
+  reviewThreads: PullRequestReviewThreadRecord[]
+): RepositoryDiffLineDecoration[] {
+  const decorations = new Map<string, RepositoryDiffLineDecoration>();
+
+  for (const thread of reviewThreads) {
+    const currentAnchor = getCurrentReviewThreadAnchor(thread);
+    if (!currentAnchor || currentAnchor.end_line === null) {
+      continue;
+    }
+
+    const id = `${currentAnchor.path}:${currentAnchor.end_side}:${currentAnchor.end_line}`;
+    const detailParts = [
+      `${thread.status} · ${formatReviewThreadAnchor(thread)}`,
+      `${thread.author_username} · ${thread.comments.length} comment${thread.comments.length === 1 ? "" : "s"}`
+    ];
+
+    if (thread.anchor?.status === "reanchored") {
+      detailParts.push("reanchored to current patch set");
+    }
+    if (thread.anchor?.patchset_changed) {
+      detailParts.push("new commits since this thread was opened");
+    }
+
+    const nextDecoration = {
+      id,
+      path: currentAnchor.path,
+      side: currentAnchor.end_side,
+      lineNumber: currentAnchor.end_line,
+      hoverMessage: detailParts.join("\n")
+    } satisfies RepositoryDiffLineDecoration;
+
+    const existing = decorations.get(id);
+    if (!existing) {
+      decorations.set(id, nextDecoration);
+      continue;
+    }
+
+    decorations.set(id, {
+      ...existing,
+      hoverMessage: [existing.hoverMessage, nextDecoration.hoverMessage].filter(Boolean).join("\n\n")
+    });
+  }
+
+  return Array.from(decorations.values());
 }
 
 export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
@@ -473,6 +521,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
   const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow;
+  const reviewThreadLineDecorations = buildReviewThreadLineDecorations(reviewThreads);
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -699,42 +748,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     } finally {
       setReplySubmittingThreadId(null);
     }
-  }
-
-  function renderInlineReviewThreads(context: RepositoryDiffLineRenderContext) {
-    const matchingThreads = reviewThreads.filter((thread) => {
-      const currentAnchor = getCurrentReviewThreadAnchor(thread);
-      if (!currentAnchor || currentAnchor.path !== context.change.path) {
-        return false;
-      }
-      if (currentAnchor.hunk_header && currentAnchor.hunk_header !== context.hunk.header) {
-        return false;
-      }
-      const lineNumber =
-        currentAnchor.end_side === "base" ? context.line.oldLineNumber : context.line.newLineNumber;
-      return lineNumber !== null && lineNumber === currentAnchor.end_line;
-    });
-
-    if (matchingThreads.length === 0) {
-      return null;
-    }
-
-    return (
-      <div className="flex flex-wrap gap-2">
-        {matchingThreads.map((thread) => (
-          <div
-            key={thread.id}
-            className="rounded-md border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground"
-          >
-            <span className="font-medium text-foreground">{thread.status}</span>{" "}
-            <span>{formatReviewThreadAnchor(thread)}</span>
-            {thread.anchor?.status === "reanchored" ? (
-              <span className="ml-1 text-foreground">reanchored</span>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    );
   }
 
   async function handleResolveReviewThread(threadId: string) {
@@ -1309,7 +1322,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 changes={comparison.changes}
                 onDiffLineClick={canReview ? handleDiffLineSelection : undefined}
                 isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
-                renderAfterDiffLine={renderInlineReviewThreads}
+                lineDecorations={reviewThreadLineDecorations}
               />
             </section>
           ) : null}
@@ -1431,9 +1444,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                 Suggested change · {comment.suggestion.side} {comment.suggestion.start_line}-
                                 {comment.suggestion.end_line}
                               </p>
-                              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-background px-3 py-2 font-mono text-xs text-foreground">
-                                {comment.suggestion.code}
-                              </pre>
+                              <MonacoTextViewer
+                                value={comment.suggestion.code}
+                                path={`${thread.anchor?.path ?? thread.path}.suggestion.${thread.id}.ts`}
+                                scope="review-suggestion"
+                                minHeight={120}
+                                maxHeight={260}
+                              />
                             </div>
                           ) : null}
                         </div>

@@ -26,6 +26,8 @@ PR 是这款产品的交付中心。
   - ahead / behind
   - mergeability
   - 文件 diff
+  - PR diff 现在统一使用 Monaco Diff Editor，并保留行号点击选区与 review thread 行级提示
+  - diff viewer 在真正渲染文本 diff 前不会加载 Monaco runtime
   - review summary
   - validation summary
   - merge summary
@@ -181,6 +183,8 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 - `web/src/pages/pull-request-detail-page.tsx`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`
+- `web/src/components/ui/monaco-text-viewer.tsx`
+- `web/src/lib/monaco.ts`
 
 ## 9. 当前边界与下一步
 
@@ -190,6 +194,7 @@ runtime 也开始要求 Agent 在退出前输出 machine-readable validation rep
 - PR detail 已具备第一版 Task chain / Handoff 摘要，并把继续 Agent 的默认入口统一到同一套语义；当前 driver issue / review thread 的选择规则也已经确定化。
 - PR 页的 polling 现在会同时刷新 detail / reviews / review threads / provenance，避免 handoff 摘要与 review 统计不同步。
 - thread 已具备第一版重锚定和 stale 标记，但更复杂 diff 还缺更智能映射。
+- diff 视觉层已经统一切到 Monaco，但 review thread 的 richer inline card 仍主要依赖下方 thread 列表与 hover 提示，而不是在 diff 中内嵌大块正文。
 
 下一步优先级：
 

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Select,
@@ -1427,9 +1428,14 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 </div>
                                 <div className="rounded-md border bg-muted/20 p-3">
                                   <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
-                                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                                    {run.prompt || "(empty prompt)"}
-                                  </pre>
+                                  <MonacoTextViewer
+                                    value={run.prompt || "(empty prompt)"}
+                                    path={`actions/run-${run.id}.prompt.txt`}
+                                    scope="action-run-prompt"
+                                    minHeight={120}
+                                    maxHeight={220}
+                                    wrap="on"
+                                  />
                                 </div>
                                 <div className="rounded-md border bg-muted/20 p-3">
                                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1456,9 +1462,13 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                       </PendingButton>
                                     ) : null}
                                   </div>
-                                  <pre className="max-h-80 overflow-auto rounded-md bg-background p-2 text-xs">
-                                    {displayedLogs || "(empty logs)"}
-                                  </pre>
+                                  <MonacoTextViewer
+                                    value={displayedLogs || "(empty logs)"}
+                                    path={`actions/run-${run.id}.log`}
+                                    scope="action-run-logs"
+                                    minHeight={180}
+                                    maxHeight={520}
+                                  />
                                 </div>
                               </div>
                             ) : null}
