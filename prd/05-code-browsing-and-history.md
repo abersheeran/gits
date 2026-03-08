@@ -18,6 +18,8 @@
 - README 渲染
 - clone URL 展示
 - open issue / open pull request 计数
+- 最新提交摘要展示
+- `Recent commits` 列表已从仓库主页移除，改为独立 `Commits` 界面承载
 
 ### 2.2 文件与目录浏览
 
@@ -30,6 +32,7 @@
 
 ### 2.3 历史与比较
 
+- 独立仓库 commit 历史页
 - 分支 commit 历史
 - 单路径历史
 - 单提交详情
@@ -52,10 +55,10 @@
 - 仓库详情、contents、commits、commit detail、history、compare 都通过 `RepositoryObject` 访问。
 - 同一仓库的多个浏览请求共享一次 hydrate 后的内存上下文。
 - `RepositoryBrowserService` 负责文件读取、README 识别、commit 摘要、compare 与 diff 结构化。
-- 前端仓库页同时承担：
-  - 仓库首页
-  - tree/blob 浏览
-  - commit/history/compare 入口
+- 前端当前拆分为：
+  - 仓库 code 页：仓库首页与 tree/blob 浏览
+  - 独立 commits 页：分支 commit 历史与提交详情
+  - compare / path history 仍复用同一套浏览服务和 diff 结构
 
 ## 4. 当前关键流程
 
@@ -81,7 +84,9 @@
 - `src/services/repository-object.ts`
 - `src/routes/api.ts`
 - `web/src/pages/repository-page.tsx`
+- `web/src/pages/repository-commits-page.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
+- `web/src/components/repository/repository-tabs.tsx`
 - `web/src/components/repository/repository-change-diff-editor.tsx`
 - `web/src/components/ui/monaco-text-viewer.tsx`
 - `web/src/lib/monaco.ts`

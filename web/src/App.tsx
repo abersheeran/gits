@@ -51,6 +51,9 @@ const RepositoryActionsPage = lazyPage(async () => ({
 const RepositoryCollaboratorsPage = lazyPage(async () => ({
   default: (await import("@/pages/repository-collaborators-page")).RepositoryCollaboratorsPage
 }));
+const RepositoryCommitsPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-commits-page")).RepositoryCommitsPage
+}));
 const RepositoryIssuesPage = lazyPage(async () => ({
   default: (await import("@/pages/repository-issues-page")).RepositoryIssuesPage
 }));
@@ -120,6 +123,12 @@ function titleForPath(pathname: string): string {
   if (pulls) {
     const repository = formatRepositoryName(pulls.params.owner, pulls.params.repo);
     return `Pull Requests · ${repository} · ${APP_NAME}`;
+  }
+
+  const commits = matchPath("/repo/:owner/:repo/commits", pathname);
+  if (commits) {
+    const repository = formatRepositoryName(commits.params.owner, commits.params.repo);
+    return `Commits · ${repository} · ${APP_NAME}`;
   }
 
   const actions = matchPath("/repo/:owner/:repo/actions", pathname);
@@ -241,6 +250,7 @@ function App() {
             path="/repo/:owner/:repo/collaborators"
             element={<RepositoryCollaboratorsPage user={user} />}
           />
+          <Route path="/repo/:owner/:repo/commits" element={<RepositoryCommitsPage user={user} />} />
           <Route path="/repo/:owner/:repo/issues" element={<RepositoryIssuesPage user={user} />} />
           <Route path="/repo/:owner/:repo/issues/new" element={<NewIssuePage user={user} />} />
           <Route

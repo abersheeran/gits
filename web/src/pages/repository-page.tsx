@@ -112,6 +112,23 @@ function buildCodePath(input: {
   return segments.join("/");
 }
 
+function buildCommitHistoryPath(input: {
+  owner: string;
+  repo: string;
+  ref?: string;
+  oid?: string;
+}): string {
+  const query = new URLSearchParams();
+  if (input.ref) {
+    query.set("ref", input.ref);
+  }
+  if (input.oid) {
+    query.set("oid", input.oid);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return `/repo/${input.owner}/${input.repo}/commits${suffix}`;
+}
+
 function isCommitOid(value: string | null): value is string {
   return Boolean(value && /^[0-9a-f]{40}$/i.test(value));
 }
@@ -422,7 +439,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
       try {
         const [nextDetail, nextHistory, nextContents, nextPathHistory] = await Promise.all([
           getRepositoryDetail(owner, repo, ref),
-          getRepositoryCommits(owner, repo, { ref, limit: 20 }),
+          getRepositoryCommits(owner, repo, { ref, limit: 1 }),
           getRepositoryContents(owner, repo, { ref, path }),
           path ? getRepositoryPathHistory(owner, repo, { ref, path, limit: 12 }) : Promise.resolve(null)
         ]);
@@ -493,6 +510,17 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
     });
   }
 
+  function openCommitHistory(commitOid?: string) {
+    navigate(
+      buildCommitHistoryPath({
+        owner,
+        repo,
+        ref: selectedBranch ?? detail?.defaultBranch ?? undefined,
+        oid: commitOid
+      })
+    );
+  }
+
   async function openCommitDetail(commitOid: string) {
     try {
       const detailResponse = await getRepositoryCommitDetail(owner, repo, commitOid);
@@ -524,12 +552,13 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
     return (
       <PageLoadingState
         title="Loading repository"
-        description={`Preparing code, history, and README for ${owner}/${repo}.`}
+        description={`Preparing code, latest commit, and README for ${owner}/${repo}.`}
       />
     );
   }
 
   const latestCommit = history.commits[0] ?? null;
+  const showSidePanel = Boolean((pathHistory && pathHistory.commits.length > 0) || selectedCommitDetail);
   const selectedBranchLabel = selectedBranch
     ? isCommitOid(selectedBranch)
       ? `commit: ${selectedBranch}`
@@ -544,7 +573,6 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
         detail={detail}
         user={user}
         active="code"
-        commitCount={history.commits.length}
         selectedBranchLabel={selectedBranchLabel}
       />
 
@@ -606,9 +634,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
             <AuthorAvatar name={latestCommit.author.name} className="h-6 w-6 text-[10px]" />
             <button
               type="button"
-              onClick={() => {
-                void openCommitDetail(latestCommit.oid);
-              }}
+              onClick={() => openCommitHistory(latestCommit.oid)}
               className="font-medium text-[#0969da] hover:underline"
             >
               {commitTitle(latestCommit.message)}
@@ -619,7 +645,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
             <span>{formatRelativeTime(latestCommit.author.timestamp * 1000)}</span>
             <button
               type="button"
-              onClick={() => openCommitFiles(latestCommit.oid)}
+              onClick={() => openCommitHistory(latestCommit.oid)}
               className="ml-auto font-mono text-[#0969da] hover:underline"
             >
               {shortOid(latestCommit.oid)}
@@ -627,139 +653,97 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
           </div>
         ) : null}
 
-        <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className={showSidePanel ? "grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]" : undefined}>
           <RepositoryContentsPanel contents={contents} onNavigate={updatePath} />
 
-          <aside className="min-w-0">
-            {pathHistory && pathHistory.commits.length > 0 ? (
-              <section className="border-b">
-                <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
-                  <History className="h-4 w-4" />
-                  Path history
-                </header>
-                <ul className="divide-y">
-                  {pathHistory.commits.map((commit) => (
-                    <li key={`path-${commit.oid}`} className="space-y-1 p-3">
-                      <div className="flex items-start gap-2">
-                        <AuthorAvatar name={commit.author.name} className="h-7 w-7 text-[11px]" />
-                        <div className="min-w-0 flex-1 space-y-1">
+          {showSidePanel ? (
+            <aside className="min-w-0">
+              {pathHistory && pathHistory.commits.length > 0 ? (
+                <section className="border-b">
+                  <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
+                    <History className="h-4 w-4" />
+                    Path history
+                  </header>
+                  <ul className="divide-y">
+                    {pathHistory.commits.map((commit) => (
+                      <li key={`path-${commit.oid}`} className="space-y-1 p-3">
+                        <div className="flex items-start gap-2">
+                          <AuthorAvatar name={commit.author.name} className="h-7 w-7 text-[11px]" />
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void openCommitDetail(commit.oid);
+                              }}
+                              className="block max-w-full truncate text-left text-sm font-medium leading-5 text-[#0969da] hover:underline"
+                            >
+                              {commitTitle(commit.message)}
+                            </button>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <span className="truncate">{commit.author.name}</span>
+                              <span>·</span>
+                              <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
+                            </div>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => {
-                              void openCommitDetail(commit.oid);
-                            }}
-                            className="block max-w-full truncate text-left text-sm font-medium leading-5 text-[#0969da] hover:underline"
+                            onClick={() => openCommitFiles(commit.oid)}
+                            className="font-mono text-xs text-[#0969da] hover:underline"
                           >
-                            {commitTitle(commit.message)}
+                            {shortOid(commit.oid)}
                           </button>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <span className="truncate">{commit.author.name}</span>
-                            <span>·</span>
-                            <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
-                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => openCommitFiles(commit.oid)}
-                          className="font-mono text-xs text-[#0969da] hover:underline"
-                        >
-                          {shortOid(commit.oid)}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
 
-            {selectedCommitDetail ? (
-              <section className="border-b">
-                <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium">Commit detail</p>
-                    <p className="text-xs text-muted-foreground">
-                      {shortOid(selectedCommitDetail.commit.oid)} ·{" "}
-                      {formatDateTime(selectedCommitDetail.commit.author.timestamp * 1000)}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openCommitFiles(selectedCommitDetail.commit.oid)}
-                  >
-                    Browse snapshot
-                  </Button>
-                </header>
-                <div className="space-y-3 p-4">
-                  <div className="flex items-center gap-2">
-                    <AuthorAvatar
-                      name={selectedCommitDetail.commit.author.name}
-                      className="h-7 w-7 text-[11px]"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {commitTitle(selectedCommitDetail.commit.message)}
-                      </p>
+              {selectedCommitDetail ? (
+                <section className="border-b">
+                  <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Commit detail</p>
                       <p className="text-xs text-muted-foreground">
-                        {selectedCommitDetail.commit.author.name}
+                        {shortOid(selectedCommitDetail.commit.oid)} ·{" "}
+                        {formatDateTime(selectedCommitDetail.commit.author.timestamp * 1000)}
                       </p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">{selectedCommitDetail.filesChanged} files</Badge>
-                    <Badge variant="outline">+{selectedCommitDetail.additions}</Badge>
-                    <Badge variant="outline">-{selectedCommitDetail.deletions}</Badge>
-                  </div>
-                  <RepositoryDiffView changes={selectedCommitDetail.changes} />
-                </div>
-              </section>
-            ) : null}
-
-            <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
-              <History className="h-4 w-4" />
-              Recent commits
-            </header>
-            {history.commits.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground">当前引用下没有提交记录。</div>
-            ) : (
-              <ul className="divide-y">
-                {history.commits.map((commit) => (
-                  <li key={commit.oid} className="space-y-1 p-3">
-                    <div className="flex items-start gap-2">
-                      <AuthorAvatar name={commit.author.name} className="h-7 w-7 text-[11px]" />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void openCommitDetail(commit.oid);
-                          }}
-                          className="block max-w-full truncate text-left text-sm font-medium leading-5 text-[#0969da] hover:underline"
-                        >
-                          {commitTitle(commit.message)}
-                        </button>
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <span className="truncate">{commit.author.name}</span>
-                          <span>·</span>
-                          <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
-                        </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openCommitFiles(selectedCommitDetail.commit.oid)}
+                    >
+                      Browse snapshot
+                    </Button>
+                  </header>
+                  <div className="space-y-3 p-4">
+                    <div className="flex items-center gap-2">
+                      <AuthorAvatar
+                        name={selectedCommitDetail.commit.author.name}
+                        className="h-7 w-7 text-[11px]"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {commitTitle(selectedCommitDetail.commit.message)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedCommitDetail.commit.author.name}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openCommitFiles(commit.oid)}
-                        className="font-mono text-xs text-[#0969da] hover:underline"
-                      >
-                        {shortOid(commit.oid)}
-                      </button>
                     </div>
-                    <div className="pl-9 text-[11px] text-muted-foreground">
-                      {formatDateTime(commit.author.timestamp * 1000)}
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline">{selectedCommitDetail.filesChanged} files</Badge>
+                      <Badge variant="outline">+{selectedCommitDetail.additions}</Badge>
+                      <Badge variant="outline">-{selectedCommitDetail.deletions}</Badge>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </aside>
+                    <RepositoryDiffView changes={selectedCommitDetail.changes} />
+                  </div>
+                </section>
+              ) : null}
+            </aside>
+          ) : null}
         </div>
       </section>
     </div>

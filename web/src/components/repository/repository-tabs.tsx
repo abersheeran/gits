@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
-import { Code2, GitPullRequest, MessageSquareText, Workflow } from "lucide-react";
+import { Code2, GitPullRequest, History, MessageSquareText, Workflow } from "lucide-react";
 import type { RepositoryDetailResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type RepositorySection = "code" | "issues" | "pulls" | "actions";
+export type RepositorySection = "code" | "commits" | "issues" | "pulls" | "actions";
 
 type RepositoryTabsProps = {
   owner: string;
@@ -14,6 +14,12 @@ type RepositoryTabsProps = {
 
 const tabs = [
   { key: "code", label: "Code", icon: Code2, href: (owner: string, repo: string) => `/repo/${owner}/${repo}` },
+  {
+    key: "commits",
+    label: "Commits",
+    icon: History,
+    href: (owner: string, repo: string) => `/repo/${owner}/${repo}/commits`
+  },
   {
     key: "issues",
     label: "Issues",
