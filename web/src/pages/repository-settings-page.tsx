@@ -480,7 +480,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
             <Label>Clone URL</Label>
             <div className="flex items-center gap-2">
               <Input value={cloneUrl} readOnly />
-              <CopyButton value={cloneUrl} label="复制地址" copiedLabel="已复制" />
+              <CopyButton value={cloneUrl} idleLabel="复制地址" copiedLabel="已复制" />
             </div>
           </div>
 

@@ -1,4 +1,5 @@
 import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type {
   CommitSummary,
   LoadedRepositoryContext,
@@ -256,6 +257,13 @@ async function parseRepositoryObjectError(response: Response): Promise<Repositor
       message: response.statusText || "Repository object request failed"
     };
   }
+}
+
+function toContentfulStatusCode(status: number): ContentfulStatusCode {
+  if (status === 101 || status === 204 || status === 205 || status === 304) {
+    return 500;
+  }
+  return status as ContentfulStatusCode;
 }
 
 export class RepositoryObject {
@@ -795,7 +803,7 @@ export class RepositoryObjectClient implements RepositoryComparisonReader {
         case "merge_not_supported":
           throw new PullRequestMergeNotSupportedError();
         default:
-          throw new HTTPException(response.status, { message: error.message });
+          throw new HTTPException(toContentfulStatusCode(response.status), { message: error.message });
       }
     }
 
