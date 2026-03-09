@@ -116,3 +116,19 @@
 1. 增加默认分支切换能力。
 2. 强化仓库页到活跃 Issue / PR / Session 的导航。
 3. 继续把仓库页从“单纯代码入口”提升为“任务入口 + 代码入口”的混合视图。
+
+## 10. 2026-03 分支管理补充
+
+- 仓库设置页新增分支管理区块，owner 可直接：
+  - 创建分支
+  - 删除非默认分支
+  - 切换默认分支
+- 分支管理暂仅对仓库 owner 开放，与当前仓库重命名 / 删除权限保持一致。
+- 默认分支切换通过更新 Git `HEAD` 指向实现，仓库详情页与代码浏览页会随之读取新的默认分支。
+- 删除分支受两条保护规则限制：
+  - 默认分支不可删除
+  - 仓库至少保留一个分支
+- 新增接口：
+  - `POST /api/repos/:owner/:repo/branches`
+  - `PATCH /api/repos/:owner/:repo/default-branch`
+  - `DELETE /api/repos/:owner/:repo/branches/:branch`

@@ -14,8 +14,16 @@ import {
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError
 } from "./repository-browser-service";
-import { clearRepositorySnapshot, type RepositorySnapshotStorage } from "./git-repo-loader";
+import {
+  clearRepositorySnapshot,
+  listRepositoryRefsFromFs,
+  persistRepositoryToStorage,
+  syncLoadedRepositoryHeadState,
+  type MutableGitFs,
+  type RepositorySnapshotStorage
+} from "./git-repo-loader";
 import { GitService } from "./git-service";
+import * as git from "isomorphic-git";
 import {
   PullRequestMergeBranchNotFoundError,
   PullRequestMergeConflictError,
@@ -31,7 +39,9 @@ import type { AppBindings } from "../types";
 type RepositoryObjectJsonOperation =
   | "browse-repository-contents"
   | "compare-refs"
+  | "create-branch"
   | "delete-repository"
+  | "delete-branch"
   | "get-commit-detail"
   | "get-repository-detail"
   | "initialize-repository"
@@ -40,6 +50,7 @@ type RepositoryObjectJsonOperation =
   | "list-path-history"
   | "rename-repository"
   | "resolve-default-branch-target"
+  | "set-default-branch"
   | "squash-merge-pull-request";
 
 type RepositoryObjectJsonRequest = {
@@ -52,6 +63,11 @@ type RepositoryHeadRef = { name: string; oid: string };
 type RepositoryDefaultBranchTarget = {
   ref: string | null;
   sha: string | null;
+};
+
+type RepositoryBranchMutationResult = {
+  defaultBranch: string | null;
+  branches: RepositoryHeadRef[];
 };
 
 type ReceivePackResponse = {
@@ -174,6 +190,63 @@ function selectDefaultBranchTarget(
   };
 }
 
+function isValidBranchName(value: string): boolean {
+  if (!value.length || value.startsWith("/") || value.endsWith("/")) {
+    return false;
+  }
+  if (value.includes("..") || value.includes("\\") || value.includes("@{") || value.includes("//")) {
+    return false;
+  }
+  const segments = value.split("/");
+  return segments.every(
+    (segment) =>
+      segment.length > 0 &&
+      segment !== "." &&
+      segment !== ".." &&
+      !segment.startsWith(".") &&
+      !segment.endsWith(".") &&
+      !segment.endsWith(".lock") &&
+      !/[\u0000-\u001f\u007f ~^:?*\[]/.test(segment)
+  );
+}
+
+function resolveBranchRefName(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new HTTPException(400, { message: `Field '${field}' must be a string` });
+  }
+  const branch = value.trim();
+  if (!branch) {
+    throw new HTTPException(400, { message: `Field '${field}' is required` });
+  }
+  if (branch.startsWith("refs/heads/")) {
+    const name = branch.slice("refs/heads/".length);
+    if (!isValidBranchName(name)) {
+      throw new HTTPException(400, { message: `Field '${field}' must be a valid branch name` });
+    }
+    return `refs/heads/${name}`;
+  }
+  if (branch.startsWith("refs/")) {
+    throw new HTTPException(400, {
+      message: `Field '${field}' must be a branch name or refs/heads/*`
+    });
+  }
+  if (!isValidBranchName(branch)) {
+    throw new HTTPException(400, { message: `Field '${field}' must be a valid branch name` });
+  }
+  return `refs/heads/${branch}`;
+}
+
+function normalizeCommitOid(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new HTTPException(400, { message: `Field '${field}' must be a string` });
+  }
+  const oid = value.trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(oid)) {
+    throw new HTTPException(400, { message: `Field '${field}' must be a 40-character commit oid` });
+  }
+  return oid;
+}
+
 async function parseRepositoryObjectError(response: Response): Promise<RepositoryObjectErrorPayload> {
   try {
     return (await response.json()) as RepositoryObjectErrorPayload;
@@ -274,6 +347,131 @@ export class RepositoryObject {
     this.rememberContext(owner, repo, buildLoadedRepositoryContext(context));
   }
 
+  private async persistMutatedRepository(args: {
+    owner: string;
+    repo: string;
+    context: LoadedRepositoryContext;
+  }): Promise<RepositoryBranchMutationResult> {
+    await persistRepositoryToStorage({
+      storage: this.storage,
+      fs: args.context.fs as MutableGitFs,
+      gitdir: args.context.gitdir,
+      owner: args.owner,
+      repo: args.repo,
+      ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
+    });
+    await syncLoadedRepositoryHeadState(args.context);
+    this.refreshContext(args.owner, args.repo, args.context);
+    const updatedRefs = await listRepositoryRefsFromFs({
+      fs: args.context.fs as MutableGitFs,
+      gitdir: args.context.gitdir,
+      prefix: "refs/heads"
+    });
+    return {
+      defaultBranch: buildLoadedRepositoryContext(args.context).defaultBranch,
+      branches: updatedRefs
+    };
+  }
+
+  private async createBranch(args: {
+    owner: string;
+    repo: string;
+    branchRef: string;
+    sourceOid: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    const context = await this.ensureLoadedContext(args.owner, args.repo);
+    const branchExists = context.headRefs.some((item) => item.name === args.branchRef);
+    if (branchExists) {
+      throw new HTTPException(409, { message: "Branch already exists" });
+    }
+    const hasPrefixConflict = context.headRefs.some(
+      (item) => item.name.startsWith(`${args.branchRef}/`) || args.branchRef.startsWith(`${item.name}/`)
+    );
+    if (hasPrefixConflict) {
+      throw new HTTPException(409, { message: "Branch name conflicts with an existing branch path" });
+    }
+    try {
+      const object = await git.readObject({
+        fs: context.fs as never,
+        dir: context.dir,
+        gitdir: context.gitdir,
+        oid: args.sourceOid
+      });
+      if (object.type !== "commit") {
+        throw new HTTPException(400, { message: "Source revision must point to a commit" });
+      }
+    } catch (error) {
+      if (error instanceof HTTPException) {
+        throw error;
+      }
+      throw new HTTPException(404, { message: "Source commit not found" });
+    }
+
+    const fs = context.fs as MutableGitFs;
+    const branchRefDir = args.branchRef.split("/").slice(0, -1).join("/");
+    await fs.promises.mkdir(`${context.gitdir}/${branchRefDir}`, { recursive: true });
+    await git.writeRef({
+      fs: context.fs as never,
+      dir: context.dir,
+      gitdir: context.gitdir,
+      ref: args.branchRef,
+      value: args.sourceOid,
+      force: false
+    });
+
+    return this.persistMutatedRepository({
+      owner: args.owner,
+      repo: args.repo,
+      context
+    });
+  }
+
+  private async setDefaultBranch(args: {
+    owner: string;
+    repo: string;
+    branchRef: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    const context = await this.ensureLoadedContext(args.owner, args.repo);
+    const branchExists = context.headRefs.some((item) => item.name === args.branchRef);
+    if (!branchExists) {
+      throw new HTTPException(404, { message: "Branch not found" });
+    }
+    const fs = context.fs as MutableGitFs;
+    await fs.promises.writeFile(`${context.gitdir}/HEAD`, `ref: ${args.branchRef}\n`);
+    return this.persistMutatedRepository({
+      owner: args.owner,
+      repo: args.repo,
+      context
+    });
+  }
+
+  private async deleteBranch(args: {
+    owner: string;
+    repo: string;
+    branchRef: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    const context = await this.ensureLoadedContext(args.owner, args.repo);
+    const branch = context.headRefs.find((item) => item.name === args.branchRef);
+    if (!branch) {
+      throw new HTTPException(404, { message: "Branch not found" });
+    }
+    const defaultTarget = selectDefaultBranchTarget(context);
+    if (defaultTarget.ref === args.branchRef) {
+      throw new HTTPException(409, { message: "Default branch cannot be deleted" });
+    }
+    if (context.headRefs.length <= 1) {
+      throw new HTTPException(409, { message: "Repository must keep at least one branch" });
+    }
+
+    const fs = context.fs as MutableGitFs;
+    await fs.promises.rm(`${context.gitdir}/${args.branchRef}`, { force: true });
+    return this.persistMutatedRepository({
+      owner: args.owner,
+      repo: args.repo,
+      context
+    });
+  }
+
   private async handleJsonRequest(request: Request): Promise<Response> {
     let jsonRequest: RepositoryObjectJsonRequest;
     try {
@@ -298,6 +496,35 @@ export class RepositoryObject {
             String(payload.repo ?? "")
           );
           return jsonResponse(selectDefaultBranchTarget(context));
+        }
+        case "create-branch": {
+          return jsonResponse(
+            await this.createBranch({
+              owner: String(payload.owner ?? ""),
+              repo: String(payload.repo ?? ""),
+              branchRef: resolveBranchRefName(payload.branchName, "branchName"),
+              sourceOid: normalizeCommitOid(payload.sourceOid, "sourceOid")
+            }),
+            201
+          );
+        }
+        case "set-default-branch": {
+          return jsonResponse(
+            await this.setDefaultBranch({
+              owner: String(payload.owner ?? ""),
+              repo: String(payload.repo ?? ""),
+              branchRef: resolveBranchRefName(payload.branchName, "branchName")
+            })
+          );
+        }
+        case "delete-branch": {
+          return jsonResponse(
+            await this.deleteBranch({
+              owner: String(payload.owner ?? ""),
+              repo: String(payload.repo ?? ""),
+              branchRef: resolveBranchRefName(payload.branchName, "branchName")
+            })
+          );
         }
         case "get-repository-detail": {
           const result = await this.browserService.getRepositoryDetail(
@@ -568,7 +795,7 @@ export class RepositoryObjectClient implements RepositoryComparisonReader {
         case "merge_not_supported":
           throw new PullRequestMergeNotSupportedError();
         default:
-          throw new HTTPException(500, { message: error.message });
+          throw new HTTPException(response.status, { message: error.message });
       }
     }
 
@@ -602,6 +829,59 @@ export class RepositoryObjectClient implements RepositoryComparisonReader {
       payload: {
         owner: args.owner,
         repo: args.repo
+      }
+    });
+  }
+
+  async createBranch(args: {
+    repositoryId: string;
+    owner: string;
+    repo: string;
+    branchName: string;
+    sourceOid: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    return this.sendJsonRequest<RepositoryBranchMutationResult>({
+      repositoryId: args.repositoryId,
+      operation: "create-branch",
+      payload: {
+        owner: args.owner,
+        repo: args.repo,
+        branchName: args.branchName,
+        sourceOid: args.sourceOid
+      }
+    });
+  }
+
+  async setDefaultBranch(args: {
+    repositoryId: string;
+    owner: string;
+    repo: string;
+    branchName: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    return this.sendJsonRequest<RepositoryBranchMutationResult>({
+      repositoryId: args.repositoryId,
+      operation: "set-default-branch",
+      payload: {
+        owner: args.owner,
+        repo: args.repo,
+        branchName: args.branchName
+      }
+    });
+  }
+
+  async deleteBranch(args: {
+    repositoryId: string;
+    owner: string;
+    repo: string;
+    branchName: string;
+  }): Promise<RepositoryBranchMutationResult> {
+    return this.sendJsonRequest<RepositoryBranchMutationResult>({
+      repositoryId: args.repositoryId,
+      operation: "delete-branch",
+      payload: {
+        owner: args.owner,
+        repo: args.repo,
+        branchName: args.branchName
       }
     });
   }

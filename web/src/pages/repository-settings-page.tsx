@@ -5,7 +5,6 @@ import { CopyButton } from "@/components/copy-button";
 import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -18,10 +17,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  createRepositoryBranch,
   createRepositoryLabel,
   createRepositoryMilestone,
+  deleteRepositoryBranch,
   deleteRepositoryLabel,
   deleteRepositoryMilestone,
   deleteRepository,
@@ -29,13 +37,14 @@ import {
   getRepositoryDetail,
   listRepositoryLabels,
   listRepositoryMilestones,
+  updateRepositoryDefaultBranch,
   updateRepositoryLabel,
   updateRepositoryMilestone,
   updateRepository,
   type AuthUser,
+  type RepositoryDetailResponse,
   type RepositoryLabelRecord,
-  type RepositoryMilestoneRecord,
-  type RepositoryDetailResponse
+  type RepositoryMilestoneRecord
 } from "@/lib/api";
 
 type RepositorySettingsPageProps = {
@@ -55,6 +64,10 @@ function parseDateInput(value: string): number | null {
   }
   const parsed = new Date(`${value}T00:00:00Z`).getTime();
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeBranchName(refName: string): string {
+  return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
 }
 
 export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
@@ -77,12 +90,21 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   const [deletePending, setDeletePending] = useState(false);
   const [confirmRepoName, setConfirmRepoName] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+
+  const [defaultBranchDraft, setDefaultBranchDraft] = useState("");
+  const [branchNameDraft, setBranchNameDraft] = useState("");
+  const [branchSourceOidDraft, setBranchSourceOidDraft] = useState("");
+  const [branchSubmitting, setBranchSubmitting] = useState(false);
+  const [defaultBranchPending, setDefaultBranchPending] = useState(false);
+  const [branchDeletingName, setBranchDeletingName] = useState<string | null>(null);
+
   const [labelSavingId, setLabelSavingId] = useState<string | null>(null);
   const [labelDeletingId, setLabelDeletingId] = useState<string | null>(null);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#0969da");
   const [newLabelDescription, setNewLabelDescription] = useState("");
   const [creatingLabel, setCreatingLabel] = useState(false);
+
   const [milestoneSavingId, setMilestoneSavingId] = useState<string | null>(null);
   const [milestoneDeletingId, setMilestoneDeletingId] = useState<string | null>(null);
   const [newMilestoneTitle, setNewMilestoneTitle] = useState("");
@@ -115,6 +137,8 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
         setName(data.repository.name);
         setDescription(data.repository.description ?? "");
         setIsPrivate(data.repository.is_private === 1);
+        setDefaultBranchDraft(data.defaultBranch ?? "");
+        setBranchSourceOidDraft(data.headOid ?? "");
       } catch (loadError) {
         if (!canceled) {
           setPageError(formatApiError(loadError));
@@ -133,6 +157,10 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   }, [owner, repo]);
 
   const cloneUrl = useMemo(() => `${window.location.origin}/${owner}/${repo}.git`, [owner, repo]);
+  const branchItems = useMemo(
+    () => detail?.branches.map((branch) => ({ ...branch, shortName: normalizeBranchName(branch.name) })) ?? [],
+    [detail]
+  );
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -160,7 +188,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
     return (
       <PageLoadingState
         title="Loading repository settings"
-        description={`Fetching repository settings, labels, and milestones for ${owner}/${repo}.`}
+        description={`Fetching repository settings, branch controls, labels, and milestones for ${owner}/${repo}.`}
       />
     );
   }
@@ -172,6 +200,13 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
         <AlertDescription>只有仓库 owner 可修改设置。</AlertDescription>
       </Alert>
     );
+  }
+
+  async function refreshRepositoryDetail(nextOwner = owner, nextRepo = repo) {
+    const reloaded = await getRepositoryDetail(nextOwner, nextRepo);
+    setDetail(reloaded);
+    setDefaultBranchDraft(reloaded.defaultBranch ?? "");
+    setBranchSourceOidDraft(reloaded.headOid ?? "");
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -193,13 +228,74 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
       if (name !== repo) {
         navigate(`/repo/${owner}/${name}/settings`, { replace: true });
       } else {
-        const reloaded = await getRepositoryDetail(owner, repo);
-        setDetail(reloaded);
+        await refreshRepositoryDetail();
       }
     } catch (submitError) {
       setFormError(formatApiError(submitError));
     } finally {
       setSavePending(false);
+    }
+  }
+
+  async function handleCreateBranch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (branchSubmitting) {
+      return;
+    }
+
+    setBranchSubmitting(true);
+    setFormError(null);
+    setNotice(null);
+    try {
+      const createdBranchName = branchNameDraft.trim();
+      await createRepositoryBranch(owner, repo, {
+        branchName: createdBranchName,
+        sourceOid: branchSourceOidDraft.trim()
+      });
+      await refreshRepositoryDetail();
+      setBranchNameDraft("");
+      setNotice(`分支 ${createdBranchName} 已创建`);
+    } catch (error) {
+      setFormError(formatApiError(error));
+    } finally {
+      setBranchSubmitting(false);
+    }
+  }
+
+  async function handleUpdateDefaultBranch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (defaultBranchPending || !defaultBranchDraft) {
+      return;
+    }
+
+    setDefaultBranchPending(true);
+    setFormError(null);
+    setNotice(null);
+    try {
+      await updateRepositoryDefaultBranch(owner, repo, {
+        branchName: defaultBranchDraft
+      });
+      await refreshRepositoryDetail();
+      setNotice(`默认分支已切换到 ${defaultBranchDraft}`);
+    } catch (error) {
+      setFormError(formatApiError(error));
+    } finally {
+      setDefaultBranchPending(false);
+    }
+  }
+
+  async function handleDeleteBranch(branchName: string) {
+    setBranchDeletingName(branchName);
+    setFormError(null);
+    setNotice(null);
+    try {
+      await deleteRepositoryBranch(owner, repo, branchName);
+      await refreshRepositoryDetail();
+      setNotice(`分支 ${branchName} 已删除`);
+    } catch (error) {
+      setFormError(formatApiError(error));
+    } finally {
+      setBranchDeletingName(null);
     }
   }
 
@@ -349,45 +445,60 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link to={`/repo/${owner}/${repo}`}>{owner}</Link>
+          <span>/</span>
+          <span>{repo}</span>
+          <Badge variant="secondary">Settings</Badge>
+        </div>
+        <h1 className="text-3xl font-semibold tracking-tight">仓库设置</h1>
+        <p className="text-sm text-muted-foreground">管理仓库基本信息、分支、标签、里程碑与删除操作。</p>
+      </div>
+
+      {formError ? (
+        <Alert variant="destructive">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      ) : null}
       {notice ? (
         <Alert>
-          <AlertTitle>保存成功</AlertTitle>
+          <AlertTitle>已更新</AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            仓库设置: {owner}/{repo}
-          </CardTitle>
-          <CardDescription>更新仓库名、描述和可见性。</CardDescription>
+          <CardTitle>General</CardTitle>
+          <CardDescription>修改仓库名称、描述和可见性。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           <div className="space-y-2">
-            <Label>当前 clone URL</Label>
-            <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
-              <code className="text-xs sm:text-sm">{cloneUrl}</code>
-              <CopyButton value={cloneUrl} />
+            <Label>Clone URL</Label>
+            <div className="flex items-center gap-2">
+              <Input value={cloneUrl} readOnly />
+              <CopyButton value={cloneUrl} label="复制地址" copiedLabel="已复制" />
             </div>
           </div>
 
           <form className="space-y-4" onSubmit={handleSave}>
-            <div className="space-y-2">
-              <Label htmlFor="repo-name">仓库名</Label>
-              <Input id="repo-name" value={name} onChange={(event) => setName(event.target.value)} required />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="repo-name">仓库名</Label>
+                <Input id="repo-name" value={name} onChange={(event) => setName(event.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="repo-description">描述</Label>
+                <Input
+                  id="repo-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </div>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="repo-description">描述</Label>
-              <Input
-                id="repo-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-              />
-            </div>
-
             <div className="flex items-center gap-2">
               <Checkbox
                 id="repo-private"
@@ -396,44 +507,125 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
               />
               <Label htmlFor="repo-private">私有仓库</Label>
             </div>
-
-            {formError ? (
-              <Alert variant="destructive">
-                <AlertTitle>操作失败</AlertTitle>
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            <div className="flex flex-wrap gap-2">
-              <PendingButton type="submit" pending={savePending} pendingText="Saving settings...">
-                保存设置
-              </PendingButton>
-              <Button variant="outline" asChild>
-                <Link to={`/repo/${owner}/${repo}/collaborators`}>管理协作者</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link to={`/repo/${owner}/${repo}`}>查看仓库</Link>
-              </Button>
-            </div>
+            <PendingButton type="submit" pending={savePending} pendingText="保存中...">
+              保存设置
+            </PendingButton>
           </form>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Labels</CardTitle>
-          <CardDescription>管理 issue / pull request 使用的标签。</CardDescription>
+          <CardTitle>Branches</CardTitle>
+          <CardDescription>创建分支、删除分支，并修改仓库默认分支。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
+          <form className="grid gap-4 md:grid-cols-[1fr_220px_auto] md:items-end" onSubmit={handleUpdateDefaultBranch}>
+            <div className="space-y-2">
+              <Label htmlFor="default-branch">默认分支</Label>
+              <Select value={defaultBranchDraft} onValueChange={setDefaultBranchDraft}>
+                <SelectTrigger id="default-branch">
+                  <SelectValue placeholder="选择默认分支" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchItems.map((branch) => (
+                    <SelectItem key={branch.name} value={branch.shortName}>
+                      {branch.shortName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>当前默认分支</Label>
+              <div className="flex h-9 items-center rounded-md border px-3 text-sm">{detail.defaultBranch ?? "none"}</div>
+            </div>
+            <PendingButton type="submit" pending={defaultBranchPending} pendingText="切换中...">
+              切换默认分支
+            </PendingButton>
+          </form>
+
+          <form className="space-y-4 rounded-md border border-dashed p-4" onSubmit={handleCreateBranch}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="new-branch-name">新分支名</Label>
+                <Input
+                  id="new-branch-name"
+                  value={branchNameDraft}
+                  onChange={(event) => setBranchNameDraft(event.target.value)}
+                  placeholder="feature/new-ui"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-branch-source-oid">起点 commit OID</Label>
+                <Input
+                  id="new-branch-source-oid"
+                  value={branchSourceOidDraft}
+                  onChange={(event) => setBranchSourceOidDraft(event.target.value)}
+                  placeholder="40 位 commit SHA"
+                  required
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">默认会预填当前页面选中的 HEAD commit，可按需替换成任意已存在的 commit SHA。</p>
+            <PendingButton type="submit" pending={branchSubmitting} pendingText="创建中...">
+              创建分支
+            </PendingButton>
+          </form>
+
+          <div className="space-y-3">
+            {branchItems.map((branch) => {
+              const isDefault = branch.shortName === detail.defaultBranch;
+              return (
+                <div
+                  key={branch.name}
+                  className="flex flex-col gap-3 rounded-lg border p-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{branch.shortName}</span>
+                      {isDefault ? <Badge>default</Badge> : null}
+                    </div>
+                    <div className="break-all text-xs text-muted-foreground">{branch.oid}</div>
+                  </div>
+                  <PendingButton
+                    type="button"
+                    variant="outline"
+                    pending={branchDeletingName === branch.shortName}
+                    pendingText="删除中..."
+                    disabled={isDefault}
+                    onClick={() => {
+                      void handleDeleteBranch(branch.shortName);
+                    }}
+                  >
+                    删除分支
+                  </PendingButton>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Labels</CardTitle>
+          <CardDescription>维护 Issue / PR 标签定义。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
           {labels.length === 0 ? (
-            <p className="text-sm text-muted-foreground">当前还没有标签。</p>
+            <p className="text-sm text-muted-foreground">还没有标签。</p>
           ) : (
             <div className="space-y-4">
               {labels.map((label) => (
-                <div key={label.id} className="space-y-3 rounded-md border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <RepositoryLabelChip label={label} />
-                    <div className="flex flex-wrap gap-2">
+                <div key={label.id} className="space-y-4 rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-2">
+                      <RepositoryLabelChip label={label} />
+                      <p className="text-xs text-muted-foreground">创建于 {new Date(label.created_at).toLocaleString()}</p>
+                    </div>
+                    <div className="flex gap-2">
                       <PendingButton
                         type="button"
                         size="sm"
@@ -571,26 +763,24 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
       <Card>
         <CardHeader>
           <CardTitle>Milestones</CardTitle>
-          <CardDescription>规划交付节点，并让 issues / pull requests 归档到统一里程碑。</CardDescription>
+          <CardDescription>维护仓库里程碑计划。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {milestones.length === 0 ? (
-            <p className="text-sm text-muted-foreground">当前还没有里程碑。</p>
+            <p className="text-sm text-muted-foreground">还没有里程碑。</p>
           ) : (
             <div className="space-y-4">
               {milestones.map((milestone) => (
-                <div key={milestone.id} className="space-y-3 rounded-md border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-medium">{milestone.title}</h3>
-                      <Badge variant={milestone.state === "open" ? "outline" : "secondary"}>
-                        {milestone.state}
-                      </Badge>
-                      {milestone.due_at ? (
-                        <Badge variant="outline">due {formatDateInput(milestone.due_at)}</Badge>
-                      ) : null}
+                <div key={milestone.id} className="space-y-4 rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{milestone.title}</span>
+                        <Badge variant={milestone.state === "open" ? "default" : "secondary"}>{milestone.state}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">创建于 {new Date(milestone.created_at).toLocaleString()}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2">
                       <PendingButton
                         type="button"
                         size="sm"
@@ -616,7 +806,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                       </PendingButton>
                     </div>
                   </div>
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-[1fr_200px]">
                     <div className="space-y-2">
                       <Label>标题</Label>
                       <Input
@@ -656,9 +846,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
                         const nextDescription = event.target.value;
                         setMilestones((previous) =>
                           previous.map((item) =>
-                            item.id === milestone.id
-                              ? { ...item, description: nextDescription }
-                              : item
+                            item.id === milestone.id ? { ...item, description: nextDescription } : item
                           )
                         );
                       }}

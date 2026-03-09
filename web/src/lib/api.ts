@@ -33,6 +33,11 @@ export type RepositoryDetailResponse = {
   readme: { path: string; content: string } | null;
 };
 
+export type RepositoryBranchMutationResponse = {
+  defaultBranch: string | null;
+  branches: Array<{ name: string; oid: string }>;
+};
+
 export type CommitHistoryResponse = {
   ref: string | null;
   commits: CommitSummary[];
@@ -906,6 +911,41 @@ export async function getRepositoryDetail(
 ): Promise<RepositoryDetailResponse> {
   const suffix = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   return requestJson<RepositoryDetailResponse>(`/api/repos/${owner}/${repo}${suffix}`);
+}
+
+export async function createRepositoryBranch(
+  owner: string,
+  repo: string,
+  input: { branchName: string; sourceOid: string }
+): Promise<RepositoryBranchMutationResponse> {
+  return requestJson<RepositoryBranchMutationResponse>(`/api/repos/${owner}/${repo}/branches`, {
+    method: "POST",
+    bodyJson: input
+  });
+}
+
+export async function updateRepositoryDefaultBranch(
+  owner: string,
+  repo: string,
+  input: { branchName: string }
+): Promise<RepositoryBranchMutationResponse> {
+  return requestJson<RepositoryBranchMutationResponse>(`/api/repos/${owner}/${repo}/default-branch`, {
+    method: "PATCH",
+    bodyJson: input
+  });
+}
+
+export async function deleteRepositoryBranch(
+  owner: string,
+  repo: string,
+  branchName: string
+): Promise<RepositoryBranchMutationResponse> {
+  return requestJson<RepositoryBranchMutationResponse>(
+    `/api/repos/${owner}/${repo}/branches/${encodeURIComponent(branchName)}`,
+    {
+      method: "DELETE"
+    }
+  );
 }
 
 export async function getRepositoryCommits(

@@ -14,6 +14,7 @@ export type MutableGitFs = {
     readFile(path: string, options?: unknown): Promise<Uint8Array | string>;
     readdir(path: string): Promise<string[]>;
     lstat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
+    rm(path: string, options?: { force?: boolean; recursive?: boolean }): Promise<void>;
   };
 };
 

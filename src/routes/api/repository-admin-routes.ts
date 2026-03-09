@@ -10,6 +10,7 @@ import {
   assertCollaboratorPermission,
   assertOptionalBoolean,
   assertOptionalString,
+  normalizeBranchRef,
   assertRepositoryName,
   assertString,
   isUniqueConstraintError,
@@ -167,6 +168,90 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     });
     await repositoryService.deleteRepositoryById(repository.id);
     return c.json({ ok: true });
+  });
+
+  router.post("/repos/:owner/:repo/branches", requireSession, async (c) => {
+    const owner = c.req.param("owner");
+    const repoName = c.req.param("repo");
+    const payload = await parseJsonObject(c.req.raw);
+    const sessionUser = mustSessionUser(c);
+    const repositoryService = new RepositoryService(c.env.DB);
+    const repositoryClient = createRepositoryObjectClient(c.env);
+
+    const repository = await repositoryService.findRepository(owner, repoName);
+    if (!repository) {
+      throw new HTTPException(404, { message: "Repository not found" });
+    }
+    if (repository.owner_id !== sessionUser.id) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    const branchName = normalizeBranchRef(payload.branchName, "branchName");
+    const sourceOid = assertString(payload.sourceOid, "sourceOid").trim().toLowerCase();
+    if (!/^[0-9a-f]{40}$/.test(sourceOid)) {
+      throw new HTTPException(400, { message: "Field 'sourceOid' must be a 40-character commit oid" });
+    }
+
+    const result = await repositoryClient.createBranch({
+      repositoryId: repository.id,
+      owner,
+      repo: repoName,
+      branchName,
+      sourceOid
+    });
+    return c.json(result, 201);
+  });
+
+  router.patch("/repos/:owner/:repo/default-branch", requireSession, async (c) => {
+    const owner = c.req.param("owner");
+    const repoName = c.req.param("repo");
+    const payload = await parseJsonObject(c.req.raw);
+    const sessionUser = mustSessionUser(c);
+    const repositoryService = new RepositoryService(c.env.DB);
+    const repositoryClient = createRepositoryObjectClient(c.env);
+
+    const repository = await repositoryService.findRepository(owner, repoName);
+    if (!repository) {
+      throw new HTTPException(404, { message: "Repository not found" });
+    }
+    if (repository.owner_id !== sessionUser.id) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    const branchName = normalizeBranchRef(payload.branchName, "branchName");
+    const result = await repositoryClient.setDefaultBranch({
+      repositoryId: repository.id,
+      owner,
+      repo: repoName,
+      branchName
+    });
+    return c.json(result);
+  });
+
+  router.delete("/repos/:owner/:repo/branches/:branch", requireSession, async (c) => {
+    const owner = c.req.param("owner");
+    const repoName = c.req.param("repo");
+    const branchParam = c.req.param("branch");
+    const sessionUser = mustSessionUser(c);
+    const repositoryService = new RepositoryService(c.env.DB);
+    const repositoryClient = createRepositoryObjectClient(c.env);
+
+    const repository = await repositoryService.findRepository(owner, repoName);
+    if (!repository) {
+      throw new HTTPException(404, { message: "Repository not found" });
+    }
+    if (repository.owner_id !== sessionUser.id) {
+      throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    const branchName = normalizeBranchRef(branchParam, "branch");
+    const result = await repositoryClient.deleteBranch({
+      repositoryId: repository.id,
+      owner,
+      repo: repoName,
+      branchName
+    });
+    return c.json(result);
   });
 
   router.get("/repos/:owner/:repo/collaborators", requireSession, async (c) => {

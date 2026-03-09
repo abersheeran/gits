@@ -335,3 +335,136 @@ describe("API repository admin routes", () => {
     expect(removeOwnerResponse.status).toBe(400);
   });
 });
+
+  it("creates a branch for repository owner", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const createBranchSpy = vi
+      .spyOn(RepositoryObjectClient.prototype, "createBranch")
+      .mockResolvedValue({
+        defaultBranch: "main",
+        branches: [
+          { name: "refs/heads/main", oid: "0123456789abcdef0123456789abcdef01234567" },
+          { name: "refs/heads/feature/test", oid: "0123456789abcdef0123456789abcdef01234567" }
+        ]
+      });
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      }
+    ]);
+
+    const app = createApp();
+    const env = createBaseEnv(db);
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/branches", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          branchName: "feature/test",
+          sourceOid: "0123456789abcdef0123456789abcdef01234567"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(201);
+    expect(createBranchSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo",
+      branchName: "refs/heads/feature/test",
+      sourceOid: "0123456789abcdef0123456789abcdef01234567"
+    });
+  });
+
+  it("updates default branch for repository owner", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const setDefaultBranchSpy = vi
+      .spyOn(RepositoryObjectClient.prototype, "setDefaultBranch")
+      .mockResolvedValue({
+        defaultBranch: "develop",
+        branches: [
+          { name: "refs/heads/main", oid: "0123456789abcdef0123456789abcdef01234567" },
+          { name: "refs/heads/develop", oid: "89abcdef012345670123456789abcdef01234567" }
+        ]
+      });
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      }
+    ]);
+
+    const app = createApp();
+    const env = createBaseEnv(db);
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/default-branch", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          branchName: "develop"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(setDefaultBranchSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo",
+      branchName: "refs/heads/develop"
+    });
+  });
+
+  it("deletes a branch for repository owner", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "owner-1",
+      username: "alice"
+    });
+    const deleteBranchSpy = vi
+      .spyOn(RepositoryObjectClient.prototype, "deleteBranch")
+      .mockResolvedValue({
+        defaultBranch: "main",
+        branches: [{ name: "refs/heads/main", oid: "0123456789abcdef0123456789abcdef01234567" }]
+      });
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      }
+    ]);
+
+    const app = createApp();
+    const env = createBaseEnv(db);
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/branches/feature%2Ftest", {
+        method: "DELETE",
+        headers: {
+          authorization: "Bearer session-ok"
+        }
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteBranchSpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo",
+      branchName: "refs/heads/feature/test"
+    });
+  });
