@@ -60,7 +60,6 @@ import type {
   IssueRecord,
   IssueState,
   IssueTaskStatus,
-  MilestoneState,
   PullRequestReviewDecision,
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,
@@ -345,47 +344,6 @@ export async function assertAssignableUserIds(args: {
     }
   }
   return args.userIds;
-}
-
-export async function assertRepositoryLabelIds(args: {
-  metadataService: RepositoryMetadataService;
-  repositoryId: string;
-  labelIds: string[] | undefined;
-  field: string;
-}): Promise<string[] | undefined> {
-  if (!args.labelIds) {
-    return undefined;
-  }
-  for (const labelId of args.labelIds) {
-    const label = await args.metadataService.findLabelById(args.repositoryId, labelId);
-    if (!label) {
-      throw new HTTPException(400, {
-        message: `Field '${args.field}' contains an unknown label`
-      });
-    }
-  }
-  return args.labelIds;
-}
-
-export async function assertRepositoryMilestoneId(args: {
-  metadataService: RepositoryMetadataService;
-  repositoryId: string;
-  milestoneId: string | null | undefined;
-  field: string;
-}): Promise<string | null | undefined> {
-  if (args.milestoneId === undefined || args.milestoneId === null) {
-    return args.milestoneId;
-  }
-  const milestone = await args.metadataService.findMilestoneById(
-    args.repositoryId,
-    args.milestoneId
-  );
-  if (!milestone) {
-    throw new HTTPException(400, {
-      message: `Field '${args.field}' references an unknown milestone`
-    });
-  }
-  return args.milestoneId;
 }
 
 export async function assertReactionSubjectExists(args: {

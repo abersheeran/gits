@@ -28,8 +28,6 @@ export type IssueTaskStatus = "open" | "agent-working" | "waiting-human" | "done
 
 export type PullRequestState = "open" | "closed" | "merged";
 
-export type MilestoneState = "open" | "closed";
-
 export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
 export type PullRequestReviewThreadSide = "base" | "head";
 export type PullRequestReviewThreadStatus = "open" | "resolved";
@@ -146,28 +144,6 @@ export type RepositoryUserSummary = {
   username: string;
 };
 
-export type RepositoryLabelRecord = {
-  id: string;
-  repository_id: string;
-  name: string;
-  color: string;
-  description: string | null;
-  created_at: number;
-  updated_at: number;
-};
-
-export type RepositoryMilestoneRecord = {
-  id: string;
-  repository_id: string;
-  title: string;
-  description: string;
-  state: MilestoneState;
-  due_at: number | null;
-  created_at: number;
-  updated_at: number;
-  closed_at: number | null;
-};
-
 export type ReactionSummary = {
   content: ReactionContent;
   count: number;
@@ -204,9 +180,7 @@ export type IssueRecord = {
   task_status: IssueTaskStatus;
   acceptance_criteria: string;
   comment_count: number;
-  labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
-  milestone: RepositoryMilestoneRecord | null;
   reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
@@ -258,10 +232,8 @@ export type PullRequestRecord = {
   head_ref: string;
   base_oid: string;
   head_oid: string;
-  labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
   requested_reviewers: RepositoryUserSummary[];
-  milestone: RepositoryMilestoneRecord | null;
   reactions: ReactionSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;

@@ -26,7 +26,6 @@ type BasePullRequestRow = {
   base_oid: string;
   head_oid: string;
   draft: number;
-  milestone_id: string | null;
   merge_commit_oid: string | null;
   created_at: number;
   updated_at: number;
@@ -157,10 +156,8 @@ export class PullRequestService {
       head_ref: row.head_ref,
       base_oid: row.base_oid,
       head_oid: row.head_oid,
-      labels: metadata.labelsByPullRequestId[row.id] ?? [],
       assignees: metadata.assigneesByPullRequestId[row.id] ?? [],
       requested_reviewers: metadata.requestedReviewersByPullRequestId[row.id] ?? [],
-      milestone: metadata.milestoneByPullRequestId[row.id] ?? null,
       reactions: metadata.reactionsByPullRequestId[row.id] ?? [],
       merge_commit_oid: row.merge_commit_oid,
       created_at: row.created_at,
@@ -353,7 +350,6 @@ export class PullRequestService {
                 pr.base_oid,
                 pr.head_oid,
                 pr.draft,
-                pr.milestone_id,
                 pr.merge_commit_oid,
                 pr.created_at,
                 pr.updated_at,
@@ -383,7 +379,6 @@ export class PullRequestService {
                 pr.base_oid,
                 pr.head_oid,
                 pr.draft,
-                pr.milestone_id,
                 pr.merge_commit_oid,
                 pr.created_at,
                 pr.updated_at,
@@ -430,7 +425,6 @@ export class PullRequestService {
           pr.base_oid,
           pr.head_oid,
           pr.draft,
-          pr.milestone_id,
           pr.merge_commit_oid,
           pr.created_at,
           pr.updated_at,
@@ -460,7 +454,6 @@ export class PullRequestService {
     baseOid: string;
     headOid: string;
     draft?: boolean;
-    milestoneId?: string | null;
   }): Promise<PullRequestRecord> {
     const duplicate = await this.db
       .prepare(
@@ -492,13 +485,12 @@ export class PullRequestService {
           base_oid,
           head_oid,
           draft,
-          milestone_id,
           merge_commit_oid,
           created_at,
           updated_at,
           closed_at,
           merged_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         crypto.randomUUID(),
@@ -513,7 +505,6 @@ export class PullRequestService {
         input.baseOid,
         input.headOid,
         input.draft ? 1 : 0,
-        input.milestoneId ?? null,
         null,
         now,
         now,
@@ -539,7 +530,6 @@ export class PullRequestService {
       mergeCommitOid?: string | null;
       baseOid?: string;
       headOid?: string;
-      milestoneId?: string | null;
       draft?: boolean;
     }
   ): Promise<PullRequestRecord | null> {
@@ -564,10 +554,6 @@ export class PullRequestService {
     if (patch.draft !== undefined) {
       updates.push("draft = ?");
       params.push(patch.draft ? 1 : 0);
-    }
-    if (patch.milestoneId !== undefined) {
-      updates.push("milestone_id = ?");
-      params.push(patch.milestoneId);
     }
     if (patch.state !== undefined) {
       updates.push("state = ?");

@@ -26,8 +26,6 @@ import {
   formatApiError,
   getIssue,
   getRepositoryDetail,
-  listRepositoryLabels,
-  listRepositoryMilestones,
   listRepositoryParticipants,
   listIssueComments,
   removeReaction,
@@ -44,9 +42,7 @@ import {
   type IssueTaskFlowRecord,
   type IssueTaskStatus,
   type ReactionContent,
-  type RepositoryLabelRecord,
   type RepositoryDetailResponse,
-  type RepositoryMilestoneRecord,
   type RepositoryUserSummary,
   type TaskFlowWaitingOn
 } from "@/lib/api";
@@ -101,12 +97,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [linkedPullRequests, setLinkedPullRequests] = useState<IssueLinkedPullRequestRecord[]>([]);
   const [taskFlow, setTaskFlow] = useState<IssueTaskFlowRecord | null>(null);
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
-  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
-  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
-  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
   const [latestPullRequestProvenanceByNumber, setLatestPullRequestProvenanceByNumber] =
@@ -220,8 +212,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           nextComments,
           latestRunItems,
           latestSessionItems,
-          nextLabels,
-          nextMilestones,
           nextParticipants
         ] = await Promise.all([
           getRepositoryDetail(owner, repo),
@@ -235,8 +225,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             sourceType: "issue",
             numbers: [number]
           }),
-          listRepositoryLabels(owner, repo),
-          listRepositoryMilestones(owner, repo),
           user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
         const latestCommentRunItemsPromise =
@@ -276,8 +264,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
         setTaskFlow(nextIssueDetail.taskFlow);
         setComments(nextComments);
-        setAvailableLabels(nextLabels);
-        setAvailableMilestones(nextMilestones);
         setParticipants(nextParticipants);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
         setLatestAgentSession(latestSessionItems[0]?.session ?? null);
@@ -303,9 +289,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     if (!issue) {
       return;
     }
-    setSelectedLabelIds(issue.labels.map((label) => label.id));
     setSelectedAssigneeIds(issue.assignees.map((assignee) => assignee.id));
-    setSelectedMilestoneId(issue.milestone?.id ?? null);
     setTaskStatusDraft(issue.task_status);
     setAcceptanceCriteriaDraft(issue.acceptance_criteria);
   }, [issue]);
@@ -411,9 +395,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setActionError(null);
     try {
       const updated = await updateIssue(owner, repo, number, {
-        labelIds: selectedLabelIds,
-        assigneeUserIds: selectedAssigneeIds,
-        milestoneId: selectedMilestoneId
+        assigneeUserIds: selectedAssigneeIds
       });
       setIssue(updated);
     } catch (error) {
@@ -1150,15 +1132,9 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           <section className="rounded-md border p-4">
             <RepositoryMetadataFields
               canEdit={canUpdate}
-              labels={availableLabels}
-              selectedLabelIds={selectedLabelIds}
-              onSelectedLabelIdsChange={setSelectedLabelIds}
               participants={participants}
               assigneeIds={selectedAssigneeIds}
               onAssigneeIdsChange={setSelectedAssigneeIds}
-              milestones={availableMilestones}
-              milestoneId={selectedMilestoneId}
-              onMilestoneIdChange={setSelectedMilestoneId}
               onSave={() => {
                 void saveMetadata();
               }}

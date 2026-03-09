@@ -19,12 +19,9 @@ import {
   assertAssignableUserIds,
   assertIssueState,
   assertIssueTaskStatus,
-  assertOptionalNullableString,
   assertOptionalString,
   assertOptionalStringArray,
   assertPositiveInteger,
-  assertRepositoryLabelIds,
-  assertRepositoryMilestoneId,
   assertString,
   buildInteractiveIssueAgentPrompt,
   buildIssueCommentMentionPrompt,
@@ -48,6 +45,9 @@ import {
 } from "./shared";
 
 export function registerIssueRoutes(router: ApiRouter): void {
+  const unsupportedIssueMetadataMessage =
+    "Issue labels and milestones have been removed; use assignees and acceptance criteria instead.";
+
   router.get("/repos/:owner/:repo/issues", optionalSession, async (c) => {
     const owner = c.req.param("owner");
     const repo = c.req.param("repo");
@@ -158,22 +158,13 @@ export function registerIssueRoutes(router: ApiRouter): void {
       input.acceptanceCriteria =
         assertOptionalString(payload.acceptanceCriteria, "acceptanceCriteria") ?? "";
     }
-    if (payload.labelIds !== undefined) {
-      const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
-      if (labelIds !== undefined) {
-        input.labelIds = labelIds;
-      }
+    if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
+      throw new HTTPException(400, { message: unsupportedIssueMetadataMessage });
     }
     if (payload.assigneeUserIds !== undefined) {
       const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
       if (assigneeUserIds !== undefined) {
         input.assigneeUserIds = assigneeUserIds;
-      }
-    }
-    if (payload.milestoneId !== undefined) {
-      const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
-      if (milestoneId !== undefined) {
-        input.milestoneId = milestoneId;
       }
     }
 
@@ -195,23 +186,11 @@ export function registerIssueRoutes(router: ApiRouter): void {
 
     const metadataService = new RepositoryMetadataService(c.env.DB);
     await Promise.all([
-      assertRepositoryLabelIds({
-        metadataService,
-        repositoryId: repository.id,
-        labelIds: input.labelIds,
-        field: "labelIds"
-      }),
       assertAssignableUserIds({
         repositoryService,
         repository,
         userIds: input.assigneeUserIds,
         field: "assigneeUserIds"
-      }),
-      assertRepositoryMilestoneId({
-        metadataService,
-        repositoryId: repository.id,
-        milestoneId: input.milestoneId,
-        field: "milestoneId"
       })
     ]);
 
@@ -223,12 +202,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
       ...(input.body !== undefined ? { body: input.body } : {}),
       ...(input.acceptanceCriteria !== undefined
         ? { acceptanceCriteria: input.acceptanceCriteria }
-        : {}),
-      ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {})
+        : {})
     });
-    if (input.labelIds !== undefined) {
-      await metadataService.replaceIssueLabels(createdIssue.id, input.labelIds);
-    }
     if (input.assigneeUserIds !== undefined) {
       await metadataService.replaceIssueAssignees(createdIssue.id, input.assigneeUserIds);
     }
@@ -312,22 +287,13 @@ export function registerIssueRoutes(router: ApiRouter): void {
       patch.acceptanceCriteria =
         assertOptionalString(payload.acceptanceCriteria, "acceptanceCriteria") ?? "";
     }
-    if (payload.labelIds !== undefined) {
-      const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
-      if (labelIds !== undefined) {
-        patch.labelIds = labelIds;
-      }
+    if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
+      throw new HTTPException(400, { message: unsupportedIssueMetadataMessage });
     }
     if (payload.assigneeUserIds !== undefined) {
       const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
       if (assigneeUserIds !== undefined) {
         patch.assigneeUserIds = assigneeUserIds;
-      }
-    }
-    if (payload.milestoneId !== undefined) {
-      const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
-      if (milestoneId !== undefined) {
-        patch.milestoneId = milestoneId;
       }
     }
     if (
@@ -336,9 +302,7 @@ export function registerIssueRoutes(router: ApiRouter): void {
       patch.state === undefined &&
       patch.taskStatus === undefined &&
       patch.acceptanceCriteria === undefined &&
-      patch.labelIds === undefined &&
-      patch.assigneeUserIds === undefined &&
-      patch.milestoneId === undefined
+      patch.assigneeUserIds === undefined
     ) {
       throw new HTTPException(400, { message: "No updatable fields provided" });
     }
@@ -361,23 +325,11 @@ export function registerIssueRoutes(router: ApiRouter): void {
 
     const metadataService = new RepositoryMetadataService(c.env.DB);
     await Promise.all([
-      assertRepositoryLabelIds({
-        metadataService,
-        repositoryId: repository.id,
-        labelIds: patch.labelIds,
-        field: "labelIds"
-      }),
       assertAssignableUserIds({
         repositoryService,
         repository,
         userIds: patch.assigneeUserIds,
         field: "assigneeUserIds"
-      }),
-      assertRepositoryMilestoneId({
-        metadataService,
-        repositoryId: repository.id,
-        milestoneId: patch.milestoneId,
-        field: "milestoneId"
       })
     ]);
 
@@ -398,14 +350,10 @@ export function registerIssueRoutes(router: ApiRouter): void {
       ...(patch.taskStatus !== undefined ? { taskStatus: patch.taskStatus } : {}),
       ...(patch.acceptanceCriteria !== undefined
         ? { acceptanceCriteria: patch.acceptanceCriteria }
-        : {}),
-      ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {})
+        : {})
     });
     if (!updatedIssue) {
       throw new HTTPException(404, { message: "Issue not found" });
-    }
-    if (patch.labelIds !== undefined) {
-      await metadataService.replaceIssueLabels(existingIssue.id, patch.labelIds);
     }
     if (patch.assigneeUserIds !== undefined) {
       await metadataService.replaceIssueAssignees(existingIssue.id, patch.assigneeUserIds);

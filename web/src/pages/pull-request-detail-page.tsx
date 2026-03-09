@@ -32,8 +32,6 @@ import {
   getPullRequest,
   getPullRequestProvenance,
   getRepositoryDetail,
-  listRepositoryLabels,
-  listRepositoryMilestones,
   listRepositoryParticipants,
   listPullRequestReviews,
   listPullRequestReviewThreads,
@@ -58,8 +56,6 @@ import {
   type ReactionContent,
   type RepositoryCompareResponse,
   type RepositoryDetailResponse,
-  type RepositoryLabelRecord,
-  type RepositoryMilestoneRecord,
   type RepositoryUserSummary,
   type TaskFlowWaitingOn
 } from "@/lib/api";
@@ -285,13 +281,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [reviews, setReviews] = useState<PullRequestReviewRecord[]>([]);
   const [reviewThreads, setReviewThreads] = useState<PullRequestReviewThreadRecord[]>([]);
-  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
-  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
-  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [draft, setDraft] = useState(false);
   const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
   const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
@@ -366,8 +358,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           nextProvenance,
           nextReviews,
           nextReviewThreads,
-          nextLabels,
-          nextMilestones,
           nextParticipants
         ] = await Promise.all([
           getRepositoryDetail(owner, repo),
@@ -375,8 +365,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           getPullRequestProvenance(owner, repo, number),
           listPullRequestReviews(owner, repo, number),
           listPullRequestReviewThreads(owner, repo, number),
-          listRepositoryLabels(owner, repo),
-          listRepositoryMilestones(owner, repo),
           user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
         const nextComparison = await compareRepositoryRefs(owner, repo, {
@@ -404,8 +392,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
         setReviewThreads(nextReviewThreads);
-        setAvailableLabels(nextLabels);
-        setAvailableMilestones(nextMilestones);
         setParticipants(nextParticipants);
         setComparison(nextComparison);
         setLatestActionRun(latestRunItems[0]?.run ?? null);
@@ -430,10 +416,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     if (!pullRequest) {
       return;
     }
-    setSelectedLabelIds(pullRequest.labels.map((label) => label.id));
     setSelectedAssigneeIds(pullRequest.assignees.map((assignee) => assignee.id));
     setSelectedReviewerIds(pullRequest.requested_reviewers.map((reviewer) => reviewer.id));
-    setSelectedMilestoneId(pullRequest.milestone?.id ?? null);
     setDraft(pullRequest.draft);
   }, [pullRequest]);
 
@@ -532,10 +516,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     try {
       const updated = await updatePullRequest(owner, repo, number, {
         draft,
-        labelIds: selectedLabelIds,
         assigneeUserIds: selectedAssigneeIds,
-        requestedReviewerIds: selectedReviewerIds,
-        milestoneId: selectedMilestoneId
+        requestedReviewerIds: selectedReviewerIds
       });
       const nextComparison = await compareRepositoryRefs(owner, repo, {
         baseRef: updated.base_ref,
@@ -1812,17 +1794,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <section className="rounded-md border p-4">
             <RepositoryMetadataFields
               canEdit={canUpdate}
-              labels={availableLabels}
-              selectedLabelIds={selectedLabelIds}
-              onSelectedLabelIdsChange={setSelectedLabelIds}
               participants={participants}
               assigneeIds={selectedAssigneeIds}
               onAssigneeIdsChange={setSelectedAssigneeIds}
               reviewerIds={selectedReviewerIds}
               onReviewerIdsChange={setSelectedReviewerIds}
-              milestones={availableMilestones}
-              milestoneId={selectedMilestoneId}
-              onMilestoneIdChange={setSelectedMilestoneId}
               draft={draft}
               onDraftChange={setDraft}
               onSave={() => {

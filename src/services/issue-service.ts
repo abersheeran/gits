@@ -20,7 +20,6 @@ type BaseIssueRow = {
   state: IssueState;
   task_status: IssueTaskStatus;
   acceptance_criteria: string;
-  milestone_id: string | null;
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -115,9 +114,7 @@ export class IssueService {
       task_status: row.task_status,
       acceptance_criteria: row.acceptance_criteria,
       comment_count: metadata.commentCountByIssueId[row.id] ?? 0,
-      labels: metadata.labelsByIssueId[row.id] ?? [],
       assignees: metadata.assigneesByIssueId[row.id] ?? [],
-      milestone: metadata.milestoneByIssueId[row.id] ?? null,
       reactions: metadata.reactionsByIssueId[row.id] ?? [],
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -208,7 +205,6 @@ export class IssueService {
                 i.state,
                 i.task_status,
                 i.acceptance_criteria,
-                i.milestone_id,
                 i.created_at,
                 i.updated_at,
                 i.closed_at
@@ -233,7 +229,6 @@ export class IssueService {
                 i.state,
                 i.task_status,
                 i.acceptance_criteria,
-                i.milestone_id,
                 i.created_at,
                 i.updated_at,
                 i.closed_at
@@ -275,7 +270,6 @@ export class IssueService {
           i.state,
           i.task_status,
           i.acceptance_criteria,
-          i.milestone_id,
           i.created_at,
           i.updated_at,
           i.closed_at
@@ -326,7 +320,6 @@ export class IssueService {
     title: string;
     body?: string;
     acceptanceCriteria?: string;
-    milestoneId?: string | null;
   }): Promise<IssueRecord> {
     const number = await this.nextIssueNumber(input.repositoryId);
     const now = Date.now();
@@ -342,11 +335,10 @@ export class IssueService {
           state,
           task_status,
           acceptance_criteria,
-          milestone_id,
           created_at,
           updated_at,
           closed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         crypto.randomUUID(),
@@ -358,7 +350,6 @@ export class IssueService {
         "open",
         "open",
         input.acceptanceCriteria ?? "",
-        input.milestoneId ?? null,
         now,
         now,
         null
@@ -444,7 +435,6 @@ export class IssueService {
       state?: IssueState;
       taskStatus?: IssueTaskStatus;
       acceptanceCriteria?: string;
-      milestoneId?: string | null;
     }
   ): Promise<IssueRecord | null> {
     const updates: string[] = [];
@@ -474,10 +464,6 @@ export class IssueService {
     if (patch.acceptanceCriteria !== undefined) {
       updates.push("acceptance_criteria = ?");
       params.push(patch.acceptanceCriteria);
-    }
-    if (patch.milestoneId !== undefined) {
-      updates.push("milestone_id = ?");
-      params.push(patch.milestoneId);
     }
     if (updates.length === 0) {
       return this.findIssueByNumber(repositoryId, number);
@@ -609,7 +595,6 @@ export class IssueService {
           i.state,
           i.task_status,
           i.acceptance_criteria,
-          i.milestone_id,
           i.created_at,
           i.updated_at,
           i.closed_at

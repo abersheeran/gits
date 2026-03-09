@@ -230,7 +230,7 @@ Issue 详情当前支持：
 
 - 标题、正文、评论
 - 验收标准
-- 标签、里程碑、指派人
+- 指派人
 - task status / taskFlow
 - assign agent / resume agent
 - 查看关联 PR 的最新 validation summary

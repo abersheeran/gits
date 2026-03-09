@@ -137,6 +137,33 @@ describe("API issue routes", () => {
     expect(body.issue.acceptance_criteria).toBe("- bug fixed");
   });
 
+  it("rejects removed issue label and milestone fields", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/issues", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          title: "Need bugfix",
+          labelIds: ["label-1"]
+        })
+      }),
+      createBaseEnv(createMockD1Database([]))
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe(
+      "Issue labels and milestones have been removed; use assignees and acceptance criteria instead."
+    );
+  });
+
   it("returns issue detail with linked pull requests", async () => {
     const now = Date.now();
     const reconcileIssueTaskStatus = vi
@@ -153,9 +180,7 @@ describe("API issue routes", () => {
       task_status: "agent-working",
       acceptance_criteria: "- login succeeds\n- error state is visible",
       comment_count: 0,
-      labels: [],
       assignees: [],
-      milestone: null,
       reactions: [],
       created_at: now,
         updated_at: now,
@@ -839,9 +864,7 @@ describe("API issue routes", () => {
       task_status: "agent-working",
       acceptance_criteria: "- bug fixed",
       comment_count: 0,
-      labels: [],
       assignees: [],
-      milestone: null,
       reactions: [],
       created_at: Date.now(),
       updated_at: Date.now(),
@@ -1036,9 +1059,7 @@ describe("API issue routes", () => {
         task_status: "waiting-human",
         acceptance_criteria: "",
         comment_count: 0,
-        labels: [],
         assignees: [],
-        milestone: null,
         reactions: [],
         created_at: Date.now(),
         updated_at: Date.now(),

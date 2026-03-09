@@ -20,12 +20,8 @@ import {
   createPullRequest,
   formatApiError,
   getRepositoryDetail,
-  listRepositoryLabels,
-  listRepositoryMilestones,
   listRepositoryParticipants,
   type AuthUser,
-  type RepositoryLabelRecord,
-  type RepositoryMilestoneRecord,
   type RepositoryDetailResponse,
   type RepositoryUserSummary
 } from "@/lib/api";
@@ -48,13 +44,9 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   const [baseRef, setBaseRef] = useState("");
   const [headRef, setHeadRef] = useState("");
   const [closeIssuesInput, setCloseIssuesInput] = useState("");
-  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
-  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
-  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -68,18 +60,14 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextLabels, nextMilestones, nextParticipants] = await Promise.all([
+        const [nextDetail, nextParticipants] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listRepositoryLabels(owner, repo),
-          listRepositoryMilestones(owner, repo),
           listRepositoryParticipants(owner, repo)
         ]);
         if (canceled) {
           return;
         }
         setDetail(nextDetail);
-        setAvailableLabels(nextLabels);
-        setAvailableMilestones(nextMilestones);
         setParticipants(nextParticipants);
         const defaultBase =
           nextDetail.defaultBranch && nextDetail.branches.some((item) => item.name === nextDetail.defaultBranch)
@@ -186,10 +174,8 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         headRef,
         ...(closeIssueNumbers.length > 0 ? { closeIssueNumbers } : {}),
         draft,
-        labelIds: selectedLabelIds,
         assigneeUserIds: selectedAssigneeIds,
-        requestedReviewerIds: selectedReviewerIds,
-        milestoneId: selectedMilestoneId
+        requestedReviewerIds: selectedReviewerIds
       });
       navigate(`/repo/${owner}/${repo}/pulls/${pullRequest.number}`, { replace: true });
     } catch (submitError) {
@@ -288,22 +274,16 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
       <Card>
         <CardHeader>
           <CardTitle>Metadata</CardTitle>
-          <CardDescription>提交前直接设置 draft、reviewers、assignees、labels 和 milestone。</CardDescription>
+          <CardDescription>提交前直接设置 draft、reviewers 和 assignees。</CardDescription>
         </CardHeader>
         <CardContent>
           <RepositoryMetadataFields
             canEdit
-            labels={availableLabels}
-            selectedLabelIds={selectedLabelIds}
-            onSelectedLabelIdsChange={setSelectedLabelIds}
             participants={participants}
             assigneeIds={selectedAssigneeIds}
             onAssigneeIdsChange={setSelectedAssigneeIds}
             reviewerIds={selectedReviewerIds}
             onReviewerIdsChange={setSelectedReviewerIds}
-            milestones={availableMilestones}
-            milestoneId={selectedMilestoneId}
-            onMilestoneIdChange={setSelectedMilestoneId}
             draft={draft}
             onDraftChange={setDraft}
           />

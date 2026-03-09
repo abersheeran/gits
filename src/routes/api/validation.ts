@@ -60,7 +60,6 @@ import type {
   IssueRecord,
   IssueState,
   IssueTaskStatus,
-  MilestoneState,
   PullRequestReviewDecision,
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,
@@ -97,9 +96,7 @@ export type CreateIssueInput = {
   title: string;
   body?: string;
   acceptanceCriteria?: string;
-  labelIds?: string[];
   assigneeUserIds?: string[];
-  milestoneId?: string | null;
 };
 
 export type UpdateIssueInput = {
@@ -108,9 +105,7 @@ export type UpdateIssueInput = {
   state?: IssueState;
   taskStatus?: IssueTaskStatus;
   acceptanceCriteria?: string;
-  labelIds?: string[];
   assigneeUserIds?: string[];
-  milestoneId?: string | null;
 };
 
 export type CreateIssueCommentInput = {
@@ -124,10 +119,8 @@ export type CreatePullRequestInput = {
   headRef: string;
   closeIssueNumbers?: number[];
   draft?: boolean;
-  labelIds?: string[];
   assigneeUserIds?: string[];
   requestedReviewerIds?: string[];
-  milestoneId?: string | null;
 };
 
 export type UpdatePullRequestInput = {
@@ -136,10 +129,8 @@ export type UpdatePullRequestInput = {
   state?: PullRequestState;
   closeIssueNumbers?: number[];
   draft?: boolean;
-  labelIds?: string[];
   assigneeUserIds?: string[];
   requestedReviewerIds?: string[];
-  milestoneId?: string | null;
 };
 
 export type CreatePullRequestReviewInput = {
@@ -205,31 +196,6 @@ export type TriggerRepositoryAgentInput = {
   agentType?: ActionAgentType;
   prompt?: string;
   threadId?: string;
-};
-
-export type CreateRepositoryLabelInput = {
-  name: string;
-  color: string;
-  description?: string | null;
-};
-
-export type UpdateRepositoryLabelInput = {
-  name?: string;
-  color?: string;
-  description?: string | null;
-};
-
-export type CreateRepositoryMilestoneInput = {
-  title: string;
-  description?: string;
-  dueAt?: number | null;
-};
-
-export type UpdateRepositoryMilestoneInput = {
-  title?: string;
-  description?: string;
-  dueAt?: number | null;
-  state?: MilestoneState;
 };
 
 export const USERNAME_REGEX = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?$/;
@@ -337,16 +303,6 @@ export function assertOptionalHexColor(value: unknown, field: string): string | 
   }
   const normalized = value.trim();
   return normalized.startsWith("#") ? normalized.toLowerCase() : `#${normalized.toLowerCase()}`;
-}
-
-export function assertMilestoneState(value: unknown): MilestoneState {
-  const state = assertString(value, "state");
-  if (state !== "open" && state !== "closed") {
-    throw new HTTPException(400, {
-      message: "Field 'state' must be one of: open, closed"
-    });
-  }
-  return state;
 }
 
 export function assertReactionContent(value: unknown): ReactionContent {

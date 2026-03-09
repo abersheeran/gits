@@ -59,7 +59,6 @@ export type {
   IssueRecord,
   IssueState,
   IssueTaskStatus,
-  MilestoneState,
   PullRequestReviewDecision,
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,

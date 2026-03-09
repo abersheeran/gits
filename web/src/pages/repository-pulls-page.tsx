@@ -4,7 +4,6 @@ import { GitPullRequest } from "lucide-react";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { RepositoryHeader } from "@/components/repository/repository-header";
-import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -237,11 +236,6 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                               Draft
                             </Badge>
                           ) : null}
-                          {pullRequest.milestone ? (
-                            <Badge variant="outline" className="text-[11px]">
-                              milestone: {pullRequest.milestone.title}
-                            </Badge>
-                          ) : null}
                           {actionRun ? (
                             <Link
                               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
@@ -258,13 +252,6 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                         <p className="text-xs text-muted-foreground">
                           {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
                         </p>
-                        {pullRequest.labels.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {pullRequest.labels.map((label) => (
-                              <RepositoryLabelChip key={label.id} label={label} />
-                            ))}
-                          </div>
-                        ) : null}
                         <p className="text-xs text-muted-foreground">
                           {stripHeadsRef(pullRequest.head_ref)} to {stripHeadsRef(pullRequest.base_ref)}
                         </p>

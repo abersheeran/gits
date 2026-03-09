@@ -24,13 +24,10 @@ import {
   assertAssignableUserIds,
   assertOptionalBoolean,
   assertOptionalIssueNumberArray,
-  assertOptionalNullableString,
   assertOptionalString,
   assertOptionalStringArray,
   assertPositiveInteger,
   assertPullRequestState,
-  assertRepositoryLabelIds,
-  assertRepositoryMilestoneId,
   assertString,
   buildInteractivePullRequestAgentPrompt,
   buildMentionPrompt,
@@ -47,6 +44,9 @@ import {
 } from "./shared";
 
 export function registerPullRequestCommandRoutes(router: ApiRouter): void {
+    const unsupportedPullRequestMetadataMessage =
+      "Pull request labels and milestones have been removed; use reviewers, assignees, and draft state instead.";
+
     router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, async (c) => {
       const owner = c.req.param("owner");
       const repo = c.req.param("repo");
@@ -171,11 +171,8 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         }
         input.draft = draft;
       }
-      if (payload.labelIds !== undefined) {
-        const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
-        if (labelIds !== undefined) {
-          input.labelIds = labelIds;
-        }
+      if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
+        throw new HTTPException(400, { message: unsupportedPullRequestMetadataMessage });
       }
       if (payload.assigneeUserIds !== undefined) {
         const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
@@ -190,12 +187,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         );
         if (requestedReviewerIds !== undefined) {
           input.requestedReviewerIds = requestedReviewerIds;
-        }
-      }
-      if (payload.milestoneId !== undefined) {
-        const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
-        if (milestoneId !== undefined) {
-          input.milestoneId = milestoneId;
         }
       }
       if (input.baseRef === input.headRef) {
@@ -237,12 +228,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       const issueService = new IssueService(c.env.DB);
       const metadataService = new RepositoryMetadataService(c.env.DB);
       await Promise.all([
-        assertRepositoryLabelIds({
-          metadataService,
-          repositoryId: repository.id,
-          labelIds: input.labelIds,
-          field: "labelIds"
-        }),
         assertAssignableUserIds({
           repositoryService,
           repository,
@@ -254,12 +239,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           repository,
           userIds: input.requestedReviewerIds,
           field: "requestedReviewerIds"
-        }),
-        assertRepositoryMilestoneId({
-          metadataService,
-          repositoryId: repository.id,
-          milestoneId: input.milestoneId,
-          field: "milestoneId"
         })
       ]);
       if (input.closeIssueNumbers && input.closeIssueNumbers.length > 0) {
@@ -291,8 +270,7 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           headRef: headRef.name,
           baseOid: baseRef.oid,
           headOid: headRef.oid,
-          ...(input.draft !== undefined ? { draft: input.draft } : {}),
-          ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {})
+          ...(input.draft !== undefined ? { draft: input.draft } : {})
         });
         const closingIssueNumbers = await pullRequestService.replacePullRequestClosingIssueNumbers({
           repositoryId: repository.id,
@@ -300,9 +278,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           pullRequestNumber: createdPullRequest.number,
           issueNumbers: input.closeIssueNumbers ?? []
         });
-        if (input.labelIds !== undefined) {
-          await metadataService.replacePullRequestLabels(createdPullRequest.id, input.labelIds);
-        }
         if (input.assigneeUserIds !== undefined) {
           await metadataService.replacePullRequestAssignees(createdPullRequest.id, input.assigneeUserIds);
         }
@@ -388,11 +363,8 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         }
         patch.draft = draft;
       }
-      if (payload.labelIds !== undefined) {
-        const labelIds = assertOptionalStringArray(payload.labelIds, "labelIds");
-        if (labelIds !== undefined) {
-          patch.labelIds = labelIds;
-        }
+      if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
+        throw new HTTPException(400, { message: unsupportedPullRequestMetadataMessage });
       }
       if (payload.assigneeUserIds !== undefined) {
         const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
@@ -409,12 +381,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           patch.requestedReviewerIds = requestedReviewerIds;
         }
       }
-      if (payload.milestoneId !== undefined) {
-        const milestoneId = assertOptionalNullableString(payload.milestoneId, "milestoneId");
-        if (milestoneId !== undefined) {
-          patch.milestoneId = milestoneId;
-        }
-      }
       if (payload.state !== undefined) {
         const nextState = assertPullRequestState(payload.state);
         patch.state = nextState;
@@ -425,10 +391,8 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         patch.state === undefined &&
         patch.closeIssueNumbers === undefined &&
         patch.draft === undefined &&
-        patch.labelIds === undefined &&
         patch.assigneeUserIds === undefined &&
-        patch.requestedReviewerIds === undefined &&
-        patch.milestoneId === undefined
+        patch.requestedReviewerIds === undefined
       ) {
         throw new HTTPException(400, { message: "No updatable fields provided" });
       }
@@ -453,12 +417,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       const issueService = new IssueService(c.env.DB);
       const metadataService = new RepositoryMetadataService(c.env.DB);
       await Promise.all([
-        assertRepositoryLabelIds({
-          metadataService,
-          repositoryId: repository.id,
-          labelIds: patch.labelIds,
-          field: "labelIds"
-        }),
         assertAssignableUserIds({
           repositoryService,
           repository,
@@ -470,12 +428,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           repository,
           userIds: patch.requestedReviewerIds,
           field: "requestedReviewerIds"
-        }),
-        assertRepositoryMilestoneId({
-          metadataService,
-          repositoryId: repository.id,
-          milestoneId: patch.milestoneId,
-          field: "milestoneId"
         })
       ]);
       const existingPullRequest = await pullRequestService.findPullRequestByNumber(
@@ -553,7 +505,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         ...(patch.body !== undefined ? { body: patch.body } : {}),
         ...(patch.state !== undefined ? { state: patch.state } : {}),
         ...(patch.draft !== undefined ? { draft: patch.draft } : {}),
-        ...(patch.milestoneId !== undefined ? { milestoneId: patch.milestoneId } : {}),
         ...(mergeResult
           ? {
               mergeCommitOid: mergeResult.mergeCommitOid,
@@ -564,9 +515,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       });
       if (!updatedPullRequest) {
         throw new HTTPException(404, { message: "Pull request not found" });
-      }
-      if (patch.labelIds !== undefined) {
-        await metadataService.replacePullRequestLabels(existingPullRequest.id, patch.labelIds);
       }
       if (patch.assigneeUserIds !== undefined) {
         await metadataService.replacePullRequestAssignees(existingPullRequest.id, patch.assigneeUserIds);

@@ -150,6 +150,35 @@ describe("API pull request routes", () => {
     expect(body.pullRequest.head_ref).toBe("refs/heads/feature");
   });
 
+  it("rejects removed pull request label and milestone fields", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/pulls", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer session-ok",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          title: "Add feature",
+          baseRef: "main",
+          headRef: "feature",
+          milestoneId: "milestone-1"
+        })
+      }),
+      createBaseEnv(createMockD1Database([]))
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe(
+      "Pull request labels and milestones have been removed; use reviewers, assignees, and draft state instead."
+    );
+  });
+
   it("returns pull request detail with linked closing issues", async () => {
     const now = Date.now();
     const reconcileIssueTaskStatus = vi
@@ -166,9 +195,7 @@ describe("API pull request routes", () => {
         task_status: "waiting-human",
         acceptance_criteria: "- login succeeds",
         comment_count: 0,
-        labels: [],
         assignees: [],
-        milestone: null,
         reactions: [],
         created_at: now - 5_000,
         updated_at: now - 1_000,

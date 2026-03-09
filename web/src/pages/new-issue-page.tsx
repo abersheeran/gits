@@ -13,12 +13,8 @@ import {
   createIssue,
   formatApiError,
   getRepositoryDetail,
-  listRepositoryLabels,
-  listRepositoryMilestones,
   listRepositoryParticipants,
   type AuthUser,
-  type RepositoryLabelRecord,
-  type RepositoryMilestoneRecord,
   type RepositoryDetailResponse,
   type RepositoryUserSummary
 } from "@/lib/api";
@@ -39,12 +35,8 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
-  const [availableLabels, setAvailableLabels] = useState<RepositoryLabelRecord[]>([]);
-  const [availableMilestones, setAvailableMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
-  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -57,16 +49,12 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextLabels, nextMilestones, nextParticipants] = await Promise.all([
+        const [nextDetail, nextParticipants] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listRepositoryLabels(owner, repo),
-          listRepositoryMilestones(owner, repo),
           listRepositoryParticipants(owner, repo)
         ]);
         if (!canceled) {
           setDetail(nextDetail);
-          setAvailableLabels(nextLabels);
-          setAvailableMilestones(nextMilestones);
           setParticipants(nextParticipants);
         }
       } catch (loadError) {
@@ -139,9 +127,7 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
         title,
         body,
         acceptanceCriteria,
-        labelIds: selectedLabelIds,
-        assigneeUserIds: selectedAssigneeIds,
-        milestoneId: selectedMilestoneId
+        assigneeUserIds: selectedAssigneeIds
       });
       navigate(`/repo/${owner}/${repo}/issues/${issue.number}`, { replace: true });
     } catch (submitError) {
@@ -204,20 +190,14 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       <Card>
         <CardHeader>
           <CardTitle>Metadata</CardTitle>
-          <CardDescription>创建时直接补齐标签、负责人和里程碑。</CardDescription>
+          <CardDescription>创建时直接补齐负责人。</CardDescription>
         </CardHeader>
         <CardContent>
           <RepositoryMetadataFields
             canEdit
-            labels={availableLabels}
-            selectedLabelIds={selectedLabelIds}
-            onSelectedLabelIdsChange={setSelectedLabelIds}
             participants={participants}
             assigneeIds={selectedAssigneeIds}
             onAssigneeIdsChange={setSelectedAssigneeIds}
-            milestones={availableMilestones}
-            milestoneId={selectedMilestoneId}
-            onMilestoneIdChange={setSelectedMilestoneId}
           />
         </CardContent>
       </Card>

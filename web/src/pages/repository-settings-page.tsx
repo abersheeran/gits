@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { CopyButton } from "@/components/copy-button";
-import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -24,47 +23,21 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createRepositoryBranch,
-  createRepositoryLabel,
-  createRepositoryMilestone,
   deleteRepositoryBranch,
-  deleteRepositoryLabel,
-  deleteRepositoryMilestone,
   deleteRepository,
   formatApiError,
   getRepositoryDetail,
-  listRepositoryLabels,
-  listRepositoryMilestones,
   updateRepositoryDefaultBranch,
-  updateRepositoryLabel,
-  updateRepositoryMilestone,
   updateRepository,
   type AuthUser,
-  type RepositoryDetailResponse,
-  type RepositoryLabelRecord,
-  type RepositoryMilestoneRecord
+  type RepositoryDetailResponse
 } from "@/lib/api";
 
 type RepositorySettingsPageProps = {
   user: AuthUser | null;
 };
-
-function formatDateInput(timestamp: number | null): string {
-  if (!timestamp) {
-    return "";
-  }
-  return new Date(timestamp).toISOString().slice(0, 10);
-}
-
-function parseDateInput(value: string): number | null {
-  if (!value.trim()) {
-    return null;
-  }
-  const parsed = new Date(`${value}T00:00:00Z`).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function normalizeBranchName(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
@@ -77,8 +50,6 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   const repo = params.repo ?? "";
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [labels, setLabels] = useState<RepositoryLabelRecord[]>([]);
-  const [milestones, setMilestones] = useState<RepositoryMilestoneRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -98,20 +69,6 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   const [defaultBranchPending, setDefaultBranchPending] = useState(false);
   const [branchDeletingName, setBranchDeletingName] = useState<string | null>(null);
 
-  const [labelSavingId, setLabelSavingId] = useState<string | null>(null);
-  const [labelDeletingId, setLabelDeletingId] = useState<string | null>(null);
-  const [newLabelName, setNewLabelName] = useState("");
-  const [newLabelColor, setNewLabelColor] = useState("#0969da");
-  const [newLabelDescription, setNewLabelDescription] = useState("");
-  const [creatingLabel, setCreatingLabel] = useState(false);
-
-  const [milestoneSavingId, setMilestoneSavingId] = useState<string | null>(null);
-  const [milestoneDeletingId, setMilestoneDeletingId] = useState<string | null>(null);
-  const [newMilestoneTitle, setNewMilestoneTitle] = useState("");
-  const [newMilestoneDescription, setNewMilestoneDescription] = useState("");
-  const [newMilestoneDueAt, setNewMilestoneDueAt] = useState("");
-  const [creatingMilestone, setCreatingMilestone] = useState(false);
-
   useEffect(() => {
     let canceled = false;
 
@@ -123,17 +80,11 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
       setLoading(true);
       setPageError(null);
       try {
-        const [data, nextLabels, nextMilestones] = await Promise.all([
-          getRepositoryDetail(owner, repo),
-          listRepositoryLabels(owner, repo),
-          listRepositoryMilestones(owner, repo)
-        ]);
+        const data = await getRepositoryDetail(owner, repo);
         if (canceled) {
           return;
         }
         setDetail(data);
-        setLabels(nextLabels);
-        setMilestones(nextMilestones);
         setName(data.repository.name);
         setDescription(data.repository.description ?? "");
         setIsPrivate(data.repository.is_private === 1);
@@ -188,7 +139,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
     return (
       <PageLoadingState
         title="Loading repository settings"
-        description={`Fetching repository settings, branch controls, labels, and milestones for ${owner}/${repo}.`}
+        description={`Fetching repository settings and branch controls for ${owner}/${repo}.`}
       />
     );
   }
@@ -321,129 +272,6 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
     }
   }
 
-  async function handleLabelSave(label: RepositoryLabelRecord) {
-    setLabelSavingId(label.id);
-    setFormError(null);
-    setNotice(null);
-    try {
-      const updated = await updateRepositoryLabel(owner, repo, label.id, {
-        name: label.name,
-        color: label.color,
-        description: label.description
-      });
-      setLabels((previous) => previous.map((item) => (item.id === updated.id ? updated : item)));
-      setNotice(`标签 ${updated.name} 已更新`);
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setLabelSavingId(null);
-    }
-  }
-
-  async function handleLabelDelete(labelId: string) {
-    setLabelDeletingId(labelId);
-    setFormError(null);
-    setNotice(null);
-    try {
-      await deleteRepositoryLabel(owner, repo, labelId);
-      setLabels((previous) => previous.filter((label) => label.id !== labelId));
-      setNotice("标签已删除");
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setLabelDeletingId(null);
-    }
-  }
-
-  async function handleCreateLabel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (creatingLabel) {
-      return;
-    }
-    setCreatingLabel(true);
-    setFormError(null);
-    setNotice(null);
-    try {
-      const created = await createRepositoryLabel(owner, repo, {
-        name: newLabelName,
-        color: newLabelColor,
-        description: newLabelDescription.trim() ? newLabelDescription : null
-      });
-      setLabels((previous) => [...previous, created].sort((left, right) => left.name.localeCompare(right.name)));
-      setNewLabelName("");
-      setNewLabelColor("#0969da");
-      setNewLabelDescription("");
-      setNotice(`标签 ${created.name} 已创建`);
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setCreatingLabel(false);
-    }
-  }
-
-  async function handleMilestoneSave(milestone: RepositoryMilestoneRecord) {
-    setMilestoneSavingId(milestone.id);
-    setFormError(null);
-    setNotice(null);
-    try {
-      const updated = await updateRepositoryMilestone(owner, repo, milestone.id, {
-        title: milestone.title,
-        description: milestone.description,
-        dueAt: milestone.due_at,
-        state: milestone.state
-      });
-      setMilestones((previous) =>
-        previous.map((item) => (item.id === updated.id ? updated : item))
-      );
-      setNotice(`里程碑 ${updated.title} 已更新`);
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setMilestoneSavingId(null);
-    }
-  }
-
-  async function handleMilestoneDelete(milestoneId: string) {
-    setMilestoneDeletingId(milestoneId);
-    setFormError(null);
-    setNotice(null);
-    try {
-      await deleteRepositoryMilestone(owner, repo, milestoneId);
-      setMilestones((previous) => previous.filter((milestone) => milestone.id !== milestoneId));
-      setNotice("里程碑已删除");
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setMilestoneDeletingId(null);
-    }
-  }
-
-  async function handleCreateMilestone(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (creatingMilestone) {
-      return;
-    }
-    setCreatingMilestone(true);
-    setFormError(null);
-    setNotice(null);
-    try {
-      const created = await createRepositoryMilestone(owner, repo, {
-        title: newMilestoneTitle,
-        description: newMilestoneDescription,
-        dueAt: parseDateInput(newMilestoneDueAt)
-      });
-      setMilestones((previous) => [created, ...previous]);
-      setNewMilestoneTitle("");
-      setNewMilestoneDescription("");
-      setNewMilestoneDueAt("");
-      setNotice(`里程碑 ${created.title} 已创建`);
-    } catch (error) {
-      setFormError(formatApiError(error));
-    } finally {
-      setCreatingMilestone(false);
-    }
-  }
-
   return (
     <div className="space-y-8">
       <div className="space-y-2">
@@ -454,7 +282,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
           <Badge variant="secondary">Settings</Badge>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight">仓库设置</h1>
-        <p className="text-sm text-muted-foreground">管理仓库基本信息、分支、标签、里程碑与删除操作。</p>
+        <p className="text-sm text-muted-foreground">管理仓库基本信息、分支与删除操作。</p>
       </div>
 
       {formError ? (
@@ -605,309 +433,6 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
               );
             })}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Labels</CardTitle>
-          <CardDescription>维护 Issue / PR 标签定义。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {labels.length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有标签。</p>
-          ) : (
-            <div className="space-y-4">
-              {labels.map((label) => (
-                <div key={label.id} className="space-y-4 rounded-lg border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-2">
-                      <RepositoryLabelChip label={label} />
-                      <p className="text-xs text-muted-foreground">创建于 {new Date(label.created_at).toLocaleString()}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <PendingButton
-                        type="button"
-                        size="sm"
-                        pending={labelSavingId === label.id}
-                        pendingText="保存中..."
-                        onClick={() => {
-                          void handleLabelSave(label);
-                        }}
-                      >
-                        保存
-                      </PendingButton>
-                      <PendingButton
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        pending={labelDeletingId === label.id}
-                        pendingText="删除中..."
-                        onClick={() => {
-                          void handleLabelDelete(label.id);
-                        }}
-                      >
-                        删除
-                      </PendingButton>
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-[1fr_160px]">
-                    <div className="space-y-2">
-                      <Label>名称</Label>
-                      <Input
-                        value={label.name}
-                        onChange={(event) => {
-                          const nextName = event.target.value;
-                          setLabels((previous) =>
-                            previous.map((item) =>
-                              item.id === label.id ? { ...item, name: nextName } : item
-                            )
-                          );
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>颜色</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          type="color"
-                          value={label.color}
-                          className="h-10 w-14 p-1"
-                          onChange={(event) => {
-                            const nextColor = event.target.value;
-                            setLabels((previous) =>
-                              previous.map((item) =>
-                                item.id === label.id ? { ...item, color: nextColor } : item
-                              )
-                            );
-                          }}
-                        />
-                        <Input
-                          value={label.color}
-                          onChange={(event) => {
-                            const nextColor = event.target.value;
-                            setLabels((previous) =>
-                              previous.map((item) =>
-                                item.id === label.id ? { ...item, color: nextColor } : item
-                              )
-                            );
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>描述</Label>
-                    <Input
-                      value={label.description ?? ""}
-                      onChange={(event) => {
-                        const nextDescription = event.target.value;
-                        setLabels((previous) =>
-                          previous.map((item) =>
-                            item.id === label.id
-                              ? {
-                                  ...item,
-                                  description: nextDescription.trim() ? nextDescription : null
-                                }
-                              : item
-                          )
-                        );
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <form className="space-y-4 rounded-md border border-dashed p-4" onSubmit={handleCreateLabel}>
-            <div className="grid gap-4 md:grid-cols-[1fr_160px]">
-              <div className="space-y-2">
-                <Label htmlFor="new-label-name">新标签名称</Label>
-                <Input
-                  id="new-label-name"
-                  value={newLabelName}
-                  onChange={(event) => setNewLabelName(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-label-color">颜色</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="new-label-color"
-                    type="color"
-                    value={newLabelColor}
-                    className="h-10 w-14 p-1"
-                    onChange={(event) => setNewLabelColor(event.target.value)}
-                  />
-                  <Input value={newLabelColor} onChange={(event) => setNewLabelColor(event.target.value)} />
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-label-description">描述</Label>
-              <Input
-                id="new-label-description"
-                value={newLabelDescription}
-                onChange={(event) => setNewLabelDescription(event.target.value)}
-              />
-            </div>
-            <PendingButton type="submit" pending={creatingLabel} pendingText="创建中...">
-              创建标签
-            </PendingButton>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Milestones</CardTitle>
-          <CardDescription>维护仓库里程碑计划。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {milestones.length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有里程碑。</p>
-          ) : (
-            <div className="space-y-4">
-              {milestones.map((milestone) => (
-                <div key={milestone.id} className="space-y-4 rounded-lg border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{milestone.title}</span>
-                        <Badge variant={milestone.state === "open" ? "default" : "secondary"}>{milestone.state}</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">创建于 {new Date(milestone.created_at).toLocaleString()}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <PendingButton
-                        type="button"
-                        size="sm"
-                        pending={milestoneSavingId === milestone.id}
-                        pendingText="保存中..."
-                        onClick={() => {
-                          void handleMilestoneSave(milestone);
-                        }}
-                      >
-                        保存
-                      </PendingButton>
-                      <PendingButton
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        pending={milestoneDeletingId === milestone.id}
-                        pendingText="删除中..."
-                        onClick={() => {
-                          void handleMilestoneDelete(milestone.id);
-                        }}
-                      >
-                        删除
-                      </PendingButton>
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-[1fr_200px]">
-                    <div className="space-y-2">
-                      <Label>标题</Label>
-                      <Input
-                        value={milestone.title}
-                        onChange={(event) => {
-                          const nextTitle = event.target.value;
-                          setMilestones((previous) =>
-                            previous.map((item) =>
-                              item.id === milestone.id ? { ...item, title: nextTitle } : item
-                            )
-                          );
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>截止日期</Label>
-                      <Input
-                        type="date"
-                        value={formatDateInput(milestone.due_at)}
-                        onChange={(event) => {
-                          const nextDueAt = parseDateInput(event.target.value);
-                          setMilestones((previous) =>
-                            previous.map((item) =>
-                              item.id === milestone.id ? { ...item, due_at: nextDueAt } : item
-                            )
-                          );
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>描述</Label>
-                    <Textarea
-                      rows={3}
-                      value={milestone.description}
-                      onChange={(event) => {
-                        const nextDescription = event.target.value;
-                        setMilestones((previous) =>
-                          previous.map((item) =>
-                            item.id === milestone.id ? { ...item, description: nextDescription } : item
-                          )
-                        );
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={`milestone-open-${milestone.id}`}
-                      checked={milestone.state === "open"}
-                      onCheckedChange={(checked) => {
-                        setMilestones((previous) =>
-                          previous.map((item) =>
-                            item.id === milestone.id
-                              ? {
-                                  ...item,
-                                  state: checked === true ? "open" : "closed"
-                                }
-                              : item
-                          )
-                        );
-                      }}
-                    />
-                    <Label htmlFor={`milestone-open-${milestone.id}`}>保持为 open</Label>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <form className="space-y-4 rounded-md border border-dashed p-4" onSubmit={handleCreateMilestone}>
-            <div className="space-y-2">
-              <Label htmlFor="new-milestone-title">新里程碑标题</Label>
-              <Input
-                id="new-milestone-title"
-                value={newMilestoneTitle}
-                onChange={(event) => setNewMilestoneTitle(event.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-milestone-description">描述</Label>
-              <Textarea
-                id="new-milestone-description"
-                rows={3}
-                value={newMilestoneDescription}
-                onChange={(event) => setNewMilestoneDescription(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-milestone-due-at">截止日期</Label>
-              <Input
-                id="new-milestone-due-at"
-                type="date"
-                value={newMilestoneDueAt}
-                onChange={(event) => setNewMilestoneDueAt(event.target.value)}
-              />
-            </div>
-            <PendingButton type="submit" pending={creatingMilestone} pendingText="创建中...">
-              创建里程碑
-            </PendingButton>
-          </form>
         </CardContent>
       </Card>
 

@@ -176,8 +176,6 @@ export type IssueState = "open" | "closed";
 
 export type PullRequestState = "open" | "closed" | "merged";
 
-export type MilestoneState = "open" | "closed";
-
 export type PullRequestReviewDecision = "comment" | "approve" | "request_changes";
 
 export type IssueListState = IssueState | "all";
@@ -203,28 +201,6 @@ export type ReactionContent =
 export type RepositoryUserSummary = {
   id: string;
   username: string;
-};
-
-export type RepositoryLabelRecord = {
-  id: string;
-  repository_id: string;
-  name: string;
-  color: string;
-  description: string | null;
-  created_at: number;
-  updated_at: number;
-};
-
-export type RepositoryMilestoneRecord = {
-  id: string;
-  repository_id: string;
-  title: string;
-  description: string;
-  state: MilestoneState;
-  due_at: number | null;
-  created_at: number;
-  updated_at: number;
-  closed_at: number | null;
 };
 
 export type ReactionSummary = {
@@ -262,9 +238,7 @@ export type IssueRecord = {
   task_status: IssueTaskStatus;
   acceptance_criteria: string;
   comment_count: number;
-  labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
-  milestone: RepositoryMilestoneRecord | null;
   reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
@@ -330,10 +304,8 @@ export type PullRequestRecord = {
   head_ref: string;
   base_oid: string;
   head_oid: string;
-  labels: RepositoryLabelRecord[];
   assignees: RepositoryUserSummary[];
   requested_reviewers: RepositoryUserSummary[];
-  milestone: RepositoryMilestoneRecord | null;
   reactions: ReactionSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;
@@ -1057,9 +1029,7 @@ export async function createIssue(
     title: string;
     body?: string;
     acceptanceCriteria?: string;
-    labelIds?: string[];
     assigneeUserIds?: string[];
-    milestoneId?: string | null;
   }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(`/api/repos/${owner}/${repo}/issues`, {
@@ -1079,9 +1049,7 @@ export async function updateIssue(
     state?: IssueState;
     taskStatus?: IssueTaskStatus;
     acceptanceCriteria?: string;
-    labelIds?: string[];
     assigneeUserIds?: string[];
-    milestoneId?: string | null;
   }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(
@@ -1188,10 +1156,8 @@ export async function createPullRequest(
     headRef: string;
     closeIssueNumbers?: number[];
     draft?: boolean;
-    labelIds?: string[];
     assigneeUserIds?: string[];
     requestedReviewerIds?: string[];
-    milestoneId?: string | null;
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
@@ -1214,10 +1180,8 @@ export async function updatePullRequest(
     state?: PullRequestState;
     closeIssueNumbers?: number[];
     draft?: boolean;
-    labelIds?: string[];
     assigneeUserIds?: string[];
     requestedReviewerIds?: string[];
-    milestoneId?: string | null;
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
@@ -1684,113 +1648,6 @@ export async function listRepositoryParticipants(
     `/api/repos/${owner}/${repo}/participants`
   );
   return response.participants;
-}
-
-export async function listRepositoryLabels(
-  owner: string,
-  repo: string
-): Promise<RepositoryLabelRecord[]> {
-  const response = await requestJson<{ labels: RepositoryLabelRecord[] }>(
-    `/api/repos/${owner}/${repo}/labels`
-  );
-  return response.labels;
-}
-
-export async function createRepositoryLabel(
-  owner: string,
-  repo: string,
-  input: { name: string; color: string; description?: string | null }
-): Promise<RepositoryLabelRecord> {
-  const response = await requestJson<{ label: RepositoryLabelRecord }>(
-    `/api/repos/${owner}/${repo}/labels`,
-    {
-      method: "POST",
-      bodyJson: input
-    }
-  );
-  return response.label;
-}
-
-export async function updateRepositoryLabel(
-  owner: string,
-  repo: string,
-  labelId: string,
-  input: { name?: string; color?: string; description?: string | null }
-): Promise<RepositoryLabelRecord> {
-  const response = await requestJson<{ label: RepositoryLabelRecord }>(
-    `/api/repos/${owner}/${repo}/labels/${labelId}`,
-    {
-      method: "PATCH",
-      bodyJson: input
-    }
-  );
-  return response.label;
-}
-
-export async function deleteRepositoryLabel(
-  owner: string,
-  repo: string,
-  labelId: string
-): Promise<void> {
-  await requestJson<{ ok: boolean }>(`/api/repos/${owner}/${repo}/labels/${labelId}`, {
-    method: "DELETE"
-  });
-}
-
-export async function listRepositoryMilestones(
-  owner: string,
-  repo: string
-): Promise<RepositoryMilestoneRecord[]> {
-  const response = await requestJson<{ milestones: RepositoryMilestoneRecord[] }>(
-    `/api/repos/${owner}/${repo}/milestones`
-  );
-  return response.milestones;
-}
-
-export async function createRepositoryMilestone(
-  owner: string,
-  repo: string,
-  input: { title: string; description?: string; dueAt?: number | null }
-): Promise<RepositoryMilestoneRecord> {
-  const response = await requestJson<{ milestone: RepositoryMilestoneRecord }>(
-    `/api/repos/${owner}/${repo}/milestones`,
-    {
-      method: "POST",
-      bodyJson: input
-    }
-  );
-  return response.milestone;
-}
-
-export async function updateRepositoryMilestone(
-  owner: string,
-  repo: string,
-  milestoneId: string,
-  input: {
-    title?: string;
-    description?: string;
-    dueAt?: number | null;
-    state?: MilestoneState;
-  }
-): Promise<RepositoryMilestoneRecord> {
-  const response = await requestJson<{ milestone: RepositoryMilestoneRecord }>(
-    `/api/repos/${owner}/${repo}/milestones/${milestoneId}`,
-    {
-      method: "PATCH",
-      bodyJson: input
-    }
-  );
-  return response.milestone;
-}
-
-export async function deleteRepositoryMilestone(
-  owner: string,
-  repo: string,
-  milestoneId: string
-): Promise<void> {
-  await requestJson<{ ok: boolean }>(`/api/repos/${owner}/${repo}/milestones/${milestoneId}`, {
-    method: "DELETE"
-  });
 }
 
 export async function addReaction(

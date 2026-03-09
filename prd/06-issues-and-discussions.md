@@ -21,7 +21,7 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 - Issue 列表与分页
 - Issue 详情
 - Issue 评论
-- 标签、里程碑、指派人
+- 指派人
 - Issue 与评论 Reaction
 
 ### 2.2 任务中心
@@ -98,17 +98,12 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `GET /api/repos/:owner/:repo/pulls/provenance/latest`
 - `GET /api/repos/:owner/:repo/actions/runs/latest-by-comments`
 - `GET /api/repos/:owner/:repo/agent-sessions/latest`
-- `GET /api/repos/:owner/:repo/labels`
-- `GET /api/repos/:owner/:repo/milestones`
 
 ## 6. 当前数据模型
 
 - `issues`
 - `issue_comments`
-- `issue_labels`
 - `issue_assignees`
-- `repository_labels`
-- `repository_milestones`
 - `reactions`
 
 ## 7. 关键代码文件

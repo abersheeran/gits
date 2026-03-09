@@ -5,7 +5,6 @@ import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { RepositoryHeader } from "@/components/repository/repository-header";
-import { RepositoryLabelChip } from "@/components/repository/repository-label-chip";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -233,11 +232,6 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                               {issue.comment_count} comments
                             </Badge>
                           ) : null}
-                          {issue.milestone ? (
-                            <Badge variant="outline" className="text-[11px]">
-                              milestone: {issue.milestone.title}
-                            </Badge>
-                          ) : null}
                           {actionRun ? (
                             <Link
                               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
@@ -254,13 +248,6 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                         <p className="text-xs text-muted-foreground">
                           {issue.author_username} opened {formatRelativeTime(issue.created_at)}
                         </p>
-                        {issue.labels.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {issue.labels.map((label) => (
-                              <RepositoryLabelChip key={label.id} label={label} />
-                            ))}
-                          </div>
-                        ) : null}
                         {issue.assignees.length > 0 ? (
                           <p className="text-xs text-muted-foreground">
                             Assignees: {issue.assignees.map((assignee) => assignee.username).join(", ")}
