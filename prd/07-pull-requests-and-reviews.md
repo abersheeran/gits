@@ -44,6 +44,7 @@ PR 是当前产品里的交付中心和评审中心。
   - `approve`
   - `request_changes`
 - review summary 按 reviewer 当前有效决策汇总，而不是历史累计
+- PR 详情页的 submit review 编辑器默认收起，仅在显式进入编辑状态后展开 decision 与 write/preview，并沿用页面内标准卡片尺度
 
 ### 2.4 Review Thread
 
@@ -61,6 +62,7 @@ PR 是当前产品里的交付中心和评审中心。
   - `reanchored`
   - `stale`
 - 同时显示 `patchset_changed`
+- open review thread 下的 reply composer 默认收起，仅在显式进入编辑状态后展示正文编辑器、suggested change 与提交动作，并沿用页面内标准卡片尺度
 
 ### 2.5 Merge
 

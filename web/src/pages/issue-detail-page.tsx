@@ -120,6 +120,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentEditorExpanded, setCommentEditorExpanded] = useState(false);
 
   async function refreshLatestRunStatus(): Promise<void> {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
@@ -488,6 +489,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           : previous
       );
       setCommentBody("");
+      setCommentEditorExpanded(false);
       await Promise.all([refreshLatestRunStatus(), refreshCommentRunStatuses(nextComments)]);
     } catch (submitError) {
       setActionError(formatApiError(submitError));
@@ -711,8 +713,13 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           </section>
 
           {canComment ? (
-            <section className="space-y-3 rounded-md border p-4">
-              <h2 className="text-base font-semibold">Add comment</h2>
+            <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-slate-950">Add comment</h2>
+                <p className="text-sm text-slate-600">
+                  默认收起评论编辑器，需要补充上下文时再显式展开，减少页面噪音。
+                </p>
+              </div>
               <MarkdownEditor
                 label="Comment"
                 value={commentBody}
@@ -720,18 +727,25 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 rows={6}
                 placeholder="Leave a comment"
                 previewEmptyText="Nothing to preview."
+                collapsible
+                expanded={commentEditorExpanded}
+                onExpandedChange={setCommentEditorExpanded}
+                enterEditLabel="Add comment"
+                collapsedHint="补充任务进展、说明验收结果，或继续推进当前 Issue。"
               />
-              <div className="flex flex-wrap gap-2">
-                <PendingButton
-                  onClick={() => {
-                    void submitComment();
-                  }}
-                  pending={commentSubmitting}
-                  pendingText="Posting comment..."
-                >
-                  Comment
-                </PendingButton>
-              </div>
+              {commentEditorExpanded ? (
+                <div className="flex flex-wrap gap-2">
+                  <PendingButton
+                    onClick={() => {
+                      void submitComment();
+                    }}
+                    pending={commentSubmitting}
+                    pendingText="Posting comment..."
+                  >
+                    Comment
+                  </PendingButton>
+                </div>
+              ) : null}
             </section>
           ) : (
             <section className="rounded-md border p-4 text-sm text-muted-foreground">

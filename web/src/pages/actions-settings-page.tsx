@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { CodeConfigPanel } from "@/components/repository/code-config-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   formatApiError,
   getActionsGlobalConfig,
@@ -26,6 +25,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const [config, setConfig] = useState<ActionsGlobalConfig | null>(null);
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
@@ -63,6 +63,24 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
     };
   }, []);
 
+  function resetDraft(nextConfig: ActionsGlobalConfig) {
+    setCodexConfigFileContent(nextConfig.codexConfigFileContent);
+    setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+  }
+
+  function handleStartEditing() {
+    setEditing(true);
+    setError(null);
+  }
+
+  function handleCancelEditing() {
+    if (config) {
+      resetDraft(config);
+    }
+    setEditing(false);
+    setError(null);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) {
@@ -84,8 +102,8 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
 
       const nextConfig = await updateActionsGlobalConfig(payload);
       setConfig(nextConfig);
-      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
-      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      resetDraft(nextConfig);
+      setEditing(false);
       setSuccess("配置已更新。新的 Actions run 会使用最新设置。");
     } catch (saveError) {
       setError(formatApiError(saveError));
@@ -120,6 +138,9 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
   } as const;
+  const hasConfigChanges =
+    codexConfigFileContent !== config.codexConfigFileContent ||
+    claudeCodeConfigFileContent !== config.claudeCodeConfigFileContent;
 
   return (
     <div className="space-y-6">
@@ -137,69 +158,68 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
         </Alert>
       ) : null}
 
-      <Card>
-        <CardHeader>
+      <Card className="rounded-xl border-slate-200/80 shadow-sm">
+        <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-sky-50/70">
           <CardTitle>Actions 全局默认配置</CardTitle>
           <CardDescription>
             这里编辑的是全局默认值。仓库 Actions 页面可以在此基础上保存自己的覆盖配置。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <p className="text-xs text-muted-foreground">updated: {formatDateTime(config.updated_at)}</p>
-
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            <section className="space-y-4 rounded-md border p-4">
-              <h2 className="text-sm font-semibold">Codex</h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="codex-config-file-content">
-                    配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
-                  </Label>
-                  <Textarea
-                    id="codex-config-file-content"
-                    value={codexConfigFileContent}
-                    onChange={(event) => setCodexConfigFileContent(event.target.value)}
-                    rows={10}
-                    wrap="off"
-                    spellCheck={false}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    autoComplete="off"
-                    className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                    style={configEditorStyle}
-                  />
-                </div>
+          <div className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Global defaults
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                updated: {formatDateTime(config.updated_at)}
+              </p>
+            </div>
+            {editing ? (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" className="rounded-lg" onClick={handleCancelEditing}>
+                  Cancel
+                </Button>
+                <PendingButton
+                  type="submit"
+                  form="actions-global-config-form"
+                  pending={saving}
+                  disabled={!hasConfigChanges}
+                  pendingText="Saving config..."
+                  className="rounded-lg"
+                >
+                  保存配置
+                </PendingButton>
               </div>
-            </section>
+            ) : (
+              <Button className="rounded-lg" onClick={handleStartEditing}>
+                Edit config
+              </Button>
+            )}
+          </div>
 
-            <section className="space-y-4 rounded-md border p-4">
-              <h2 className="text-sm font-semibold">Claude Code</h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="claude-code-config-file-content">
-                    配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
-                  </Label>
-                  <Textarea
-                    id="claude-code-config-file-content"
-                    value={claudeCodeConfigFileContent}
-                    onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
-                    rows={10}
-                    wrap="off"
-                    spellCheck={false}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    autoComplete="off"
-                    className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                    style={configEditorStyle}
-                  />
-                </div>
-              </div>
-            </section>
+          <form id="actions-global-config-form" className="space-y-6" onSubmit={handleSubmit}>
+            <CodeConfigPanel
+              title="Codex"
+              description="映射到容器 `/home/rootless/.codex/config.toml`。"
+              label="Codex 配置文件内容"
+              value={codexConfigFileContent}
+              editing={editing}
+              onChange={setCodexConfigFileContent}
+              style={configEditorStyle}
+            />
+
+            <CodeConfigPanel
+              title="Claude Code"
+              description="映射到容器 `/home/rootless/.claude/settings.json`。"
+              label="Claude Code 配置文件内容"
+              value={claudeCodeConfigFileContent}
+              editing={editing}
+              onChange={setClaudeCodeConfigFileContent}
+              style={configEditorStyle}
+            />
 
             <div className="flex flex-wrap gap-2">
-              <PendingButton type="submit" pending={saving} pendingText="Saving config...">
-                保存配置
-              </PendingButton>
               <Button variant="outline" asChild>
                 <Link to="/dashboard">返回 Dashboard</Link>
               </Button>

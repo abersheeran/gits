@@ -30,8 +30,8 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex min-h-[240px] flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-slate-200 bg-slate-50/80 px-6 py-8 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/80 bg-white shadow-sm">
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-4 py-6 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/80 bg-white shadow-sm">
         <Sparkles className="h-5 w-5 text-slate-400" />
       </div>
       <p className="mt-4 text-sm font-semibold text-slate-900">{title}</p>
@@ -68,9 +68,9 @@ export function IssueAcceptanceCriteriaPanel({
   }
 
   return (
-    <section className="relative overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-sky-50/80 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-      <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-sky-100/80 via-white to-emerald-100/70" />
-      <div className="relative space-y-5 p-5 sm:p-6">
+    <section className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-sky-50/80 shadow-sm">
+      <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-sky-100/80 via-white to-emerald-100/70" />
+      <div className="relative space-y-4 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm backdrop-blur">
@@ -121,7 +121,7 @@ export function IssueAcceptanceCriteriaPanel({
         </div>
 
         <div className={cn("grid gap-4", canUpdate && editing ? "xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" : "")}>
-          <div className="rounded-[1.25rem] border border-slate-200/80 bg-white/90 p-4 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
+          <div className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-sm backdrop-blur">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
@@ -142,7 +142,7 @@ export function IssueAcceptanceCriteriaPanel({
                 {hasContent ? "Ready for review" : "Waiting for definition"}
               </Badge>
             </div>
-            <div className="mt-4 rounded-[1.25rem] border border-white/80 bg-white/95 p-4 shadow-inner shadow-slate-200/40">
+            <div className="mt-3 rounded-lg border border-white/80 bg-white/95 p-3 shadow-inner shadow-slate-200/40">
               {hasContent ? (
                 <MarkdownBody content={content} emptyText="(no acceptance criteria)" />
               ) : (
@@ -159,7 +159,7 @@ export function IssueAcceptanceCriteriaPanel({
                 </p>
                 <Button
                   type="button"
-                  className="h-10 rounded-xl bg-slate-950 px-4 text-white shadow-lg shadow-slate-950/10 hover:bg-slate-800"
+                  className="h-9 rounded-lg bg-slate-950 px-3.5 text-white shadow-sm hover:bg-slate-800"
                   onClick={startEditing}
                 >
                   <PencilLine className="h-3.5 w-3.5" />
@@ -170,7 +170,7 @@ export function IssueAcceptanceCriteriaPanel({
           </div>
 
           {canUpdate && editing ? (
-            <div className="rounded-[1.25rem] border border-slate-200/80 bg-white/80 p-4 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
+            <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
@@ -179,13 +179,13 @@ export function IssueAcceptanceCriteriaPanel({
                   </div>
                   <h3 className="text-sm font-semibold text-slate-950">Refine acceptance criteria</h3>
                 </div>
-                <div className="inline-flex items-center rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
                   <Button
                     type="button"
                     size="sm"
                     variant={mode === "write" ? "secondary" : "ghost"}
                     className={cn(
-                      "h-8 rounded-full px-3 text-xs",
+                      "h-8 rounded-md px-3 text-xs",
                       mode === "write" ? "shadow-sm" : "text-slate-500"
                     )}
                     onClick={() => setMode("write")}
@@ -198,7 +198,7 @@ export function IssueAcceptanceCriteriaPanel({
                     size="sm"
                     variant={mode === "preview" ? "secondary" : "ghost"}
                     className={cn(
-                      "h-8 rounded-full px-3 text-xs",
+                      "h-8 rounded-md px-3 text-xs",
                       mode === "preview" ? "shadow-sm" : "text-slate-500"
                     )}
                     onClick={() => setMode("preview")}
@@ -242,10 +242,10 @@ export function IssueAcceptanceCriteriaPanel({
                     value={draft}
                     onChange={(event) => onDraftChange(event.target.value)}
                     rows={10}
-                    className="min-h-[280px] rounded-[1.25rem] border-slate-200 bg-white/95 px-4 py-3 text-sm leading-7 shadow-inner shadow-slate-200/40 focus-visible:ring-slate-400"
+                    className="min-h-[280px] rounded-lg border-slate-200 bg-white/95 px-3 py-3 text-sm leading-7 shadow-inner shadow-slate-200/40 focus-visible:ring-slate-400"
                   />
                 ) : (
-                  <div className="min-h-[280px] rounded-[1.25rem] border border-slate-200 bg-white/95 px-4 py-4 shadow-inner shadow-slate-200/40">
+                  <div className="min-h-[280px] rounded-lg border border-slate-200 bg-white/95 px-3 py-3 shadow-inner shadow-slate-200/40">
                     {hasDraft ? (
                       <MarkdownBody content={draft} emptyText="暂无验收标准。" />
                     ) : (
@@ -266,7 +266,7 @@ export function IssueAcceptanceCriteriaPanel({
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 rounded-xl border-slate-200 bg-white px-4"
+                    className="h-10 rounded-lg border-slate-200 bg-white px-3.5"
                     disabled={saving}
                     onClick={cancelEditing}
                   >
@@ -276,7 +276,7 @@ export function IssueAcceptanceCriteriaPanel({
                     pending={saving}
                     pendingText="Saving acceptance criteria..."
                     disabled={draftIsSynced}
-                    className="h-11 rounded-xl bg-slate-950 px-5 text-white shadow-lg shadow-slate-950/10 hover:bg-slate-800"
+                    className="h-10 rounded-lg bg-slate-950 px-4 text-white shadow-sm hover:bg-slate-800"
                     onClick={onSave}
                   >
                     保存验收标准

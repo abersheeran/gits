@@ -346,6 +346,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [reviewDecision, setReviewDecision] = useState<PullRequestReviewDecision>("comment");
   const [reviewBody, setReviewBody] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewEditorExpanded, setReviewEditorExpanded] = useState(false);
   const [selectedReviewRange, setSelectedReviewRange] = useState<SelectedReviewRange | null>(null);
   const [reviewThreadBody, setReviewThreadBody] = useState("");
   const [reviewThreadSuggestedCode, setReviewThreadSuggestedCode] = useState("");
@@ -354,6 +355,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [threadReplySuggestedCodes, setThreadReplySuggestedCodes] = useState<Record<string, string>>(
     {}
   );
+  const [threadReplyEditorsExpanded, setThreadReplyEditorsExpanded] = useState<
+    Record<string, boolean>
+  >({});
   const [replySubmittingThreadId, setReplySubmittingThreadId] = useState<string | null>(null);
   const [resolvingThreadId, setResolvingThreadId] = useState<string | null>(null);
   const [agentResumeThreadId, setAgentResumeThreadId] = useState<string | null>(null);
@@ -623,6 +627,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       setReviewSummary(created.reviewSummary);
       setReviewBody("");
       setReviewDecision("comment");
+      setReviewEditorExpanded(false);
       await refreshPullRequestDetail();
     } catch (submitError) {
       setError(formatApiError(submitError));
@@ -774,6 +779,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       );
       setThreadReplyBodies((previous) => ({ ...previous, [thread.id]: "" }));
       setThreadReplySuggestedCodes((previous) => ({ ...previous, [thread.id]: "" }));
+      setThreadReplyEditorsExpanded((previous) => ({ ...previous, [thread.id]: false }));
       await refreshPullRequestDetail();
     } catch (replyError) {
       setError(formatApiError(replyError));
@@ -1500,7 +1506,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {thread.status === "open" ? (
                       <div className="mt-3 space-y-3">
                         {canReview ? (
-                          <div className="space-y-3 rounded-md border bg-background/70 p-3">
+                          <div className="space-y-3 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
                             <MarkdownEditor
                               label="Reply"
                               value={threadReplyBodies[thread.id] ?? ""}
@@ -1510,68 +1516,114 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                               rows={4}
                               placeholder="Add context or explain the requested change"
                               previewEmptyText="Nothing to preview."
+                              collapsible
+                              expanded={threadReplyEditorsExpanded[thread.id] ?? false}
+                              onExpandedChange={(expanded) =>
+                                setThreadReplyEditorsExpanded((previous) => ({
+                                  ...previous,
+                                  [thread.id]: expanded
+                                }))
+                              }
+                              enterEditLabel="Reply"
+                              collapsedHint="只在需要回复这条 review thread 时，再展开编辑器并显示 Write / Preview。"
                             />
-                            <div className="space-y-2">
-                              <Label htmlFor={`thread-suggested-code-${thread.id}`}>Suggested change</Label>
-                              <Textarea
-                                id={`thread-suggested-code-${thread.id}`}
-                                value={threadReplySuggestedCodes[thread.id] ?? ""}
-                                onChange={(event) =>
-                                  setThreadReplySuggestedCodes((previous) => ({
-                                    ...previous,
-                                    [thread.id]: event.target.value
-                                  }))
-                                }
-                                rows={5}
-                                disabled={!canSuggestChangeOnReviewThread(thread)}
-                                placeholder={
-                                  canSuggestChangeOnReviewThread(thread)
-                                    ? "Optional replacement code for this anchored range"
-                                    : thread.anchor?.status === "stale"
-                                      ? "Suggested changes are disabled until this thread maps to the current diff"
-                                      : "Suggested changes are only available for head-side ranges"
-                                }
-                              />
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <PendingButton
-                                size="sm"
-                                pending={replySubmittingThreadId === thread.id}
-                                disabled={replySubmittingThreadId !== null || pullRequest.state !== "open"}
-                                pendingText="Replying..."
-                                onClick={() => {
-                                  void submitReviewThreadComment(thread);
-                                }}
-                              >
-                                Reply
-                              </PendingButton>
-                              {canRunAgents ? (
+                            {threadReplyEditorsExpanded[thread.id] ? (
+                              <>
+                                <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
+                                  <Label htmlFor={`thread-suggested-code-${thread.id}`}>
+                                    Suggested change
+                                  </Label>
+                                  <Textarea
+                                    id={`thread-suggested-code-${thread.id}`}
+                                    value={threadReplySuggestedCodes[thread.id] ?? ""}
+                                    onChange={(event) =>
+                                      setThreadReplySuggestedCodes((previous) => ({
+                                        ...previous,
+                                        [thread.id]: event.target.value
+                                      }))
+                                    }
+                                    rows={5}
+                                    disabled={!canSuggestChangeOnReviewThread(thread)}
+                                    placeholder={
+                                      canSuggestChangeOnReviewThread(thread)
+                                        ? "Optional replacement code for this anchored range"
+                                        : thread.anchor?.status === "stale"
+                                          ? "Suggested changes are disabled until this thread maps to the current diff"
+                                          : "Suggested changes are only available for head-side ranges"
+                                    }
+                                    className="rounded-lg border-slate-200 bg-white/95"
+                                  />
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <PendingButton
+                                    size="sm"
+                                    pending={replySubmittingThreadId === thread.id}
+                                    disabled={replySubmittingThreadId !== null || pullRequest.state !== "open"}
+                                    pendingText="Replying..."
+                                    onClick={() => {
+                                      void submitReviewThreadComment(thread);
+                                    }}
+                                  >
+                                    Reply
+                                  </PendingButton>
+                                  {canRunAgents ? (
+                                    <PendingButton
+                                      size="sm"
+                                      variant="outline"
+                                      pending={agentSubmitting && agentResumeThreadId === thread.id}
+                                      disabled={agentSubmitting || pullRequest.state !== "open"}
+                                      pendingText="Resuming agent..."
+                                      onClick={() => {
+                                        void handleResumeAgent(thread.id);
+                                      }}
+                                    >
+                                      继续 Agent 处理 review thread
+                                    </PendingButton>
+                                  ) : null}
+                                  <PendingButton
+                                    size="sm"
+                                    variant="outline"
+                                    pending={resolvingThreadId === thread.id}
+                                    disabled={Boolean(resolvingThreadId)}
+                                    pendingText="Resolving..."
+                                    onClick={() => {
+                                      void handleResolveReviewThread(thread.id);
+                                    }}
+                                  >
+                                    Resolve
+                                  </PendingButton>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {canRunAgents ? (
+                                  <PendingButton
+                                    size="sm"
+                                    variant="outline"
+                                    pending={agentSubmitting && agentResumeThreadId === thread.id}
+                                    disabled={agentSubmitting || pullRequest.state !== "open"}
+                                    pendingText="Resuming agent..."
+                                    onClick={() => {
+                                      void handleResumeAgent(thread.id);
+                                    }}
+                                  >
+                                    继续 Agent 处理 review thread
+                                  </PendingButton>
+                                ) : null}
                                 <PendingButton
                                   size="sm"
                                   variant="outline"
-                                  pending={agentSubmitting && agentResumeThreadId === thread.id}
-                                  disabled={agentSubmitting || pullRequest.state !== "open"}
-                                  pendingText="Resuming agent..."
+                                  pending={resolvingThreadId === thread.id}
+                                  disabled={Boolean(resolvingThreadId)}
+                                  pendingText="Resolving..."
                                   onClick={() => {
-                                    void handleResumeAgent(thread.id);
+                                    void handleResolveReviewThread(thread.id);
                                   }}
                                 >
-                                  继续 Agent 处理 review thread
+                                  Resolve
                                 </PendingButton>
-                              ) : null}
-                              <PendingButton
-                                size="sm"
-                                variant="outline"
-                                pending={resolvingThreadId === thread.id}
-                                disabled={Boolean(resolvingThreadId)}
-                                pendingText="Resolving..."
-                                onClick={() => {
-                                  void handleResolveReviewThread(thread.id);
-                                }}
-                              >
-                                Resolve
-                              </PendingButton>
-                            </div>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="flex flex-wrap gap-2">
@@ -1600,21 +1652,30 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           </section>
 
           {canReview ? (
-            <section className="space-y-3 rounded-md border p-4">
-              <h2 className="text-base font-semibold">Submit review</h2>
-              <div className="space-y-2">
-                <Label htmlFor="review-decision">Decision</Label>
-                <select
-                  id="review-decision"
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                  value={reviewDecision}
-                  onChange={(event) => setReviewDecision(event.target.value as PullRequestReviewDecision)}
-                >
-                  <option value="comment">Comment</option>
-                  <option value="approve">Approve</option>
-                  <option value="request_changes">Request changes</option>
-                </select>
+            <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-slate-950">Submit review</h2>
+                <p className="text-sm text-slate-600">
+                  默认先展示只读入口，真正提交 review 时再进入编辑状态。
+                </p>
               </div>
+              {reviewEditorExpanded ? (
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
+                  <Label htmlFor="review-decision">Decision</Label>
+                  <select
+                    id="review-decision"
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                    value={reviewDecision}
+                    onChange={(event) =>
+                      setReviewDecision(event.target.value as PullRequestReviewDecision)
+                    }
+                  >
+                    <option value="comment">Comment</option>
+                    <option value="approve">Approve</option>
+                    <option value="request_changes">Request changes</option>
+                  </select>
+                </div>
+              ) : null}
               <MarkdownEditor
                 label="Body"
                 value={reviewBody}
@@ -1622,19 +1683,26 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 rows={6}
                 placeholder="Leave your review comments"
                 previewEmptyText="Nothing to preview."
+                collapsible
+                expanded={reviewEditorExpanded}
+                onExpandedChange={setReviewEditorExpanded}
+                enterEditLabel="Write review"
+                collapsedHint="只有进入 review 编辑状态以后，才会显示正文编辑器和 Write / Preview。"
               />
-              <div className="flex flex-wrap gap-2">
-                <PendingButton
-                  onClick={() => {
-                    void submitReview();
-                  }}
-                  pending={reviewSubmitting}
-                  disabled={reviewSubmitting}
-                  pendingText="Submitting review..."
-                >
-                  Submit review
-                </PendingButton>
-              </div>
+              {reviewEditorExpanded ? (
+                <div className="flex flex-wrap gap-2">
+                  <PendingButton
+                    onClick={() => {
+                      void submitReview();
+                    }}
+                    pending={reviewSubmitting}
+                    disabled={reviewSubmitting}
+                    pendingText="Submitting review..."
+                  >
+                    Submit review
+                  </PendingButton>
+                </div>
+              ) : null}
             </section>
           ) : null}
         </div>

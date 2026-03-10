@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { CodeConfigPanel } from "@/components/repository/code-config-panel";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   cancelRepositoryAgentSession,
   getActionRunLogStreamPath,
@@ -343,6 +343,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
   const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
   const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
+  const [runnerConfigEditing, setRunnerConfigEditing] = useState(false);
   const [runnerInstanceType, setRunnerInstanceType] = useState<ActionContainerInstanceType>("lite");
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
   const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
@@ -356,6 +357,25 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
   } as const;
+
+  function resetRunnerConfigDraft(nextConfig: RepositoryActionsConfig) {
+    setRunnerInstanceType(nextConfig.instanceType);
+    setCodexConfigFileContent(nextConfig.codexConfigFileContent);
+    setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+  }
+
+  function handleStartRunnerConfigEditing() {
+    setRunnerConfigEditing(true);
+    setError(null);
+  }
+
+  function handleCancelRunnerConfigEditing() {
+    if (runnerConfig) {
+      resetRunnerConfigDraft(runnerConfig);
+    }
+    setRunnerConfigEditing(false);
+    setError(null);
+  }
 
   const loadData = useCallback(
     async (options?: { background?: boolean }) => {
@@ -460,9 +480,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
-      setRunnerInstanceType(nextConfig.instanceType);
-      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
-      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      resetRunnerConfigDraft(nextConfig);
     } catch (loadError) {
       if (mountedRef.current) {
         setError(formatApiError(loadError));
@@ -478,6 +496,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     if (!canManageActions) {
       setRunnerConfig(null);
       setRunnerConfigSuccess(null);
+      setRunnerConfigEditing(false);
       setRunnerInstanceType("lite");
       setCodexConfigFileContent("");
       setClaudeCodeConfigFileContent("");
@@ -778,9 +797,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
-      setRunnerInstanceType(nextConfig.instanceType);
-      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
-      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      resetRunnerConfigDraft(nextConfig);
+      setRunnerConfigEditing(false);
       setRunnerConfigSuccess("容器配置已保存。新的 Actions run 会使用当前仓库配置。");
     } catch (saveError) {
       if (mountedRef.current) {
@@ -813,9 +831,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         return;
       }
       setRunnerConfig(nextConfig);
-      setRunnerInstanceType(nextConfig.instanceType);
-      setCodexConfigFileContent(nextConfig.codexConfigFileContent);
-      setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
+      resetRunnerConfigDraft(nextConfig);
+      setRunnerConfigEditing(false);
       setRunnerConfigSuccess("已恢复为继承全局默认容器配置。");
     } catch (resetError) {
       if (mountedRef.current) {
@@ -887,6 +904,12 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       />
     );
   }
+
+  const runnerConfigDirty =
+    !!runnerConfig &&
+    (runnerInstanceType !== runnerConfig.instanceType ||
+      codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
+      claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
 
   return (
     <div className="space-y-4">
@@ -967,145 +990,162 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                     />
                   ) : (
                     <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                      <section className="space-y-4 rounded-md border p-4">
-                        <div className="space-y-1">
-                          <h2 className="text-sm font-semibold">Instance Type</h2>
-                          <p className="text-xs text-muted-foreground">
-                            这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
+                      <div className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Repository override
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            updated: {formatDateTime(runnerConfig.updated_at)}
                           </p>
                         </div>
-                        <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
-                          <div className="space-y-2">
-                            <Label htmlFor="repository-runner-instance-type">实例规格</Label>
-                            <Select
-                              value={runnerInstanceType}
-                              onValueChange={(value) =>
-                                setRunnerInstanceType(value as ActionContainerInstanceType)
-                              }
+                        {runnerConfigEditing ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-lg"
+                              onClick={handleCancelRunnerConfigEditing}
                             >
-                              <SelectTrigger id="repository-runner-instance-type">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              Cancel
+                            </Button>
+                            <PendingButton
+                              type="submit"
+                              pending={runnerConfigAction === "save"}
+                              disabled={
+                                !runnerConfigDirty ||
+                                (savingRunnerConfig && runnerConfigAction !== "save")
+                              }
+                              pendingText="Saving config..."
+                              className="rounded-lg"
+                            >
+                              保存容器配置
+                            </PendingButton>
+                            <PendingButton
+                              type="button"
+                              variant="outline"
+                              className="rounded-lg"
+                              pending={runnerConfigAction === "reset"}
+                              disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
+                              pendingText="Resetting..."
+                              onClick={() => {
+                                void handleResetRunnerConfig();
+                              }}
+                            >
+                              恢复全局默认
+                            </PendingButton>
                           </div>
-                          <div className="overflow-x-auto rounded-md border">
-                            <table className="min-w-full text-left text-xs">
-                              <thead className="bg-muted/40 text-muted-foreground">
-                                <tr>
-                                  <th className="px-3 py-2 font-medium">Instance Type</th>
-                                  <th className="px-3 py-2 font-medium">规格</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                  <tr
-                                    key={option.value}
-                                    className={
-                                      option.value === runnerInstanceType ? "bg-muted/30" : ""
-                                    }
-                                  >
-                                    <td className="px-3 py-2 font-mono">{option.label}</td>
-                                    <td className="px-3 py-2 text-muted-foreground">
-                                      {option.spec}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="space-y-4 rounded-md border p-4">
-                        <div className="space-y-1">
-                          <h2 className="text-sm font-semibold">Codex</h2>
-                          <p className="text-xs text-muted-foreground">
-                            {runnerConfig.inheritsGlobalCodexConfig
-                              ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                              : "当前使用当前仓库保存的覆盖配置。"}
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="repository-codex-config-file-content">
-                            配置文件内容（映射到容器 `/home/rootless/.codex/config.toml`）
-                          </Label>
-                          <Textarea
-                            id="repository-codex-config-file-content"
-                            value={codexConfigFileContent}
-                            onChange={(event) => setCodexConfigFileContent(event.target.value)}
-                            rows={10}
-                            wrap="off"
-                            spellCheck={false}
-                            autoCapitalize="off"
-                            autoCorrect="off"
-                            autoComplete="off"
-                            className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                            style={configEditorStyle}
-                          />
-                        </div>
-                      </section>
-
-                      <section className="space-y-4 rounded-md border p-4">
-                        <div className="space-y-1">
-                          <h2 className="text-sm font-semibold">Claude Code</h2>
-                          <p className="text-xs text-muted-foreground">
-                            {runnerConfig.inheritsGlobalClaudeCodeConfig
-                              ? "当前继承全局默认值。保存后会写入当前仓库覆盖配置。"
-                              : "当前使用当前仓库保存的覆盖配置。"}
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="repository-claude-code-config-file-content">
-                            配置文件内容（映射到容器 `/home/rootless/.claude/settings.json`）
-                          </Label>
-                          <Textarea
-                            id="repository-claude-code-config-file-content"
-                            value={claudeCodeConfigFileContent}
-                            onChange={(event) => setClaudeCodeConfigFileContent(event.target.value)}
-                            rows={10}
-                            wrap="off"
-                            spellCheck={false}
-                            autoCapitalize="off"
-                            autoCorrect="off"
-                            autoComplete="off"
-                            className="font-mono text-xs leading-5 whitespace-pre overflow-x-auto"
-                            style={configEditorStyle}
-                          />
-                        </div>
-                      </section>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <PendingButton
-                          type="submit"
-                          pending={runnerConfigAction === "save"}
-                          disabled={savingRunnerConfig && runnerConfigAction !== "save"}
-                          pendingText="Saving config..."
-                        >
-                          保存容器配置
-                        </PendingButton>
-                        <PendingButton
-                          type="button"
-                          variant="outline"
-                          pending={runnerConfigAction === "reset"}
-                          disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
-                          pendingText="Resetting..."
-                          onClick={() => {
-                            void handleResetRunnerConfig();
-                          }}
-                        >
-                          恢复全局默认
-                        </PendingButton>
-                        <p className="text-xs text-muted-foreground">
-                          updated: {formatDateTime(runnerConfig.updated_at)}
-                        </p>
+                        ) : (
+                          <Button className="rounded-lg" type="button" onClick={handleStartRunnerConfigEditing}>
+                            Edit config
+                          </Button>
+                        )}
                       </div>
+
+                      {runnerConfigEditing ? (
+                        <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+                          <div className="space-y-1">
+                            <h2 className="text-sm font-semibold text-slate-950">Instance Type</h2>
+                            <p className="text-sm text-slate-600">
+                              这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
+                            </p>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
+                            <div className="space-y-2">
+                              <Label htmlFor="repository-runner-instance-type">实例规格</Label>
+                              <Select
+                                value={runnerInstanceType}
+                                onValueChange={(value) =>
+                                  setRunnerInstanceType(value as ActionContainerInstanceType)
+                                }
+                              >
+                                <SelectTrigger
+                                  id="repository-runner-instance-type"
+                                  className="rounded-lg border-slate-200 bg-white"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-inner shadow-slate-200/40">
+                              <table className="min-w-full text-left text-xs">
+                                <thead className="bg-slate-50 text-slate-500">
+                                  <tr>
+                                    <th className="px-3 py-2 font-medium">Instance Type</th>
+                                    <th className="px-3 py-2 font-medium">规格</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
+                                    <tr
+                                      key={option.value}
+                                      className={
+                                        option.value === runnerInstanceType ? "bg-sky-50/80" : ""
+                                      }
+                                    >
+                                      <td className="px-3 py-2 font-mono">{option.label}</td>
+                                      <td className="px-3 py-2 text-slate-600">{option.spec}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </section>
+                      ) : (
+                        <section className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="space-y-1">
+                              <h2 className="text-sm font-semibold text-slate-950">Instance Type</h2>
+                              <p className="text-sm text-slate-600">
+                                当前仓库运行时实例规格：{runnerConfig.instanceType}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="rounded-full">
+                              {
+                                ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.find(
+                                  (option) => option.value === runnerConfig.instanceType
+                                )?.spec
+                              }
+                            </Badge>
+                          </div>
+                        </section>
+                      )}
+
+                      <CodeConfigPanel
+                        title="Codex"
+                        description="映射到容器 `/home/rootless/.codex/config.toml`。"
+                        label="Codex 配置文件内容"
+                        value={codexConfigFileContent}
+                        editing={runnerConfigEditing}
+                        onChange={setCodexConfigFileContent}
+                        style={configEditorStyle}
+                        statusText={
+                          runnerConfig.inheritsGlobalCodexConfig ? "Inheriting global" : "Repository override"
+                        }
+                      />
+
+                      <CodeConfigPanel
+                        title="Claude Code"
+                        description="映射到容器 `/home/rootless/.claude/settings.json`。"
+                        label="Claude Code 配置文件内容"
+                        value={claudeCodeConfigFileContent}
+                        editing={runnerConfigEditing}
+                        onChange={setClaudeCodeConfigFileContent}
+                        style={configEditorStyle}
+                        statusText={
+                          runnerConfig.inheritsGlobalClaudeCodeConfig
+                            ? "Inheriting global"
+                            : "Repository override"
+                        }
+                      />
                     </form>
                   )}
                 </CardContent>
