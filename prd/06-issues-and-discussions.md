@@ -32,6 +32,7 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
   - `waiting-human`
   - `done`
 - 独立 `acceptance_criteria`
+- Issue 详情页的验收标准区已升级为双卡片面板，区分当前生效标准与编辑草稿，并提供更明确的 write/preview 切换与保存状态提示
 - `taskFlow` 摘要：
   - 当前状态
   - 当前等待方

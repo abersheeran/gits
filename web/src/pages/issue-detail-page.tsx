@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
+import { IssueAcceptanceCriteriaPanel } from "@/components/repository/issue-acceptance-criteria-panel";
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
@@ -651,43 +652,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             />
           </section>
 
-          <section className="space-y-3 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Acceptance criteria</h2>
-              <p className="text-sm text-muted-foreground">
-                让 Issue 里始终保留一份稳定的完成定义，供 Agent 交付和人类验收对照。
-              </p>
-            </div>
-            <div className="rounded-md border bg-muted/20 p-3">
-              <MarkdownBody
-                content={issue.acceptance_criteria}
-                emptyText="(no acceptance criteria)"
-              />
-            </div>
-            {canUpdate ? (
-              <div className="space-y-3">
-                <MarkdownEditor
-                  label="Edit acceptance criteria"
-                  value={acceptanceCriteriaDraft}
-                  onChange={setAcceptanceCriteriaDraft}
-                  rows={6}
-                  previewEmptyText="暂无验收标准。"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <PendingButton
-                    pending={acceptanceCriteriaSaving}
-                    pendingText="Saving acceptance criteria..."
-                    disabled={acceptanceCriteriaDraft === issue.acceptance_criteria}
-                    onClick={() => {
-                      void saveAcceptanceCriteria();
-                    }}
-                  >
-                    保存验收标准
-                  </PendingButton>
-                </div>
-              </div>
-            ) : null}
-          </section>
+          <IssueAcceptanceCriteriaPanel
+            canUpdate={canUpdate}
+            content={issue.acceptance_criteria}
+            draft={acceptanceCriteriaDraft}
+            onDraftChange={setAcceptanceCriteriaDraft}
+            saving={acceptanceCriteriaSaving}
+            onSave={() => {
+              void saveAcceptanceCriteria();
+            }}
+          />
 
           <section className="space-y-3 rounded-md border p-4">
             <h2 className="text-base font-semibold">Comments ({comments.length})</h2>
