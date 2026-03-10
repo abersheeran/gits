@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,21 @@ export function PullRequestInlineThreadComposer({
   submitting,
   disabled
 }: PullRequestInlineThreadComposerProps) {
+  const [editing, setEditing] = useState(
+    body.trim().length > 0 || suggestedCode.trim().length > 0
+  );
+
+  useEffect(() => {
+    if (body.trim().length > 0 || suggestedCode.trim().length > 0) {
+      setEditing(true);
+    }
+  }, [body, suggestedCode]);
+
+  function handleDiscardDraft() {
+    onDiscardDraft();
+    setEditing(false);
+  }
+
   return (
     <div className="space-y-3 rounded-lg border bg-background p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -68,7 +84,7 @@ export function PullRequestInlineThreadComposer({
           <Button type="button" variant="ghost" size="sm" onClick={onClearSelection}>
             Clear selection
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onDiscardDraft}>
+          <Button type="button" variant="outline" size="sm" onClick={handleDiscardDraft}>
             Discard draft
           </Button>
         </div>
@@ -81,34 +97,44 @@ export function PullRequestInlineThreadComposer({
         rows={4}
         placeholder="Describe the requested change for this selected diff range"
         previewEmptyText="Nothing to preview."
+        collapsible
+        expanded={editing}
+        onExpandedChange={setEditing}
+        enterEditLabel="Write thread comment"
+        collapsedHint="只有进入编辑状态后，才会显示正文编辑器和 Write / Preview。"
       />
 
-      <div className="space-y-2">
-        <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
-        <Textarea
-          id="inline-review-thread-suggested-code"
-          value={suggestedCode}
-          onChange={(event) => onSuggestedCodeChange(event.target.value)}
-          rows={5}
-          disabled={!supportsSuggestion}
-          placeholder={
-            supportsSuggestion
-              ? "Optional replacement code for the selected head-side range"
-              : "Suggested changes are only available for head-side ranges"
-          }
-        />
-      </div>
+      {editing ? (
+        <>
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
+            <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
+            <Textarea
+              id="inline-review-thread-suggested-code"
+              value={suggestedCode}
+              onChange={(event) => onSuggestedCodeChange(event.target.value)}
+              rows={5}
+              disabled={!supportsSuggestion}
+              placeholder={
+                supportsSuggestion
+                  ? "Optional replacement code for the selected head-side range"
+                  : "Suggested changes are only available for head-side ranges"
+              }
+              className="rounded-lg border-slate-200 bg-white/95"
+            />
+          </div>
 
-      <div className="flex flex-wrap gap-2">
-        <PendingButton
-          onClick={onSubmit}
-          pending={submitting}
-          disabled={disabled}
-          pendingText="Creating thread..."
-        >
-          Create review thread
-        </PendingButton>
-      </div>
+          <div className="flex flex-wrap gap-2">
+            <PendingButton
+              onClick={onSubmit}
+              pending={submitting}
+              disabled={disabled}
+              pendingText="Creating thread..."
+            >
+              Create review thread
+            </PendingButton>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

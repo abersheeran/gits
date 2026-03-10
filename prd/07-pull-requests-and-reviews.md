@@ -54,7 +54,7 @@ PR 是当前产品里的交付中心和评审中心。
 - `open / resolved`
 - `Files changed` 内支持类似 GitHub 的行级 comment 草稿流：
   - 点击行号或代码行即可选中 review range
-  - 草稿表单直接展开在对应文件的 diff 区块内，而不是页面级独立表单
+  - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview、suggested change 与提交动作
   - 文件头展示该文件的 `open / resolved` thread 数量
 - 支持从单条 unresolved thread focused resume agent
 - 新 commit 后会给出锚点状态：
