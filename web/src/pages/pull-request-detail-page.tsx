@@ -4,6 +4,7 @@ import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
+import { PullRequestInlineThreadComposer } from "@/components/repository/pull-request-inline-thread-composer";
 import { ReactionStrip } from "@/components/repository/reaction-strip";
 import {
   RepositoryDiffView,
@@ -141,6 +142,11 @@ type SelectedReviewRange = {
   anchorLine: number;
 };
 
+type ReviewThreadPathSummary = {
+  open: number;
+  resolved: number;
+};
+
 function sortReviewThreads(threads: PullRequestReviewThreadRecord[]): PullRequestReviewThreadRecord[] {
   return [...threads].sort((left, right) => {
     if (left.status !== right.status) {
@@ -218,10 +224,42 @@ function canSuggestChangeOnReviewThread(thread: PullRequestReviewThreadRecord): 
   return currentAnchor?.start_side === "head";
 }
 
+function reviewThreadDisplayPath(thread: PullRequestReviewThreadRecord): string {
+  return thread.anchor?.path ?? thread.path;
+}
+
 function formatSelectedReviewRange(range: SelectedReviewRange): string {
   const lineLabel =
     range.startLine === range.endLine ? String(range.startLine) : `${range.startLine}-${range.endLine}`;
   return `${range.path}:${lineLabel} (${range.side})`;
+}
+
+function countSelectedReviewRangeLines(range: SelectedReviewRange): number {
+  return range.endLine - range.startLine + 1;
+}
+
+function buildReviewThreadPathSummary(
+  reviewThreads: PullRequestReviewThreadRecord[]
+): Map<string, ReviewThreadPathSummary> {
+  const summary = new Map<string, ReviewThreadPathSummary>();
+
+  for (const thread of reviewThreads) {
+    const path = reviewThreadDisplayPath(thread);
+    const current = summary.get(path) ?? {
+      open: 0,
+      resolved: 0
+    };
+
+    if (thread.status === "open") {
+      current.open += 1;
+    } else {
+      current.resolved += 1;
+    }
+
+    summary.set(path, current);
+  }
+
+  return summary;
 }
 
 function buildReviewThreadLineDecorations(
@@ -431,6 +469,17 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
   }, [reviewThreadSuggestedCode, selectedReviewRange?.side]);
 
+  function clearReviewThreadSelection() {
+    setSelectedReviewRange(null);
+    setReviewThreadSuggestedCode("");
+  }
+
+  function discardReviewThreadDraft() {
+    setSelectedReviewRange(null);
+    setReviewThreadBody("");
+    setReviewThreadSuggestedCode("");
+  }
+
   const hasPendingRun =
     latestActionRun !== null &&
     (latestActionRun.status === "queued" || latestActionRun.status === "running");
@@ -506,6 +555,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const allowedAgentTypes = FALLBACK_AGENT_TYPES;
   const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow;
   const reviewThreadLineDecorations = buildReviewThreadLineDecorations(reviewThreads);
+  const reviewThreadSummaryByPath = buildReviewThreadPathSummary(reviewThreads);
 
   async function saveMetadata() {
     if (metadataSaving) {
@@ -1227,7 +1277,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 <div className="rounded-md border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <h3 className="text-sm font-medium">Selected diff range</h3>
+                      <h3 className="text-sm font-medium">Line comments</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Click a diff line number or code line to start a thread. Click another line on
+                        the same side and hunk to expand the range.
+                      </p>
                       {selectedReviewRange ? (
                         <>
                           <p className="font-mono text-xs text-foreground">
@@ -1238,65 +1292,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             {selectedReviewRange.hunkHeader}
                           </p>
                         </>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          Click a diff line number to start a thread. Click another line on the same side and hunk
-                          to expand the range.
-                        </p>
-                      )}
+                      ) : null}
                     </div>
                     {selectedReviewRange ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setSelectedReviewRange(null);
-                          setReviewThreadSuggestedCode("");
-                        }}
+                        onClick={clearReviewThreadSelection}
                       >
                         Clear selection
                       </Button>
                     ) : null}
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    <MarkdownEditor
-                      label="Thread body"
-                      value={reviewThreadBody}
-                      onChange={setReviewThreadBody}
-                      rows={4}
-                      placeholder="Describe the requested change for this diff range"
-                      previewEmptyText="Nothing to preview."
-                    />
-                    <div className="space-y-2">
-                      <Label htmlFor="review-thread-suggested-code">Suggested change</Label>
-                      <Textarea
-                        id="review-thread-suggested-code"
-                        value={reviewThreadSuggestedCode}
-                        onChange={(event) => setReviewThreadSuggestedCode(event.target.value)}
-                        rows={6}
-                        disabled={!selectedRangeSupportsSuggestion}
-                        placeholder={
-                          selectedRangeSupportsSuggestion
-                            ? "Optional replacement code for the selected head-side range"
-                            : "Suggested changes are only available for head-side ranges"
-                        }
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <PendingButton
-                        onClick={() => {
-                          void submitReviewThread();
-                        }}
-                        pending={reviewThreadSubmitting}
-                        disabled={
-                          reviewThreadSubmitting || pullRequest.state !== "open" || !selectedReviewRange
-                        }
-                        pendingText="Creating thread..."
-                      >
-                        Create review thread
-                      </PendingButton>
-                    </div>
                   </div>
                 </div>
               ) : null}
@@ -1305,6 +1312,52 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 onDiffLineClick={canReview ? handleDiffLineSelection : undefined}
                 isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
                 lineDecorations={reviewThreadLineDecorations}
+                renderChangeHeaderExtras={(change) => {
+                  const summary = reviewThreadSummaryByPath.get(change.path);
+                  if (!summary) {
+                    return null;
+                  }
+
+                  return (
+                    <>
+                      {summary.open > 0 ? (
+                        <Badge variant="secondary">Open threads: {summary.open}</Badge>
+                      ) : null}
+                      {summary.resolved > 0 ? (
+                        <Badge variant="outline">Resolved: {summary.resolved}</Badge>
+                      ) : null}
+                    </>
+                  );
+                }}
+                renderChangeTopPanel={(change) => {
+                  if (!canReview || !selectedReviewRange || selectedReviewRange.path !== change.path) {
+                    return null;
+                  }
+
+                  return (
+                    <PullRequestInlineThreadComposer
+                      selectedLabel={formatSelectedReviewRange(selectedReviewRange)}
+                      compareLabel={`Compare ${shortOid(selectedReviewRange.baseOid)}..${shortOid(selectedReviewRange.headOid)}`}
+                      hunkHeader={selectedReviewRange.hunkHeader}
+                      side={selectedReviewRange.side}
+                      lineCount={countSelectedReviewRangeLines(selectedReviewRange)}
+                      supportsSuggestion={selectedRangeSupportsSuggestion}
+                      body={reviewThreadBody}
+                      onBodyChange={setReviewThreadBody}
+                      suggestedCode={reviewThreadSuggestedCode}
+                      onSuggestedCodeChange={setReviewThreadSuggestedCode}
+                      onClearSelection={clearReviewThreadSelection}
+                      onDiscardDraft={discardReviewThreadDraft}
+                      onSubmit={() => {
+                        void submitReviewThread();
+                      }}
+                      submitting={reviewThreadSubmitting}
+                      disabled={
+                        reviewThreadSubmitting || pullRequest.state !== "open" || !selectedReviewRange
+                      }
+                    />
+                  );
+                }}
               />
             </section>
           ) : null}

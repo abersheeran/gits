@@ -51,6 +51,10 @@ PR 是当前产品里的交付中心和评审中心。
 - 多轮 comments
 - suggested changes
 - `open / resolved`
+- `Files changed` 内支持类似 GitHub 的行级 comment 草稿流：
+  - 点击行号或代码行即可选中 review range
+  - 草稿表单直接展开在对应文件的 diff 区块内，而不是页面级独立表单
+  - 文件头展示该文件的 `open / resolved` thread 数量
 - 支持从单条 unresolved thread focused resume agent
 - 新 commit 后会给出锚点状态：
   - `current`
@@ -147,6 +151,7 @@ PR 页面已经直接消费 run/session 的验证信息：
 - `src/routes/api/pull-request-command-routes.ts`
 - `src/routes/api/pull-request-routes.test.ts`
 - `web/src/pages/pull-request-detail-page.tsx`
+- `web/src/components/repository/pull-request-inline-thread-composer.tsx`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`
 - `web/src/components/repository/repository-change-diff-editor.tsx`

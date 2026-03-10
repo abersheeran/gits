@@ -233,17 +233,9 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
       return null;
     }
 
-    const monacoInstance = monacoRef.current;
     const lineMap = side === "base" ? lineIndex.baseTargets : lineIndex.headTargets;
 
     return editorInstance.onMouseDown((event) => {
-      if (
-        event.target.type !== monacoInstance.editor.MouseTargetType.GUTTER_GLYPH_MARGIN &&
-        event.target.type !== monacoInstance.editor.MouseTargetType.GUTTER_LINE_NUMBERS
-      ) {
-        return;
-      }
-
       const lineNumber =
         event.target.position?.lineNumber ?? event.target.range?.startLineNumber ?? null;
       if (!lineNumber) {

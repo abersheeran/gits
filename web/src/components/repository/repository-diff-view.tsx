@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { estimateMonacoHeight } from "@/lib/monaco";
@@ -27,6 +27,8 @@ type RepositoryDiffViewProps = {
   onDiffLineClick?: (target: RepositoryDiffLineTarget) => void;
   isDiffLineSelected?: (target: RepositoryDiffLineTarget) => boolean;
   lineDecorations?: RepositoryDiffLineDecoration[];
+  renderChangeHeaderExtras?: (change: RepositoryCompareChange) => ReactNode;
+  renderChangeTopPanel?: (change: RepositoryCompareChange) => ReactNode;
 };
 
 const LazyRepositoryChangeDiffEditor = lazy(async () => {
@@ -76,7 +78,9 @@ export function RepositoryDiffView({
   className,
   onDiffLineClick,
   isDiffLineSelected,
-  lineDecorations
+  lineDecorations,
+  renderChangeHeaderExtras,
+  renderChangeTopPanel
 }: RepositoryDiffViewProps) {
   if (changes.length === 0) {
     return <p className="text-sm text-muted-foreground">No file changes.</p>;
@@ -88,6 +92,8 @@ export function RepositoryDiffView({
         const changeLineDecorations = (lineDecorations ?? []).filter(
           (decoration) => decoration.path === change.path
         );
+        const changeHeaderExtras = renderChangeHeaderExtras?.(change) ?? null;
+        const changeTopPanel = renderChangeTopPanel?.(change) ?? null;
 
         return (
           <section key={`${change.status}:${change.path}`} className="overflow-hidden rounded-md border">
@@ -102,10 +108,12 @@ export function RepositoryDiffView({
                 ) : null}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {changeHeaderExtras}
                 <span>+{change.additions}</span>
                 <span>-{change.deletions}</span>
               </div>
             </header>
+            {changeTopPanel ? <div className="border-b bg-muted/10 px-4 py-4">{changeTopPanel}</div> : null}
             {change.isBinary ? (
               <div className="px-4 py-3 text-sm text-muted-foreground">
                 Binary change. Inline diff is not available.
