@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
@@ -362,7 +362,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [resolvingThreadId, setResolvingThreadId] = useState<string | null>(null);
   const [agentResumeThreadId, setAgentResumeThreadId] = useState<string | null>(null);
 
-  async function refreshPullRequestDetail(): Promise<PullRequestDetailResponse | null> {
+  const refreshPullRequestDetail = useCallback(async (): Promise<PullRequestDetailResponse | null> => {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return null;
     }
@@ -383,7 +383,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setReviewSummary(nextReviews.reviewSummary);
     setReviewThreads(nextReviewThreads);
     return nextPullRequestDetail;
-  }
+  }, [number, owner, repo]);
 
   useEffect(() => {
     let canceled = false;
@@ -523,7 +523,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingAgentSession, hasPendingRun, number, owner, repo]);
+  }, [hasPendingAgentSession, hasPendingRun, number, owner, refreshPullRequestDetail, repo]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (

@@ -36,6 +36,7 @@ PR 是当前产品里的交付中心和评审中心。
 - closing issues 完成度摘要
 - `taskFlow` / handoff 摘要
 - 最新 run/session provenance 摘要
+- PR 详情只在存在 pending run 或 session 时继续轮询 provenance 与详情，静止状态下不维持后台刷新
 
 ### 2.3 Review
 
@@ -55,6 +56,7 @@ PR 是当前产品里的交付中心和评审中心。
 - `Files changed` 内支持类似 GitHub 的行级 comment 草稿流：
   - 点击行号或代码行即可选中 review range
   - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview、suggested change 与提交动作
+  - 一旦草稿正文或 suggested change 已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
   - 文件头展示该文件的 `open / resolved` thread 数量
 - 支持从单条 unresolved thread focused resume agent
 - 新 commit 后会给出锚点状态：

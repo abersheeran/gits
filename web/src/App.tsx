@@ -48,6 +48,9 @@ const RegisterPage = lazyPage(async () => ({
 const RepositoryActionsPage = lazyPage(async () => ({
   default: (await import("@/pages/repository-actions-page")).RepositoryActionsPage
 }));
+const RepositoryBranchesPage = lazyPage(async () => ({
+  default: (await import("@/pages/repository-branches-page")).RepositoryBranchesPage
+}));
 const RepositoryCollaboratorsPage = lazyPage(async () => ({
   default: (await import("@/pages/repository-collaborators-page")).RepositoryCollaboratorsPage
 }));
@@ -135,6 +138,12 @@ function titleForPath(pathname: string): string {
   if (actions) {
     const repository = formatRepositoryName(actions.params.owner, actions.params.repo);
     return `Actions · ${repository} · ${APP_NAME}`;
+  }
+
+  const repoBranches = matchPath("/repo/:owner/:repo/branches", pathname);
+  if (repoBranches) {
+    const repository = formatRepositoryName(repoBranches.params.owner, repoBranches.params.repo);
+    return `分支管理 · ${repository} · ${APP_NAME}`;
   }
 
   const repoSettings = matchPath("/repo/:owner/:repo/settings", pathname);
@@ -273,6 +282,10 @@ function App() {
           <Route
             path="/repo/:owner/:repo/actions"
             element={<RepositoryActionsPage user={user} />}
+          />
+          <Route
+            path="/repo/:owner/:repo/branches"
+            element={<RepositoryBranchesPage user={user} />}
           />
           <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
           <Route

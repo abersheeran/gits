@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { IssueAcceptanceCriteriaPanel } from "@/components/repository/issue-acceptance-criteria-panel";
@@ -122,7 +122,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentEditorExpanded, setCommentEditorExpanded] = useState(false);
 
-  async function refreshLatestRunStatus(): Promise<void> {
+  const refreshLatestRunStatus = useCallback(async (): Promise<void> => {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return;
     }
@@ -131,9 +131,9 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       numbers: [number]
     });
     setLatestActionRun(latestRunItems[0]?.run ?? null);
-  }
+  }, [number, owner, repo]);
 
-  async function refreshLatestAgentSessionStatus(): Promise<void> {
+  const refreshLatestAgentSessionStatus = useCallback(async (): Promise<void> => {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return;
     }
@@ -142,9 +142,9 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       numbers: [number]
     });
     setLatestAgentSession(latestSessionItems[0]?.session ?? null);
-  }
+  }, [number, owner, repo]);
 
-  async function refreshIssueDetail(): Promise<IssueDetailResponse | null> {
+  const refreshIssueDetail = useCallback(async (): Promise<IssueDetailResponse | null> => {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return null;
     }
@@ -153,11 +153,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
     setTaskFlow(nextIssueDetail.taskFlow);
     return nextIssueDetail;
-  }
+  }, [number, owner, repo]);
 
-  async function refreshCommentRunStatuses(
+  const refreshCommentRunStatuses = useCallback(async (
     nextCommentsInput?: IssueCommentRecord[]
-  ): Promise<void> {
+  ): Promise<void> => {
     const nextComments = nextCommentsInput ?? comments;
     if (!owner || !repo || nextComments.length === 0) {
       setLatestRunByCommentId({});
@@ -175,11 +175,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       }
     }
     setLatestRunByCommentId(nextRunByCommentId);
-  }
+  }, [comments, owner, repo]);
 
-  async function refreshLinkedPullRequestProvenance(
+  const refreshLinkedPullRequestProvenance = useCallback(async (
     nextLinkedPullRequestsInput?: IssueLinkedPullRequestRecord[]
-  ): Promise<void> {
+  ): Promise<void> => {
     const nextLinkedPullRequests = nextLinkedPullRequestsInput ?? linkedPullRequests;
     if (!owner || !repo || nextLinkedPullRequests.length === 0) {
       setLatestPullRequestProvenanceByNumber({});
@@ -197,7 +197,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       }
     }
     setLatestPullRequestProvenanceByNumber(nextProvenanceByPullRequestNumber);
-  }
+  }, [linkedPullRequests, owner, repo]);
 
   useEffect(() => {
     let canceled = false;
@@ -344,14 +344,17 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       window.clearInterval(timer);
     };
   }, [
-    comments,
     hasPendingAgentSession,
     hasPendingCommentRun,
     hasPendingPullRequestValidation,
     hasPendingRun,
-    linkedPullRequests,
     number,
     owner,
+    refreshCommentRunStatuses,
+    refreshIssueDetail,
+    refreshLatestAgentSessionStatus,
+    refreshLatestRunStatus,
+    refreshLinkedPullRequestProvenance,
     repo
   ]);
 

@@ -46,6 +46,7 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 - 每个关联 PR 会展示最近 run/session 进展。
 - Issue 页会展示关联 PR 的 validation summary 与 highlighted artifacts 摘要。
 - Issue 页不再铺开全文日志，全文入口统一回到 Actions 页或 Session detail。
+- Issue 详情只在存在 pending issue run、session、comment run 或关联 PR validation 时继续轮询刷新，避免无意义的前端重复请求。
 
 ### 2.4 Agent 与自动化入口
 

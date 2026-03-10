@@ -164,8 +164,9 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 ### 4.3 观测与回看
 
 1. Actions 页以 run 为主视图，支持筛选、查看日志、rerun。
-2. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
-3. 全文日志与全文 artifact 按需读取对象存储。
+2. 未展开日志的 pending run 走后台轮询；已展开且仍在运行的 run 直接建立日志流，流关闭或报错后再回退后台 refresh。
+3. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
+4. 全文日志与全文 artifact 按需读取对象存储。
 
 ## 5. 当前接口
 

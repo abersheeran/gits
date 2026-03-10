@@ -650,11 +650,12 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   }, [selectedSessionId, agentSessions.length]);
 
   useEffect(() => {
-    if (!owner || !repo || liveExpandedRunIds.length === 0) {
+    const liveRunIds = liveExpandedRunIdsKey ? liveExpandedRunIdsKey.split("|") : [];
+    if (!owner || !repo || liveRunIds.length === 0) {
       return;
     }
 
-    const sources = liveExpandedRunIds.map((runId) => {
+    const sources = liveRunIds.map((runId) => {
       const source = new EventSource(getActionRunLogStreamPath(owner, repo, runId));
       const handleEvent = (streamEvent: ActionRunLogStreamEvent) => {
         if (!mountedRef.current) {
@@ -727,7 +728,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         source.close();
       }
     };
-  }, [liveExpandedRunIdsKey, owner, repo]);
+  }, [liveExpandedRunIdsKey, owner, refreshDataInBackground, repo]);
 
   async function handleRerunRun(run: ActionRunRecord) {
     if (!canManageActions || rerunningRunId) {

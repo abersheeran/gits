@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Eye, FileText, PencilLine, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,21 +53,13 @@ export function MarkdownEditor({
   enterEditLabel,
   collapsedHint
 }: MarkdownEditorProps) {
-  const [mode, setMode] = useState<"write" | "preview">("write");
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(
     defaultExpanded ?? !collapsible
   );
-  const textareaId = useId();
   const expanded = collapsible ? (expandedProp ?? uncontrolledExpanded) : true;
   const hasValue = value.trim().length > 0;
   const nonEmptyLineCount = countNonEmptyLines(value);
   const excerpt = excerptText(value);
-
-  useEffect(() => {
-    if (!expanded) {
-      setMode("write");
-    }
-  }, [expanded]);
 
   function setExpanded(nextExpanded: boolean) {
     if (!collapsible) {
@@ -144,12 +136,65 @@ export function MarkdownEditor({
   }
 
   return (
-      <div
-        className={cn(
-          "space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm",
-          className
-        )}
-      >
+    <ExpandedMarkdownEditorPanel
+      label={label}
+      value={value}
+      onChange={onChange}
+      rows={rows}
+      placeholder={placeholder}
+      previewEmptyText={previewEmptyText}
+      className={className}
+      textareaClassName={textareaClassName}
+      collapsible={collapsible}
+      onCollapse={() => setExpanded(false)}
+      collapsedHint={collapsedHint}
+      hasValue={hasValue}
+      nonEmptyLineCount={nonEmptyLineCount}
+    />
+  );
+}
+
+type ExpandedMarkdownEditorPanelProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows: number;
+  placeholder?: string;
+  previewEmptyText?: string;
+  className?: string;
+  textareaClassName?: string;
+  collapsible: boolean;
+  onCollapse: () => void;
+  collapsedHint?: string;
+  hasValue: boolean;
+  nonEmptyLineCount: number;
+};
+
+function ExpandedMarkdownEditorPanel({
+  label,
+  value,
+  onChange,
+  rows,
+  placeholder,
+  previewEmptyText,
+  className,
+  textareaClassName,
+  collapsible,
+  onCollapse,
+  collapsedHint,
+  hasValue,
+  nonEmptyLineCount
+}: ExpandedMarkdownEditorPanelProps) {
+  const [mode, setMode] = useState<"write" | "preview">("write");
+  const textareaId = useId();
+
+  return (
+    <div
+      className={cn(
+        "space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm",
+        className
+      )}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -166,7 +211,7 @@ export function MarkdownEditor({
               type="button"
               variant="ghost"
               className="h-8 rounded-md px-3 text-xs text-slate-500"
-              onClick={() => setExpanded(false)}
+              onClick={onCollapse}
             >
               Cancel
             </Button>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { Badge } from "@/components/ui/badge";
@@ -47,15 +47,9 @@ export function PullRequestInlineThreadComposer({
   submitting,
   disabled
 }: PullRequestInlineThreadComposerProps) {
-  const [editing, setEditing] = useState(
-    body.trim().length > 0 || suggestedCode.trim().length > 0
-  );
-
-  useEffect(() => {
-    if (body.trim().length > 0 || suggestedCode.trim().length > 0) {
-      setEditing(true);
-    }
-  }, [body, suggestedCode]);
+  const hasDraft = body.trim().length > 0 || suggestedCode.trim().length > 0;
+  const [editing, setEditing] = useState(hasDraft);
+  const expanded = editing || hasDraft;
 
   function handleDiscardDraft() {
     onDiscardDraft();
@@ -98,13 +92,13 @@ export function PullRequestInlineThreadComposer({
         placeholder="Describe the requested change for this selected diff range"
         previewEmptyText="Nothing to preview."
         collapsible
-        expanded={editing}
+        expanded={expanded}
         onExpandedChange={setEditing}
         enterEditLabel="Write thread comment"
         collapsedHint="只有进入编辑状态后，才会显示正文编辑器和 Write / Preview。"
       />
 
-      {editing ? (
+      {expanded ? (
         <>
           <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
             <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
