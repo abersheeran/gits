@@ -48,12 +48,24 @@ export function IssueAcceptanceCriteriaPanel({
   saving,
   onSave
 }: IssueAcceptanceCriteriaPanelProps) {
+  const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState<"write" | "preview">("write");
   const hasContent = content.trim().length > 0;
   const hasDraft = draft.trim().length > 0;
   const draftIsSynced = draft === content;
   const lineCount = countNonEmptyLines(draft);
   const checklistItemCount = countChecklistItems(draft);
+
+  function startEditing() {
+    setMode("write");
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    onDraftChange(content);
+    setMode("write");
+    setEditing(false);
+  }
 
   return (
     <section className="relative overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-sky-50/80 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
@@ -81,7 +93,7 @@ export function IssueAcceptanceCriteriaPanel({
             >
               Stable definition
             </Badge>
-            {canUpdate ? (
+            {canUpdate && editing ? (
               <Badge
                 variant="outline"
                 className={cn(
@@ -94,10 +106,21 @@ export function IssueAcceptanceCriteriaPanel({
                 {draftIsSynced ? "Saved copy is current" : "Draft changed"}
               </Badge>
             ) : null}
+            {canUpdate && !editing ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-full border-white/80 bg-white/85 px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-white"
+                onClick={startEditing}
+              >
+                <PencilLine className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+            ) : null}
           </div>
         </div>
 
-        <div className={cn("grid gap-4", canUpdate ? "xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" : "")}>
+        <div className={cn("grid gap-4", canUpdate && editing ? "xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" : "")}>
           <div className="rounded-[1.25rem] border border-slate-200/80 bg-white/90 p-4 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
@@ -129,9 +152,24 @@ export function IssueAcceptanceCriteriaPanel({
                 />
               )}
             </div>
+            {canUpdate && !editing ? (
+              <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/80 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-5 text-slate-500">
+                  仅在进入编辑状态后显示草稿编辑器和预览切换。
+                </p>
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl bg-slate-950 px-4 text-white shadow-lg shadow-slate-950/10 hover:bg-slate-800"
+                  onClick={startEditing}
+                >
+                  <PencilLine className="h-3.5 w-3.5" />
+                  编辑验收标准
+                </Button>
+              </div>
+            ) : null}
           </div>
 
-          {canUpdate ? (
+          {canUpdate && editing ? (
             <div className="rounded-[1.25rem] border border-slate-200/80 bg-white/80 p-4 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
@@ -224,15 +262,26 @@ export function IssueAcceptanceCriteriaPanel({
                 <p className="text-xs leading-5 text-slate-500">
                   建议把通过条件、验证命令、预期结果和关键产物都写清楚。
                 </p>
-                <PendingButton
-                  pending={saving}
-                  pendingText="Saving acceptance criteria..."
-                  disabled={draftIsSynced}
-                  className="h-11 rounded-xl bg-slate-950 px-5 text-white shadow-lg shadow-slate-950/10 hover:bg-slate-800"
-                  onClick={onSave}
-                >
-                  保存验收标准
-                </PendingButton>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-xl border-slate-200 bg-white px-4"
+                    disabled={saving}
+                    onClick={cancelEditing}
+                  >
+                    Cancel
+                  </Button>
+                  <PendingButton
+                    pending={saving}
+                    pendingText="Saving acceptance criteria..."
+                    disabled={draftIsSynced}
+                    className="h-11 rounded-xl bg-slate-950 px-5 text-white shadow-lg shadow-slate-950/10 hover:bg-slate-800"
+                    onClick={onSave}
+                  >
+                    保存验收标准
+                  </PendingButton>
+                </div>
               </div>
             </div>
           ) : null}
