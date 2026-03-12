@@ -1018,7 +1018,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                       />
                   ) : (
                     <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                      <div className="flex flex-col gap-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="panel-inset flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-label-xs text-text-supporting">
                             Repository override
@@ -1068,7 +1068,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                       </div>
 
                       {runnerConfigEditing ? (
-                        <section className="space-y-4 rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
+                        <section className="panel-card space-y-4">
                           <div className="space-y-1">
                             <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
                             <p className="text-body-sm text-text-secondary">
@@ -1099,7 +1099,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="overflow-x-auto rounded-[20px] border border-border-subtle bg-surface-focus">
+                            <div className="overflow-x-auto rounded-[20px] bg-surface-focus">
                               <table className="min-w-full text-left text-xs">
                                 <thead className="bg-surface-base text-text-supporting">
                                   <tr>
@@ -1123,7 +1123,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           </div>
                         </section>
                       ) : (
-                        <section className="rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
+                        <section className="panel-card">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="space-y-1">
                               <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
@@ -1185,7 +1185,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             <CardTitle className="text-base">运行日志</CardTitle>
           </CardHeader>
           <CardContent>
-            <section className="mb-6 space-y-4 rounded-md border p-4">
+            <section className="mb-6 panel-card space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="space-y-1">
                   <h2 className="text-sm font-semibold">Agent sessions</h2>
@@ -1197,19 +1197,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               </div>
 
               <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Visible sessions</p>
                   <p className="text-2xl font-semibold">{sessionSummary.total}</p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Running</p>
                   <p className="text-2xl font-semibold">{sessionSummary.running}</p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Succeeded</p>
                   <p className="text-2xl font-semibold">{sessionSummary.success}</p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Failed</p>
                   <p className="text-2xl font-semibold">{sessionSummary.failed}</p>
                 </div>
@@ -1220,7 +1220,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               ) : (
                 <div className="space-y-3">
                   {selectedAgentSession ? (
-                    <div className="rounded-md border bg-background p-4">
+                    <div className="panel-card">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
@@ -1284,8 +1284,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                       <li
                         id={`agent-session-${session.id}`}
                         key={session.id}
-                        className={`rounded-[20px] border bg-muted/20 p-3 ${
-                          selectedExecutionId === session.id ? "border-fill-tertiary bg-surface-focus" : ""
+                        className={`panel-inset-compact ${
+                          selectedExecutionId === session.id ? "bg-surface-base ring-1 ring-fill-tertiary" : ""
                         }`}
                       >
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1334,19 +1334,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             </div>
 
             <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
+              <div className="panel-card-compact">
                 <p className="text-xs text-muted-foreground">Visible sessions</p>
                 <p className="text-2xl font-semibold">{runSummary.total}</p>
               </div>
-              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
+              <div className="panel-card-compact">
                 <p className="text-xs text-muted-foreground">Running</p>
                 <p className="text-2xl font-semibold">{runSummary.running}</p>
               </div>
-              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
+              <div className="panel-card-compact">
                 <p className="text-xs text-muted-foreground">Succeeded</p>
                 <p className="text-2xl font-semibold">{runSummary.success}</p>
               </div>
-              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
+              <div className="panel-card-compact">
                 <p className="text-xs text-muted-foreground">Failed</p>
                 <p className="text-2xl font-semibold">{runSummary.failed}</p>
               </div>
@@ -1429,8 +1429,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           <li
                             id={`action-run-${run.id}`}
                             key={run.id}
-                            className={`space-y-3 rounded-[20px] border p-3 ${
-                              selectedExecutionId === run.id ? "border-fill-tertiary bg-surface-focus" : ""
+                            className={`panel-card-compact space-y-3 ${
+                              selectedExecutionId === run.id ? "bg-surface-focus ring-1 ring-fill-tertiary" : ""
                             }`}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1486,14 +1486,14 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                             {expanded ? (
                               <div className="space-y-3">
                                 <div className="grid gap-3 md:grid-cols-2">
-                                  <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                                  <div className="panel-inset-compact text-xs text-muted-foreground">
                                     <p>Source: {runSourceLabel(run)}</p>
                                     <p>Created: {formatDateTime(run.created_at)}</p>
                                     <p>Claimed: {formatDateTime(run.claimed_at)}</p>
                                     <p>Started: {formatDateTime(run.started_at)}</p>
                                     <p>Completed: {formatDateTime(run.completed_at)}</p>
                                   </div>
-                                  <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                                  <div className="panel-inset-compact text-xs text-muted-foreground">
                                     <p>Container: {run.container_instance ?? "-"}</p>
                                     <p>Actor: {run.triggered_by_username ?? "-"}</p>
                                     <p>Ref: {run.trigger_ref ?? "-"}</p>
@@ -1501,7 +1501,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                     <p>Workflow: {run.workflow_name ?? "-"}</p>
                                   </div>
                                 </div>
-                                <div className="rounded-md border bg-muted/20 p-3">
+                                <div className="panel-inset-compact">
                                   <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
                                   <MonacoTextViewer
                                     value={run.prompt || "(empty prompt)"}
@@ -1512,7 +1512,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                     wrap="on"
                                   />
                                 </div>
-                                <div className="rounded-md border bg-muted/20 p-3">
+                                <div className="panel-inset-compact">
                                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                     <div>
                                       <p className="text-xs font-medium text-foreground">Session logs</p>

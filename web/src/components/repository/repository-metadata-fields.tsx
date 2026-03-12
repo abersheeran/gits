@@ -47,7 +47,7 @@ export function RepositoryMetadataFields({
               {participants.map((participant) => (
                 <label
                   key={participant.id}
-                  className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                  className="flex items-center justify-between gap-3 rounded-[18px] bg-surface-focus px-3 py-2"
                 >
                   <span className="text-sm">{participant.username}</span>
                   <Checkbox
@@ -78,7 +78,7 @@ export function RepositoryMetadataFields({
                 {participants.map((participant) => (
                   <label
                     key={participant.id}
-                    className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded-[18px] bg-surface-focus px-3 py-2"
                   >
                     <span className="text-sm">{participant.username}</span>
                     <Checkbox
@@ -107,7 +107,7 @@ export function RepositoryMetadataFields({
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">Draft</h3>
           {canEdit && onDraftChange ? (
-            <label className="flex items-center justify-between rounded-md border px-3 py-2">
+            <label className="flex items-center justify-between rounded-[18px] bg-surface-focus px-3 py-2">
               <span className="text-sm">Keep this pull request as draft</span>
               <Checkbox checked={draft} onCheckedChange={(checked) => onDraftChange(checked === true)} />
             </label>

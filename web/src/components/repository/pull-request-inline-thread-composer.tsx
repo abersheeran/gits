@@ -57,7 +57,7 @@ export function PullRequestInlineThreadComposer({
   }
 
   return (
-    <div className="space-y-3 rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
+    <div className="panel-card space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -100,7 +100,7 @@ export function PullRequestInlineThreadComposer({
 
       {expanded ? (
         <>
-          <div className="space-y-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3 shadow-container">
+          <div className="panel-inset-compact space-y-2">
             <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
             <Textarea
               id="inline-review-thread-suggested-code"
@@ -113,7 +113,7 @@ export function PullRequestInlineThreadComposer({
                   ? "Optional replacement code for the selected head-side range"
                   : "Suggested changes are only available for head-side ranges"
               }
-              className="min-h-[180px] bg-surface-base shadow-container"
+              className="min-h-[180px] bg-surface-base shadow-none"
             />
           </div>
 

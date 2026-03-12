@@ -27,7 +27,7 @@ export function DetailSection({
 
   return (
     <section className={cn(panelClassName, className)}>
-      <div className={cn("space-y-4 p-4 md:p-5", contentClassName)}>
+      <div className={cn("panel-content space-y-4", contentClassName)}>
         {hasHeader ? (
           <div
             className={cn(

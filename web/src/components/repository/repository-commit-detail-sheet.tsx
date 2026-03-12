@@ -74,7 +74,7 @@ export function RepositoryCommitDetailSheet({
 
           {!loading && !error && detail ? (
             <div className="space-y-4">
-              <section className="rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
+              <section className="panel-inset">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <AuthorAvatar

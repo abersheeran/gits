@@ -68,7 +68,7 @@ export function CodeConfigPanel({
   return (
     <section
       className={cn(
-        "rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container md:p-5",
+        "panel-inset",
         className
       )}
     >
@@ -98,7 +98,7 @@ export function CodeConfigPanel({
         </div>
       </div>
 
-      <div className="mt-3 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
+      <div className="mt-3 panel-card-compact">
         {editing ? (
           <div className="space-y-3">
             <Label className="text-body-sm text-text-primary">{label}</Label>
@@ -112,7 +112,7 @@ export function CodeConfigPanel({
               autoCapitalize="off"
               autoCorrect="off"
               autoComplete="off"
-              className="overflow-x-auto whitespace-pre rounded-[20px] border-border-subtle bg-surface-base px-3 py-3 font-mono text-code-sm leading-6 shadow-none"
+              className="overflow-x-auto whitespace-pre rounded-[16px] bg-surface-canvas px-3 py-3 font-mono text-code-sm leading-6 shadow-none"
               style={style}
             />
           </div>
@@ -128,7 +128,7 @@ export function CodeConfigPanel({
               ) : null}
             </div>
             <pre
-              className="max-h-[20rem] overflow-auto whitespace-pre rounded-[16px] bg-surface-base px-3 py-3 text-code-sm leading-6 text-text-primary"
+              className="max-h-[20rem] overflow-auto whitespace-pre rounded-[16px] bg-surface-canvas px-3 py-3 text-code-sm leading-6 text-text-primary"
               style={style}
             >
               {previewValue}

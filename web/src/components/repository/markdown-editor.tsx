@@ -75,7 +75,7 @@ export function MarkdownEditor({
     return (
       <div
         className={cn(
-          "rounded-[28px] border border-border-subtle bg-surface-focus p-4 shadow-container",
+          "panel-inset",
           className
         )}
       >
@@ -100,7 +100,7 @@ export function MarkdownEditor({
           </Button>
         </div>
 
-        <div className="mt-3 rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
+        <div className="mt-3 panel-card-compact">
           {hasValue ? (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
@@ -185,7 +185,7 @@ function ExpandedMarkdownEditorPanel({
   return (
     <div
       className={cn(
-        "space-y-4 rounded-[28px] border border-border-subtle bg-surface-focus p-4 shadow-container",
+        "panel-inset space-y-4",
         className
       )}
     >
@@ -259,12 +259,12 @@ function ExpandedMarkdownEditorPanel({
           rows={rows}
           placeholder={placeholder}
           className={cn(
-            "min-h-[220px] bg-surface-base shadow-container",
+            "min-h-[220px] bg-surface-base shadow-none",
             textareaClassName
           )}
         />
       ) : (
-        <div className="min-h-[8rem] rounded-[20px] border border-border-subtle bg-surface-base px-4 py-3 shadow-container">
+        <div className="panel-card-compact min-h-[8rem]">
           <MarkdownBody content={value} emptyText={previewEmptyText} />
         </div>
       )}

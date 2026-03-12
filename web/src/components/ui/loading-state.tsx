@@ -55,7 +55,7 @@ export function PageLoadingState({
         </div>
       </div>
 
-      <div className="mt-5 rounded-[22px] border border-border-subtle bg-surface-focus p-4">
+      <div className="mt-5 panel-inset">
         <LoadingLines lines={lines} />
       </div>
     </section>
@@ -71,7 +71,7 @@ export function InlineLoadingState({
   return (
     <div
       className={cn(
-        "rounded-[24px] border border-border-subtle bg-surface-focus p-4",
+        "panel-inset",
         className
       )}
       role="status"

@@ -4,11 +4,7 @@ import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription
-} from "@/components/ui/card";
+import { CardDescription } from "@/components/ui/card";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { formatApiError, listPublicRepositories, type AuthUser, type RepositoryRecord } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -101,13 +97,13 @@ export function HomePage({ user }: HomePageProps) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <div className="page-panel-muted p-4">
+            <div className="page-panel-muted panel-content">
               <p className="text-label-xs text-text-supporting">Public repositories</p>
               <p className="mt-3 font-display text-section-heading-mobile text-text-primary">
                 {loading ? "..." : repositories.length}
               </p>
             </div>
-            <div className="page-panel p-4">
+            <div className="panel-card">
               <p className="text-label-xs text-text-supporting">Latest entry</p>
               {repositories[0] ? (
                 <Link
@@ -148,23 +144,21 @@ export function HomePage({ user }: HomePageProps) {
         </div>
 
         {loading ? (
-          <Card className="m-4 border-none bg-transparent shadow-none">
-            <CardContent className="p-5 pt-5 md:p-6 md:pt-6">
-              <InlineLoadingState
-                title="Loading repositories"
-                description="Fetching the latest public repositories."
-                lines={3}
-              />
-            </CardContent>
-          </Card>
+          <div className="panel-content">
+            <InlineLoadingState
+              title="Loading repositories"
+              description="Fetching the latest public repositories."
+              lines={3}
+            />
+          </div>
         ) : repositories.length === 0 ? (
           <div className="p-6 text-body-sm text-text-secondary">暂无公开仓库。</div>
         ) : (
           <div className="grid items-start gap-4 p-4 md:grid-cols-2">
             {repositories.map((repo) => (
-              <Card
+              <div
                 key={repo.id}
-                className="transition-transform duration-200 ease-out hover:-translate-y-0.5"
+                className="overflow-hidden rounded-[24px] bg-surface-base transition-transform duration-200 ease-out hover:-translate-y-0.5"
               >
                 <div className="flex h-full flex-col">
                   <div className="flex flex-1 flex-col gap-4 p-5 md:p-6">
@@ -198,7 +192,7 @@ export function HomePage({ user }: HomePageProps) {
                     </Link>
                   </div>
                 </div>
-              </Card>
+              </div>
             ))}
           </div>
         )}

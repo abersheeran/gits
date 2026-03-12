@@ -1004,7 +1004,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
-      <header className="page-panel-muted space-y-3 p-5">
+      <header className="page-hero space-y-3">
         <h1 className="font-display text-heading-3-16-semibold text-text-primary md:text-card-title">
           {pullRequest.title} <span className="text-muted-foreground">#{pullRequest.number}</span>
         </h1>
@@ -1121,7 +1121,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             {latestValidationSession ? (
               <div className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                  <div className="panel-inset-compact space-y-2">
                     <p className="text-sm font-medium">Latest validation session</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       {latestValidationSession ? (
@@ -1154,7 +1154,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                       </p>
                     </div>
                   </div>
-                  <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                  <div className="panel-inset-compact space-y-2">
                     <p className="text-sm font-medium">Latest agent update</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       {latestValidationSession ? (
@@ -1179,7 +1179,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 </div>
                 {provenanceDetail ? (
                   <>
-                    <div className="space-y-2 rounded-md border bg-background/70 p-3">
+                    <div className="panel-card-compact space-y-2">
                       <p className="text-sm font-medium">
                         {validationSummary?.headline ?? "Structured validation summary unavailable."}
                       </p>
@@ -1204,7 +1204,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                         {validationSummary.checks.map((check) => (
                           <div
                             key={`${check.kind}:${check.scope ?? ""}:${check.command}`}
-                            className="space-y-2 rounded-md border bg-background/70 p-3"
+                            className="panel-card-compact space-y-2"
                           >
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant={validationCheckBadgeVariant(check.status)}>
@@ -1224,7 +1224,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {highlightedArtifacts.length > 0 ? (
                       <div className="space-y-3">
                         {highlightedArtifacts.map((artifact) => (
-                          <div key={artifact.id} className="space-y-1 rounded-md border bg-background/70 p-3">
+                          <div key={artifact.id} className="panel-card-compact space-y-1">
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Badge variant="outline">{artifact.kind}</Badge>
                               <span>{artifact.title}</span>
@@ -1255,7 +1255,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             description="在一个地方汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。"
             contentClassName="space-y-3"
           >
-            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+            <div className="panel-inset-compact space-y-3">
               <p className="text-sm font-medium">{mergeSummaryHeadline}</p>
               <p className="text-sm text-muted-foreground">{mergeSummaryDetail}</p>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -1280,7 +1280,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             {closingIssues.length > 0 ? (
               <div className="space-y-3">
                 {closingIssues.map((issue) => (
-                  <div key={issue.id} className="space-y-2 rounded-md border bg-background/70 p-3">
+                  <div key={issue.id} className="panel-card-compact space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Link
                         className="text-sm font-medium gh-link"
@@ -1318,7 +1318,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               contentClassName="space-y-3"
             >
               {canReview ? (
-                <div className="rounded-md border bg-muted/20 p-3">
+                <div className="panel-inset-compact">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
                       <h3 className="text-sm font-medium">Line comments</h3>
@@ -1426,7 +1426,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             ) : (
               <ul className="space-y-3">
                 {reviews.map((review) => (
-                  <li key={review.id} className="rounded-md border bg-muted/30 p-3">
+                  <li key={review.id} className="panel-inset-compact">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge
                         variant={
@@ -1483,7 +1483,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   <li
                     key={thread.id}
                     id={`review-thread-${thread.id}`}
-                    className="rounded-md border bg-muted/20 p-3"
+                    className="panel-inset-compact"
                   >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant={thread.status === "open" ? "secondary" : "outline"}>
@@ -1523,7 +1523,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     ) : null}
                     <div className="mt-3 space-y-3">
                       {thread.comments.map((comment) => (
-                        <div key={comment.id} className="rounded-md border bg-background/80 p-3">
+                        <div key={comment.id} className="panel-card-compact">
                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             <span>{comment.author_username}</span>
                             <span>{formatRelativeTime(comment.created_at)}</span>
@@ -1533,7 +1533,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             <MarkdownBody content={comment.body} emptyText="(no comment)" />
                           </div>
                           {comment.suggestion ? (
-                            <div className="mt-3 space-y-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
+                            <div className="mt-3 panel-inset-compact space-y-2">
                               <p className="text-xs font-medium text-foreground">
                                 Suggested change · {comment.suggestion.side} {comment.suggestion.start_line}-
                                 {comment.suggestion.end_line}
@@ -1559,7 +1559,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {thread.status === "open" ? (
                       <div className="mt-3 space-y-3">
                         {canReview ? (
-                          <div className="space-y-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
+                          <div className="panel-inset space-y-3">
                             <MarkdownEditor
                               label="Reply"
                               value={threadReplyBodies[thread.id] ?? ""}
@@ -1582,7 +1582,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             />
                             {threadReplyEditorsExpanded[thread.id] ? (
                               <>
-                                <div className="space-y-2 rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
+                                <div className="panel-card-compact space-y-2">
                                   <Label htmlFor={`thread-suggested-code-${thread.id}`}>
                                     Suggested change
                                   </Label>
@@ -1711,7 +1711,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               description="默认先展示只读入口，真正提交 review 时再进入编辑状态。"
             >
               {reviewEditorExpanded ? (
-                <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
+                <div className="panel-card-compact">
                   <LabeledSelectField
                     id="review-decision"
                     label="Decision"
@@ -1757,7 +1757,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             title="Task chain / Handoff"
             description="将 linked issue、review/validation 状态和下一步 handoff 收拢到同一处。"
           >
-            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+            <div className="panel-inset-compact space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
                 {comparison ? (
@@ -1820,7 +1820,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           >
 
             {provenanceDetail || latestAgentSession ? (
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="panel-inset-compact space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge
                     status={(provenanceDetail?.session ?? latestAgentSession)?.status ?? "queued"}
@@ -1849,7 +1849,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   </p>
                 </div>
                 {validationSummary ? (
-                  <div className="space-y-2 rounded-md border bg-background/70 p-3">
+                  <div className="panel-card-compact space-y-2">
                     <p className="text-sm font-medium">{validationSummary.headline}</p>
                     <p className="text-xs text-muted-foreground">{validationSummary.detail}</p>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -1864,7 +1864,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {highlightedArtifacts.length > 0 ? (
                       <div className="space-y-2">
                         {highlightedArtifacts.slice(0, 2).map((artifact) => (
-                          <div key={artifact.id} className="rounded-md border bg-muted/20 p-3">
+                          <div key={artifact.id} className="panel-inset-compact">
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Badge variant="outline">{artifact.kind}</Badge>
                               <span>{artifact.title}</span>

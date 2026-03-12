@@ -325,21 +325,21 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Session</p>
                   <p className="mt-1 break-all text-sm font-medium">{session.id}</p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Duration</p>
                   <p className="mt-1 text-sm font-medium">
                     {formatDuration(session.started_at, session.completed_at)}
                   </p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Updated</p>
                   <p className="mt-1 text-sm font-medium">{formatDateTime(session.updated_at)}</p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Timeline events</p>
                   <p className="mt-1 text-sm font-medium">{timeline.length}</p>
                 </div>
@@ -393,7 +393,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                 ) : null}
               </div>
 
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="panel-inset-compact">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-medium text-foreground">Prompt</p>
@@ -459,7 +459,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                   {usageRecords.map((record) => (
-                    <div key={`${record.kind}-${record.id}`} className="rounded-md border p-3">
+                    <div key={`${record.kind}-${record.id}`} className="panel-card-compact">
                       <p className="text-xs text-muted-foreground">{usageLabel(record)}</p>
                       <p className="mt-1 text-sm font-medium text-foreground">
                         {formatUsageValue(record)}
@@ -484,7 +484,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               ) : (
                 <ol className="space-y-3">
                   {interventions.map((intervention) => (
-                    <li key={intervention.id} className="rounded-md border bg-muted/20 p-3">
+                    <li key={intervention.id} className="panel-inset-compact">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -517,7 +517,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               <CardTitle className="text-base">Validation</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-md border bg-muted/20 p-3">
+              <div className="panel-inset-compact">
                 <p className="text-sm font-medium text-foreground">
                   {sessionDetail.validationSummary.headline}
                 </p>
@@ -526,7 +526,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Exit code</p>
                   <p className="mt-1 text-sm font-medium text-foreground">
                     {sessionDetail.validationSummary.exit_code === null
@@ -534,7 +534,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                       : String(sessionDetail.validationSummary.exit_code)}
                   </p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Stdout</p>
                   <p className="mt-1 text-sm font-medium text-foreground">
                     {sessionDetail.validationSummary.stdout_chars === null
@@ -542,7 +542,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                       : `${Math.round(sessionDetail.validationSummary.stdout_chars).toLocaleString()} chars`}
                   </p>
                 </div>
-                <div className="rounded-md border p-3">
+                <div className="panel-card-compact">
                   <p className="text-xs text-muted-foreground">Stderr</p>
                   <p className="mt-1 text-sm font-medium text-foreground">
                     {sessionDetail.validationSummary.stderr_chars === null
@@ -554,7 +554,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               {sessionDetail.validationSummary.checks.length > 0 ? (
                 <ul className="space-y-2">
                   {sessionDetail.validationSummary.checks.map((check) => (
-                    <li key={`${check.kind}-${check.scope ?? "default"}-${check.command}`} className="rounded-md border bg-muted/20 p-3">
+                    <li key={`${check.kind}-${check.scope ?? "default"}-${check.command}`} className="panel-inset-compact">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{check.label}</Badge>
                         {check.scope ? <Badge variant="outline">{check.scope}</Badge> : null}
@@ -582,7 +582,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                     const fullContent = artifactContentById[artifact.id];
                     const showingExcerpt = fullContent === undefined;
                     return (
-                      <section key={artifact.id} className="rounded-md border bg-muted/20 p-3">
+                      <section key={artifact.id} className="panel-inset-compact">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="outline">{artifact.kind.replaceAll("_", " ")}</Badge>
@@ -639,7 +639,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               ) : (
                 <ol className="space-y-3">
                   {timeline.map((event) => (
-                    <li key={event.id} className="rounded-md border bg-muted/20 p-3">
+                    <li key={event.id} className="panel-inset-compact">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">

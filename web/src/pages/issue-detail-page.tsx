@@ -611,7 +611,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           <AlertDescription>{actionError}</AlertDescription>
         </Alert>
       ) : null}
-      <header className="page-panel-muted space-y-3 p-5">
+      <header className="page-hero space-y-3">
         <h1 className="font-display text-heading-3-16-semibold text-text-primary md:text-card-title">
           {issue.title} <span className="text-muted-foreground">#{issue.number}</span>
         </h1>
@@ -685,7 +685,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 {comments.map((comment) => (
                   <li
                     key={comment.id}
-                    className="rounded-[20px] border border-border-subtle bg-surface-focus p-3"
+                    className="panel-inset-compact"
                   >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-medium text-foreground">{comment.author_username}</span>
@@ -771,7 +771,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             title="Task center"
             description="这里展示当前在等谁、最近一轮交付状态，以及 Issue 作为任务入口的最小控制面。"
           >
-            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+            <div className="panel-inset-compact space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <IssueTaskStatusBadge status={currentTaskFlow.status} />
                 <RepositoryStateBadge state={issue.state} kind="issue" />
@@ -863,7 +863,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   const pullRequestHighlightedArtifacts =
                     highlightedValidationArtifacts(pullRequestProvenance).slice(0, 2);
                   return (
-                    <div key={pullRequest.id} className="space-y-3 rounded-md border bg-muted/20 p-3">
+                    <div key={pullRequest.id} className="panel-inset-compact space-y-3">
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
@@ -900,7 +900,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                         )}
                       </div>
                       {pullRequestProvenance ? (
-                        <div className="space-y-3 rounded-md border bg-background/70 p-3">
+                        <div className="panel-card-compact space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-medium">Latest validation</span>
                             {pullRequestValidationStatus ? (
@@ -964,7 +964,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                               {pullRequestHighlightedArtifacts.map((artifact) => (
                                 <div
                                   key={artifact.id}
-                                  className="space-y-1 rounded-md border bg-muted/20 p-3"
+                                  className="panel-inset-compact space-y-1"
                                 >
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <Badge variant="outline">{artifact.kind}</Badge>
@@ -998,7 +998,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           >
 
             {latestAgentSession ? (
-              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div className="panel-inset-compact space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge status={latestAgentSession.status} />
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">

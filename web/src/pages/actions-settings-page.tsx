@@ -167,7 +167,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex flex-col gap-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="panel-inset flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-label-xs text-text-supporting">
                 Global defaults

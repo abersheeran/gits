@@ -649,7 +649,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 rounded-[20px] border border-border-subtle bg-surface-base px-3 py-2 shadow-container">
+            <div className="panel-card-compact min-w-0">
               <div className="flex items-center gap-2">
                 <Link2 className="h-3.5 w-3.5 text-text-supporting" />
                 <code className="block truncate font-mono text-body-micro text-text-primary">{cloneUrl}</code>

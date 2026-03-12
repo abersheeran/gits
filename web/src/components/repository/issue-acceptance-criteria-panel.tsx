@@ -112,7 +112,7 @@ export function IssueAcceptanceCriteriaPanel({
       <div className="space-y-4 p-4 md:p-5">
         <div className="grid gap-4">
           {canUpdate && editing ? (
-            <div className="rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
+            <div className="panel-inset">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
@@ -172,10 +172,10 @@ export function IssueAcceptanceCriteriaPanel({
                     value={draft}
                     onChange={(event) => onDraftChange(event.target.value)}
                     rows={10}
-                    className="min-h-[280px] bg-surface-base shadow-container"
+                    className="min-h-[280px] bg-surface-base shadow-none"
                   />
                 ) : (
-                  <div className="min-h-[280px] rounded-[20px] border border-border-subtle bg-surface-base px-4 py-3 shadow-container">
+                  <div className="panel-card min-h-[280px]">
                     {hasDraft ? (
                       <MarkdownBody content={draft} emptyText="暂无验收标准。" />
                     ) : (
@@ -215,7 +215,7 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
             </div>
           ) : (
-            <div className="rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
+            <div className="panel-inset">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
@@ -228,7 +228,7 @@ export function IssueAcceptanceCriteriaPanel({
                   {hasContent ? "Ready for review" : "Waiting for definition"}
                 </Badge>
               </div>
-              <div className="mt-3 rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
+              <div className="mt-3 panel-card-compact">
                 {hasContent ? (
                   <MarkdownBody content={content} emptyText="(no acceptance criteria)" />
                 ) : (

@@ -184,7 +184,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
 
   return (
     <div className="app-page">
-      <section className="page-panel-muted p-5">
+      <section className="page-hero">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-body-sm text-text-secondary">

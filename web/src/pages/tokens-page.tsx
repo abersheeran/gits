@@ -121,7 +121,7 @@ export function TokensPage({ user }: TokensPageProps) {
         <Alert>
           <AlertTitle>新 Token（仅本次可见）</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
+            <div className="panel-inset-compact mt-2 flex flex-wrap items-center gap-2">
               <code className="text-xs sm:text-sm">{createdToken}</code>
               <CopyButton value={createdToken} />
             </div>

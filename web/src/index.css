@@ -202,7 +202,31 @@
   }
 
   .page-panel-muted {
-    @apply overflow-hidden rounded-[28px] border border-border-subtle bg-surface-focus;
+    @apply overflow-hidden rounded-[28px] bg-surface-focus;
+  }
+
+  .panel-content {
+    @apply p-4 md:p-5;
+  }
+
+  .panel-content-compact {
+    @apply p-3 md:p-4;
+  }
+
+  .panel-inset {
+    @apply rounded-[24px] bg-surface-focus p-4 md:p-5;
+  }
+
+  .panel-inset-compact {
+    @apply rounded-[20px] bg-surface-focus px-4 py-3;
+  }
+
+  .panel-card {
+    @apply rounded-[24px] bg-surface-base p-4 md:p-5;
+  }
+
+  .panel-card-compact {
+    @apply rounded-[20px] bg-surface-base px-4 py-3;
   }
 
   .panel-toolbar {

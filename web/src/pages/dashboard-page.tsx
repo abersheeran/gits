@@ -4,7 +4,6 @@ import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatApiError, listMyRepositories, type AuthUser, type RepositoryRecord } from "@/lib/api";
@@ -77,27 +76,23 @@ export function DashboardPage({ user }: DashboardPageProps) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <Card className="bg-surface-focus shadow-none">
-              <CardHeader>
-                <CardDescription>Repositories</CardDescription>
-                <CardTitle className="text-section-heading-mobile md:text-heading-3-16-semibold">
-                  {loading ? "..." : String(repositories.length)}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardDescription>Access Tokens</CardDescription>
-                <CardTitle className="text-heading-3-16-semibold">
-                  Git over HTTPS
-                </CardTitle>
-              </CardHeader>
-              <CardFooter>
+            <div className="page-panel-muted panel-content">
+              <p className="text-label-xs text-text-supporting">Repositories</p>
+              <p className="mt-3 font-display text-section-heading-mobile text-text-primary md:text-heading-3-16-semibold">
+                {loading ? "..." : String(repositories.length)}
+              </p>
+            </div>
+            <div className="panel-card">
+              <p className="text-label-xs text-text-supporting">Access Tokens</p>
+              <p className="mt-3 font-display text-heading-3-16-semibold text-text-primary">
+                Git over HTTPS
+              </p>
+              <div className="mt-4">
                 <Button variant="outline" asChild>
                   <Link to="/tokens">查看与吊销</Link>
                 </Button>
-              </CardFooter>
-            </Card>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -125,7 +120,7 @@ export function DashboardPage({ user }: DashboardPageProps) {
               description="Refreshing your repositories and collaborator access."
             />
           ) : repositories.length === 0 ? (
-            <div className="page-panel-muted p-4 text-body-sm text-text-secondary">
+            <div className="panel-inset-compact text-body-sm text-text-secondary">
               还没有仓库，先创建一个。
             </div>
           ) : (
