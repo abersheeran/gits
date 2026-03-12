@@ -50,27 +50,65 @@ export function HomePage({ user }: HomePageProps) {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-2xl border bg-gradient-to-br from-slate-100 via-blue-50 to-white p-6">
-        <h1 className="text-3xl font-semibold tracking-tight">Git Service Console</h1>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          React 前端已接管界面层，后端继续由 Hono + D1 + R2 处理 API 与 Git 协议。你可以直接浏览仓库并跳转到详情页。
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {user ? (
-            <Button asChild>
-              <Link to="/dashboard">进入 Dashboard</Link>
-            </Button>
-          ) : (
-            <>
-              <Button asChild>
-                <Link to="/register">注册</Link>
-              </Button>
-              <Button variant="outline" asChild>
-                <Link to="/login">登录</Link>
-              </Button>
-            </>
-          )}
+    <div className="app-page">
+      <section className="page-hero">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
+          <div className="space-y-4">
+            <Badge variant="secondary" className="w-fit">
+              Issue to Session to PR to Review
+            </Badge>
+            <div className="space-y-3">
+              <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
+                把仓库、任务、评审和 Agent 交付压进同一条主链路。
+              </h1>
+              <p className="max-w-3xl text-body-sm text-text-secondary md:text-body-md">
+                gits 的前端现在围绕仓库入口、任务中心和交付回看统一组织。你可以从公开仓库开始浏览，
+                再进入 Issue、PR、Actions 与 Session 细节。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {user ? (
+                <>
+                  <Button asChild>
+                    <Link to="/dashboard">进入 Dashboard</Link>
+                  </Button>
+                  <Button variant="outline" asChild>
+                    <Link to="/repositories/new">创建仓库</Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button asChild>
+                    <Link to="/register">创建账号</Link>
+                  </Button>
+                  <Button variant="outline" asChild>
+                    <Link to="/login">登录已有账号</Link>
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="page-panel-muted p-4">
+              <p className="text-label-xs text-text-supporting">公开仓库</p>
+              <p className="mt-3 font-display text-section-heading-mobile text-text-primary">
+                {loading ? "..." : repositories.length}
+              </p>
+              <p className="mt-2 text-body-xs text-text-secondary">
+                浏览当前公开的仓库入口和最近新增项目。
+              </p>
+            </div>
+            <div className="page-panel p-4">
+              <p className="text-label-xs text-text-supporting">协作模式</p>
+              <p className="mt-3 font-display text-heading-3-16-semibold text-text-primary">
+                Repository-first
+              </p>
+              <p className="mt-2 text-body-xs text-text-secondary">
+                从仓库进入代码、Issue、PR、Actions，再回到 Session 追踪交付。
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -81,57 +119,68 @@ export function HomePage({ user }: HomePageProps) {
         </Alert>
       ) : null}
 
-      {loading ? (
-        <Card>
-          <CardContent className="pt-6">
+      <section className="page-panel overflow-hidden">
+        <div className="panel-toolbar">
+          <div className="space-y-1">
+            <h2 className="font-display text-heading-3-16-semibold text-text-primary">
+              Explore public repositories
+            </h2>
+            <p className="text-body-sm text-text-secondary">
+              公开仓库发现页保持轻量，但已经可以直接跳转到代码与交付上下文。
+            </p>
+          </div>
+          <Badge variant="outline">{loading ? "Refreshing" : `${repositories.length} repositories`}</Badge>
+        </div>
+
+        {loading ? (
+          <Card className="m-4 border-none bg-transparent shadow-none">
+            <CardContent className="pt-2">
             <InlineLoadingState
               title="Loading repositories"
               description="Fetching the latest public repositories."
               lines={3}
             />
           </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {repositories.length === 0 ? (
-            <Card>
-              <CardContent className="pt-6 text-sm text-muted-foreground">暂无公开仓库。</CardContent>
-            </Card>
-          ) : (
-            repositories.map((repo) => (
-              <Card key={repo.id} className="rounded-xl border-border/80 shadow-none">
-                <CardContent className="space-y-3 p-4">
+          </Card>
+        ) : repositories.length === 0 ? (
+          <div className="p-6 text-body-sm text-text-secondary">暂无公开仓库。</div>
+        ) : (
+          <div className="grid gap-4 p-4 md:grid-cols-2">
+            {repositories.map((repo) => (
+              <Card key={repo.id} className="h-full transition-transform duration-200 ease-out hover:-translate-y-1">
+                <CardContent className="flex h-full flex-col gap-4 p-5">
                   <div className="flex items-start justify-between gap-3">
-                    <Link
-                      to={`/repo/${repo.owner_username}/${repo.name}`}
-                      className="text-sm font-semibold text-[#0969da] hover:underline"
-                    >
-                      {repo.owner_username}/{repo.name}
-                    </Link>
-                    <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px] font-medium">
+                    <div className="space-y-2">
+                      <Link
+                        to={`/repo/${repo.owner_username}/${repo.name}`}
+                        className="gh-link block font-display text-heading-3-16-semibold"
+                      >
+                        {repo.owner_username}/{repo.name}
+                      </Link>
+                      <CardDescription>
+                        {repo.description?.trim() ? repo.description : "No description provided."}
+                      </CardDescription>
+                    </div>
+                    <Badge variant={repo.is_private === 1 ? "destructive" : "outline"}>
                       {repo.is_private === 1 ? "Private" : "Public"}
                     </Badge>
                   </div>
 
-                  <CardDescription className="text-sm">
-                    {repo.description?.trim() ? repo.description : "No description provided."}
-                  </CardDescription>
-
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <div className="mt-auto flex items-center justify-between gap-3 text-body-micro text-text-secondary">
                     <span>Created on {formatDateTime(repo.created_at)}</span>
                     <Link
                       to={`/repo/${repo.owner_username}/${repo.name}`}
-                      className="font-medium text-[#0969da] hover:underline"
+                      className="gh-link font-sans text-label-sm"
                     >
                       查看详情
                     </Link>
                   </div>
                 </CardContent>
               </Card>
-            ))
-          )}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

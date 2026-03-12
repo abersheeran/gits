@@ -13,6 +13,8 @@ import {
 } from "@/components/repository/repository-diff-view";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
+import { DetailSection } from "@/components/common/detail-section";
+import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +77,18 @@ type PullRequestDetailPageProps = {
 };
 
 const FALLBACK_AGENT_TYPES: ActionAgentType[] = ["codex", "claude_code"];
+const FALLBACK_AGENT_TYPE_OPTIONS = FALLBACK_AGENT_TYPES.map((agentType) => ({
+  value: agentType,
+  label: agentType
+}));
+const REVIEW_DECISION_OPTIONS: {
+  value: PullRequestReviewDecision;
+  label: string;
+}[] = [
+  { value: "comment", label: "Comment" },
+  { value: "approve", label: "Approve" },
+  { value: "request_changes", label: "Request changes" }
+];
 
 function stripHeadsRef(refName: string): string {
   return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
@@ -556,7 +570,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const canReview = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
-  const allowedAgentTypes = FALLBACK_AGENT_TYPES;
   const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow;
   const reviewThreadLineDecorations = buildReviewThreadLineDecorations(reviewThreads);
   const reviewThreadSummaryByPath = buildReviewThreadPathSummary(reviewThreads);
@@ -955,18 +968,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               : "Validation, review threads, and mergeability all look aligned for a final human decision.";
 
   return (
-    <div className="space-y-4">
+    <div className="app-page">
       {error ? (
         <Alert variant="destructive">
           <AlertTitle>操作失败</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
-      <header className="space-y-2 rounded-md border bg-[#f6f8fa] p-4">
-        <h1 className="text-xl font-semibold">
+      <header className="page-panel-muted space-y-3 p-5">
+        <h1 className="font-display text-heading-3-16-semibold text-text-primary md:text-card-title">
           {pullRequest.title} <span className="text-muted-foreground">#{pullRequest.number}</span>
         </h1>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-body-sm text-text-secondary">
           <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />
           <span>{pullRequest.author_username}</span>
           <span>opened {formatRelativeTime(pullRequest.created_at)}</span>
@@ -980,7 +993,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             </Link>
           ) : null}
         </div>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body-sm text-text-secondary">
           {stripHeadsRef(pullRequest.head_ref)} → {stripHeadsRef(pullRequest.base_ref)}
         </p>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -1009,7 +1022,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             {closingIssues.map((issue) => (
               <Link
                 key={issue.id}
-                className="text-[#0969da] hover:underline"
+                className="gh-link"
                 to={`/repo/${owner}/${repo}/issues/${issue.number}`}
               >
                 #{issue.number}
@@ -1053,7 +1066,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
-          <section className="space-y-3 rounded-md border p-4">
+          <DetailSection contentClassName="space-y-3">
             <MarkdownBody content={pullRequest.body} emptyText="(no description)" />
             <ReactionStrip
               reactions={pullRequest.reactions}
@@ -1066,18 +1079,16 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   : undefined
               }
             />
-          </section>
+          </DetailSection>
 
-          <section className="space-y-3 rounded-md border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold">Validation summary</h2>
-                <p className="text-sm text-muted-foreground">
-                  直接展示最近一轮 Agent 交付、验证结果和关键 artifact，不再要求先跳到 Session 页。
-                </p>
-              </div>
-              {latestValidationState ? <ActionStatusBadge status={latestValidationState} /> : null}
-            </div>
+          <DetailSection
+            title="Validation summary"
+            description="直接展示最近一轮 Agent 交付、验证结果和关键 artifact，不再要求先跳到 Session 页。"
+            headerActions={
+              latestValidationState ? <ActionStatusBadge status={latestValidationState} /> : null
+            }
+            contentClassName="space-y-3"
+          >
             {latestValidationRun || latestValidationSession ? (
               <div className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-2">
@@ -1210,15 +1221,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             ) : (
               <p className="text-sm text-muted-foreground">当前 PR 还没有可用的验证结果。</p>
             )}
-          </section>
+          </DetailSection>
 
-          <section className="space-y-3 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Merge summary</h2>
-              <p className="text-sm text-muted-foreground">
-                在一个地方汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。
-              </p>
-            </div>
+          <DetailSection
+            title="Merge summary"
+            description="在一个地方汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。"
+            contentClassName="space-y-3"
+          >
             <div className="space-y-3 rounded-md border bg-muted/20 p-3">
               <p className="text-sm font-medium">{mergeSummaryHeadline}</p>
               <p className="text-sm text-muted-foreground">{mergeSummaryDetail}</p>
@@ -1264,21 +1273,23 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   </div>
                 ))}
               </div>
-            ) : (
+          ) : (
               <p className="text-sm text-muted-foreground">当前 PR 没有关联关闭的 Issue。</p>
             )}
-          </section>
+          </DetailSection>
 
           {comparison ? (
-            <section className="space-y-3 rounded-md border p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-base font-semibold">Files changed</h2>
+            <DetailSection
+              title="Files changed"
+              headerActions={
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <Badge variant="outline">{comparison.filesChanged} files</Badge>
                   <Badge variant="outline">+{comparison.additions}</Badge>
                   <Badge variant="outline">-{comparison.deletions}</Badge>
                 </div>
-              </div>
+              }
+              contentClassName="space-y-3"
+            >
               {canReview ? (
                 <div className="rounded-md border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1365,11 +1376,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   );
                 }}
               />
-            </section>
+            </DetailSection>
           ) : null}
 
-          <section className="space-y-3 rounded-md border p-4">
-            <h2 className="text-base font-semibold">Reviews</h2>
+          <DetailSection title="Reviews" contentClassName="space-y-3">
             {reviews.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无 review。</p>
             ) : (
@@ -1412,16 +1422,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 ))}
               </ul>
             )}
-          </section>
+          </DetailSection>
 
-          <section className="space-y-3 rounded-md border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold">Review threads</h2>
+          <DetailSection
+            title="Review threads"
+            headerActions={
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <Badge variant="outline">Open: {openReviewThreadCount}</Badge>
                 <Badge variant="outline">Resolved: {resolvedReviewThreadCount}</Badge>
               </div>
-            </div>
+            }
+            contentClassName="space-y-3"
+          >
             {reviewThreads.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无行级 review thread。</p>
             ) : (
@@ -1480,7 +1492,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             <MarkdownBody content={comment.body} emptyText="(no comment)" />
                           </div>
                           {comment.suggestion ? (
-                            <div className="mt-3 space-y-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+                            <div className="mt-3 space-y-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
                               <p className="text-xs font-medium text-foreground">
                                 Suggested change · {comment.suggestion.side} {comment.suggestion.start_line}-
                                 {comment.suggestion.end_line}
@@ -1506,7 +1518,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {thread.status === "open" ? (
                       <div className="mt-3 space-y-3">
                         {canReview ? (
-                          <div className="space-y-3 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+                          <div className="space-y-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
                             <MarkdownEditor
                               label="Reply"
                               value={threadReplyBodies[thread.id] ?? ""}
@@ -1529,7 +1541,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             />
                             {threadReplyEditorsExpanded[thread.id] ? (
                               <>
-                                <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
+                                <div className="space-y-2 rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
                                   <Label htmlFor={`thread-suggested-code-${thread.id}`}>
                                     Suggested change
                                   </Label>
@@ -1549,9 +1561,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                         ? "Optional replacement code for this anchored range"
                                         : thread.anchor?.status === "stale"
                                           ? "Suggested changes are disabled until this thread maps to the current diff"
-                                          : "Suggested changes are only available for head-side ranges"
+                                        : "Suggested changes are only available for head-side ranges"
                                     }
-                                    className="rounded-lg border-slate-200 bg-white/95"
+                                    className="min-h-[160px] bg-surface-focus"
                                   />
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -1649,31 +1661,23 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 ))}
               </ul>
             )}
-          </section>
+          </DetailSection>
 
           {canReview ? (
-            <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-slate-950">Submit review</h2>
-                <p className="text-sm text-slate-600">
-                  默认先展示只读入口，真正提交 review 时再进入编辑状态。
-                </p>
-              </div>
+            <DetailSection
+              variant="muted"
+              title="Submit review"
+              description="默认先展示只读入口，真正提交 review 时再进入编辑状态。"
+            >
               {reviewEditorExpanded ? (
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
-                  <Label htmlFor="review-decision">Decision</Label>
-                  <select
+                <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
+                  <LabeledSelectField
                     id="review-decision"
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                    label="Decision"
                     value={reviewDecision}
-                    onChange={(event) =>
-                      setReviewDecision(event.target.value as PullRequestReviewDecision)
-                    }
-                  >
-                    <option value="comment">Comment</option>
-                    <option value="approve">Approve</option>
-                    <option value="request_changes">Request changes</option>
-                  </select>
+                    onValueChange={(nextDecision) => setReviewDecision(nextDecision)}
+                    options={REVIEW_DECISION_OPTIONS}
+                  />
                 </div>
               ) : null}
               <MarkdownEditor
@@ -1703,18 +1707,15 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   </PendingButton>
                 </div>
               ) : null}
-            </section>
+            </DetailSection>
           ) : null}
         </div>
 
         <aside className="space-y-4">
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Task chain / Handoff</h2>
-              <p className="text-sm text-muted-foreground">
-                将 linked issue、review/validation 状态和下一步 handoff 收拢到同一处。
-              </p>
-            </div>
+          <DetailSection
+            title="Task chain / Handoff"
+            description="将 linked issue、review/validation 状态和下一步 handoff 收拢到同一处。"
+          >
             <div className="space-y-3 rounded-md border bg-muted/20 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
@@ -1770,15 +1771,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 </p>
               </div>
             </div>
-          </section>
+          </DetailSection>
 
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Agent handoff</h2>
-              <p className="text-sm text-muted-foreground">
-                最近一轮 session、验证摘要和继续 Agent 的主入口都收在这里。
-              </p>
-            </div>
+          <DetailSection
+            title="Agent handoff"
+            description="最近一轮 session、验证摘要和继续 Agent 的主入口都收在这里。"
+          >
 
             {provenanceDetail || latestAgentSession ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
@@ -1864,23 +1862,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
             {canRunAgents ? (
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="pull-request-agent-type">Agent</Label>
-                  <select
-                    id="pull-request-agent-type"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={selectedAgentType}
-                    onChange={(event) =>
-                      setSelectedAgentType(event.target.value as ActionAgentType)
-                    }
-                  >
-                    {allowedAgentTypes.map((agentType) => (
-                      <option key={agentType} value={agentType}>
-                        {agentType}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <LabeledSelectField
+                  id="pull-request-agent-type"
+                  label="Agent"
+                  value={selectedAgentType}
+                  onValueChange={(nextAgentType) => setSelectedAgentType(nextAgentType)}
+                  options={FALLBACK_AGENT_TYPE_OPTIONS}
+                />
                 <div className="space-y-2">
                   <Label htmlFor="pull-request-agent-instruction">Extra instruction</Label>
                   <Textarea
@@ -1889,6 +1877,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     onChange={(event) => setAgentInstruction(event.target.value)}
                     rows={5}
                     placeholder="Optional guidance for the next iteration"
+                    className="min-h-[180px] bg-surface-focus"
                   />
                 </div>
                 <PendingButton
@@ -1910,9 +1899,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 仅仓库所有者或协作者可以从当前 PR 继续 Agent。
               </p>
             )}
-          </section>
+          </DetailSection>
 
-          <section className="rounded-md border p-4">
+          <DetailSection>
             <RepositoryMetadataFields
               canEdit={canUpdate}
               participants={participants}
@@ -1927,7 +1916,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               }}
               saving={metadataSaving}
             />
-          </section>
+          </DetailSection>
         </aside>
       </div>
     </div>

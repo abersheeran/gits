@@ -3,7 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatApiError, listMyRepositories, type AuthUser, type RepositoryRecord } from "@/lib/api";
@@ -39,42 +39,71 @@ export function DashboardPage({ user }: DashboardPageProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Repositories</CardTitle>
-            <CardDescription>你拥有或协作的仓库数量。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-semibold tracking-tight">{repositories.length}</div>
-          </CardContent>
-        </Card>
+    <div className="app-page">
+      <section className="page-hero">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
+            <Badge variant="secondary" className="w-fit">
+              Personal workspace
+            </Badge>
+            <div className="space-y-3">
+              <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
+                {user.username} 的交付工作面
+              </h1>
+              <p className="max-w-3xl text-body-sm text-text-secondary md:text-body-md">
+                Dashboard 聚合了你拥有和参与的仓库，也保留了到 Tokens、Actions 配置和新仓库创建的直接入口。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link to="/repositories/new">新建仓库</Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link to="/tokens">管理 Tokens</Link>
+              </Button>
+            </div>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Access Tokens</CardTitle>
-            <CardDescription>用于 Git over HTTPS 认证。</CardDescription>
-          </CardHeader>
-          <CardFooter>
-            <Button variant="outline" asChild>
-              <Link to="/tokens">管理 Tokens</Link>
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <Card className="bg-surface-focus shadow-none">
+              <CardHeader>
+                <CardDescription>Repositories</CardDescription>
+                <CardTitle className="text-section-heading-mobile md:text-heading-3-16-semibold">
+                  {loading ? "..." : String(repositories.length)}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardDescription>Access Tokens</CardDescription>
+                <CardTitle className="text-heading-3-16-semibold">
+                  Git over HTTPS
+                </CardTitle>
+              </CardHeader>
+              <CardFooter>
+                <Button variant="outline" asChild>
+                  <Link to="/tokens">查看与吊销</Link>
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>你的仓库</CardTitle>
-            <CardDescription>包含 owner 和 collaborator 两种角色。</CardDescription>
+      <section className="page-panel overflow-hidden">
+        <div className="panel-toolbar">
+          <div className="space-y-1">
+            <h2 className="font-display text-heading-3-16-semibold text-text-primary">你的仓库</h2>
+            <p className="text-body-sm text-text-secondary">
+              包含 owner 和 collaborator 两种角色。
+            </p>
           </div>
           <Button asChild>
             <Link to="/repositories/new">新建仓库</Link>
           </Button>
-        </CardHeader>
-        <CardContent>
+        </div>
+
+        <div className="p-4 md:p-5">
           {error ? (
             <Alert variant="destructive">
               <AlertTitle>加载失败</AlertTitle>
@@ -86,7 +115,7 @@ export function DashboardPage({ user }: DashboardPageProps) {
               description="Refreshing your repositories and collaborator access."
             />
           ) : repositories.length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有仓库，先创建一个。</p>
+            <p className="text-body-sm text-text-secondary">还没有仓库，先创建一个。</p>
           ) : (
             <Table>
               <TableHeader>
@@ -103,15 +132,17 @@ export function DashboardPage({ user }: DashboardPageProps) {
                   return (
                     <TableRow key={repo.id}>
                       <TableCell>
-                        <div className="font-medium">
-                          <Link className="hover:underline" to={path}>
+                        <div className="space-y-1">
+                          <Link className="gh-link font-display text-heading-4" to={path}>
                             {repo.owner_username}/{repo.name}
                           </Link>
+                          <div className="text-body-micro text-text-secondary">
+                            {repo.description ?? "No description"}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">{repo.description ?? "No description"}</div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={repo.is_private === 1 ? "destructive" : "secondary"}>
+                        <Badge variant={repo.is_private === 1 ? "destructive" : "outline"}>
                           {repo.is_private === 1 ? "private" : "public"}
                         </Badge>
                       </TableCell>
@@ -134,8 +165,8 @@ export function DashboardPage({ user }: DashboardPageProps) {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   );
 }

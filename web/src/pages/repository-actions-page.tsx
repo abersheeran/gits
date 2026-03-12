@@ -1260,8 +1260,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                       <li
                         id={`agent-session-${session.id}`}
                         key={session.id}
-                        className={`rounded-md border bg-muted/20 p-3 ${
-                          selectedSessionId === session.id ? "border-[#fd8c73]" : ""
+                        className={`rounded-[20px] border bg-muted/20 p-3 ${
+                          selectedSessionId === session.id ? "border-fill-tertiary bg-surface-focus" : ""
                         }`}
                       >
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1300,19 +1300,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             </section>
 
             <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <div className="rounded-md border p-3">
+              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
                 <p className="text-xs text-muted-foreground">Visible runs</p>
                 <p className="text-2xl font-semibold">{runSummary.total}</p>
               </div>
-              <div className="rounded-md border p-3">
+              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
                 <p className="text-xs text-muted-foreground">Running</p>
                 <p className="text-2xl font-semibold">{runSummary.running}</p>
               </div>
-              <div className="rounded-md border p-3">
+              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
                 <p className="text-xs text-muted-foreground">Succeeded</p>
                 <p className="text-2xl font-semibold">{runSummary.success}</p>
               </div>
-              <div className="rounded-md border p-3">
+              <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
                 <p className="text-xs text-muted-foreground">Failed</p>
                 <p className="text-2xl font-semibold">{runSummary.failed}</p>
               </div>
@@ -1395,8 +1395,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           <li
                             id={`action-run-${run.id}`}
                             key={run.id}
-                            className={`space-y-3 rounded-md border p-3 ${
-                              selectedRunId === run.id ? "border-[#fd8c73] bg-muted/20" : ""
+                            className={`space-y-3 rounded-[20px] border p-3 ${
+                              selectedRunId === run.id ? "border-fill-tertiary bg-surface-focus" : ""
                             }`}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">

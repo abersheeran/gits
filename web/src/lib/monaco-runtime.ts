@@ -42,14 +42,21 @@ export function configureMonaco(instance: Monaco) {
   }
   monacoConfigured = true;
 
+  const rootStyles = globalThis.document
+    ? getComputedStyle(globalThis.document.documentElement)
+    : null;
+  const surfaceBase = rootStyles?.getPropertyValue("--color-surface-base").trim() || "#ffffff";
+  const textSecondary = rootStyles?.getPropertyValue("--text-secondary").trim() || "#766f6a";
+  const textPrimary = rootStyles?.getPropertyValue("--text-primary").trim() || "#0f0e0d";
+
   instance.editor.defineTheme("gits-light", {
     base: "vs",
     inherit: true,
     colors: {
-      "editor.background": "#ffffff",
-      "editor.lineHighlightBackground": "#00000000",
-      "editorLineNumber.foreground": "#6b7280",
-      "editorLineNumber.activeForeground": "#111827"
+      "editor.background": surfaceBase,
+      "editor.lineHighlightBackground": "transparent",
+      "editorLineNumber.foreground": textSecondary,
+      "editorLineNumber.activeForeground": textPrimary
     },
     rules: []
   });

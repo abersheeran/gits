@@ -18,7 +18,7 @@ function LoadingLines({ lines = 3 }: { lines?: number }) {
         <div
           key={index}
           className={cn(
-            "h-2.5 animate-pulse rounded-full bg-muted",
+            "h-2.5 animate-pulse rounded-full bg-fill-primary",
             widths[index % widths.length]
           )}
         />
@@ -36,7 +36,7 @@ export function PageLoadingState({
   return (
     <section
       className={cn(
-        "rounded-xl border bg-card/95 p-6 shadow-sm",
+        "rounded-[28px] border border-border-subtle bg-surface-base p-6 shadow-container",
         className
       )}
       role="status"
@@ -44,18 +44,18 @@ export function PageLoadingState({
       aria-busy="true"
     >
       <div className="flex items-start gap-3">
-        <div className="rounded-full border bg-muted/40 p-2 text-muted-foreground">
+        <div className="rounded-full border border-border-subtle bg-surface-focus p-2 text-text-supporting">
           <LoaderCircle className="h-4 w-4 animate-spin" />
         </div>
         <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium">{title}</p>
+          <p className="font-display text-heading-3-15 text-text-primary">{title}</p>
           {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="text-body-sm text-text-secondary">{description}</p>
           ) : null}
         </div>
       </div>
 
-      <div className="mt-5 rounded-lg border border-dashed bg-muted/20 p-4">
+      <div className="mt-5 rounded-[22px] border border-border-subtle bg-surface-focus p-4">
         <LoadingLines lines={lines} />
       </div>
     </section>
@@ -71,7 +71,7 @@ export function InlineLoadingState({
   return (
     <div
       className={cn(
-        "rounded-lg border border-dashed bg-muted/20 p-4",
+        "rounded-[24px] border border-border-subtle bg-surface-focus p-4",
         className
       )}
       role="status"
@@ -79,11 +79,11 @@ export function InlineLoadingState({
       aria-busy="true"
     >
       <div className="flex items-start gap-2.5">
-        <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+        <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-text-supporting" />
         <div className="min-w-0 flex-1 space-y-1.5">
-          <p className="text-sm font-medium">{title}</p>
+          <p className="font-display text-heading-3-15 text-text-primary">{title}</p>
           {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="text-body-sm text-text-secondary">{description}</p>
           ) : null}
           <LoadingLines lines={lines} />
         </div>

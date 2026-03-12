@@ -57,12 +57,12 @@ export function PullRequestInlineThreadComposer({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border bg-background p-4 shadow-sm">
+    <div className="space-y-3 rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 text-sm font-medium">
-              <MessageSquarePlus className="h-4 w-4 text-[#0969da]" />
+              <MessageSquarePlus className="h-4 w-4 text-text-supportingStrong" />
               Draft review thread
             </span>
             <Badge variant="outline">{side === "head" ? "Head side" : "Base side"}</Badge>
@@ -100,7 +100,7 @@ export function PullRequestInlineThreadComposer({
 
       {expanded ? (
         <>
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner shadow-slate-200/40">
+          <div className="space-y-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3 shadow-container">
             <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
             <Textarea
               id="inline-review-thread-suggested-code"
@@ -113,7 +113,7 @@ export function PullRequestInlineThreadComposer({
                   ? "Optional replacement code for the selected head-side range"
                   : "Suggested changes are only available for head-side ranges"
               }
-              className="rounded-lg border-slate-200 bg-white/95"
+              className="min-h-[180px] bg-surface-base shadow-container"
             />
           </div>
 

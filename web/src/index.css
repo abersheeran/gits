@@ -1,40 +1,98 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Onest:wght@300;400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif,
-      "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --color-surface-canvas: #faf8f5;
+    --color-surface-base: #ffffff;
+    --color-surface-elevated: #ffffff;
+    --color-surface-focus: #f4eeeb;
+    --color-surface-glass: #0000000a;
+    --color-surface-hover: #f6f4f4;
+    --color-surface-overlay: #f5f3f103;
+    --color-surface-glass-bright: #ffffffcc;
+
+    --text-primary: #0f0e0d;
+    --text-secondary: #766f6a;
+    --text-tertiary: #a6a09b;
+    --text-supporting: #6e6e6e;
+    --text-supporting-strong: #44403b;
+    --text-inverse: #ffffff;
+
+    --border-default: #e5e5e5;
+    --border-subtle: #efe9e7;
+    --border-muted: #0000000a;
+    --border-strong: #0000001a;
+
+    --color-fill-primary: #ebe4e0;
+    --color-fill-secondary: #d1cecc;
+    --color-fill-tertiary: #bbb6b4;
+
+    --color-action-primary-bg: #0f0e0d;
+
+    --color-danger-bg: #8f3b32;
+    --color-danger-surface: #f9ece8;
+    --border-danger: #e9c6bf;
+    --text-danger: #7f3128;
+
+    --layout-gutter-mobile: 12px;
+    --layout-content-mobile: calc(100vw - (2 * var(--layout-gutter-mobile)));
+    --layout-content-mobile-inset: calc(100vw - (4 * var(--layout-gutter-mobile)));
+    --layout-content-mobile-footer: calc(100vw - (6 * var(--layout-gutter-mobile)));
+
+    --control-height-mobile: 40px;
+    --control-height-compact: 36px;
+
+    --radius: 1.25rem;
+    --radius-pill: 9999px;
+    --radius-lg: 1.25rem;
+    --radius-xl: 1.75rem;
+  }
+
+  .dark {
+    --color-surface-canvas: #141210;
+    --color-surface-base: #1b1917;
+    --color-surface-elevated: #221f1d;
+    --color-surface-focus: #272320;
+    --color-surface-glass: #ffffff14;
+    --color-surface-hover: #2c2724;
+    --color-surface-overlay: #ffffff08;
+    --color-surface-glass-bright: #ffffff33;
+
+    --text-primary: #faf8f5;
+    --text-secondary: #d1cbc6;
+    --text-tertiary: #a9a29c;
+    --text-supporting: #c0bab5;
+    --text-supporting-strong: #e6e0db;
+    --text-inverse: #0f0e0d;
+
+    --border-default: #ffffff1a;
+    --border-subtle: #ffffff12;
+    --border-muted: #ffffff0f;
+    --border-strong: #ffffff26;
+
+    --color-fill-primary: #2a2623;
+    --color-fill-secondary: #332e2a;
+    --color-fill-tertiary: #3d3732;
+
+    --color-action-primary-bg: #faf8f5;
+
+    --color-danger-bg: #d38b7f;
+    --color-danger-surface: #3b201d;
+    --border-danger: #714038;
+    --text-danger: #f6c7bf;
   }
 
   * {
     @apply border-border;
+  }
+
+  html {
+    @apply bg-surface-canvas;
+    color-scheme: light;
   }
 
   body,
@@ -42,70 +100,98 @@
   input,
   select,
   textarea {
-    font-family: var(--font-sans);
+    @apply font-sans;
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-surface-canvas text-text-primary antialiased;
     min-height: 100vh;
     margin: 0;
+  }
+
+  #root {
+    min-height: 100vh;
   }
 
   a {
     @apply text-inherit no-underline;
   }
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+
+  ::selection {
+    @apply bg-fill-primary text-text-primary;
   }
 
   .monaco-editor .gits-monaco-selected-line {
-    background: rgba(17, 24, 39, 0.08);
+    background: color-mix(in srgb, var(--color-fill-primary) 72%, transparent);
   }
 
   .monaco-editor .gits-monaco-selected-line-number {
-    color: #111827;
+    color: var(--text-primary);
     font-weight: 600;
   }
 
   .monaco-editor .gits-monaco-selected-line-decoration {
-    border-left: 3px solid #111827;
+    border-left: 3px solid var(--text-primary);
     margin-left: 2px;
   }
 
   .monaco-editor .gits-monaco-thread-line {
-    background: rgba(59, 130, 246, 0.08);
+    background: color-mix(in srgb, var(--color-surface-focus) 85%, transparent);
   }
 
   .monaco-editor .gits-monaco-thread-line-number {
-    color: #1d4ed8;
+    color: var(--text-supporting-strong);
     font-weight: 600;
   }
 
   .monaco-editor .gits-monaco-thread-line-decoration {
-    border-left: 3px solid #2563eb;
+    border-left: 3px solid var(--color-fill-secondary);
     margin-left: 2px;
+  }
+}
+
+@layer components {
+  .app-container {
+    @apply mx-auto w-full max-w-page px-page-gutter md:px-6;
+  }
+
+  .app-page {
+    @apply space-y-6 md:space-y-8;
+  }
+
+  .page-hero {
+    @apply overflow-hidden rounded-[32px] border border-border-subtle bg-surface-base p-6 shadow-container-elevated md:p-8;
+  }
+
+  .page-panel {
+    @apply rounded-[28px] border border-border-subtle bg-surface-base shadow-container;
+  }
+
+  .page-panel-muted {
+    @apply rounded-[28px] border border-border-subtle bg-surface-focus;
+  }
+
+  .panel-toolbar {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 md:px-5;
+  }
+
+  .segmented-control {
+    @apply inline-flex items-center rounded-full bg-surface-focus p-1;
+  }
+
+  .segmented-control__item {
+    @apply inline-flex h-9 items-center gap-2 rounded-full px-4 font-display text-button-md text-text-supporting transition-colors duration-100 ease-in-out hover:bg-surface-glass hover:text-text-primary;
+  }
+
+  .segmented-control__item[data-active="true"] {
+    @apply bg-surface-base text-text-primary shadow-sm;
+  }
+
+  .gh-link {
+    @apply text-text-primary underline-offset-4 transition-colors duration-100 ease-in-out hover:text-text-supportingStrong hover:underline;
+  }
+
+  .soft-code {
+    @apply rounded-2xl border border-border-subtle bg-surface-focus px-2 py-1 font-mono text-code-sm text-text-primary;
   }
 }

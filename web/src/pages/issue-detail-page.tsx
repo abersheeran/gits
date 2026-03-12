@@ -8,6 +8,8 @@ import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { ReactionStrip } from "@/components/repository/reaction-strip";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
+import { DetailSection } from "@/components/common/detail-section";
+import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,6 +70,14 @@ const ISSUE_TASK_STATUS_OPTIONS: IssueTaskStatus[] = [
   "waiting-human",
   "done"
 ];
+const ISSUE_TASK_STATUS_SELECT_OPTIONS = ISSUE_TASK_STATUS_OPTIONS.map((status) => ({
+  value: status,
+  label: status
+}));
+const FALLBACK_AGENT_TYPE_OPTIONS = FALLBACK_AGENT_TYPES.map((agentType) => ({
+  value: agentType,
+  label: agentType
+}));
 
 function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
@@ -389,7 +399,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const canComment = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
-  const allowedAgentTypes = FALLBACK_AGENT_TYPES;
   const currentTaskFlow: IssueTaskFlowRecord = taskFlow;
 
   async function saveMetadata() {
@@ -595,18 +604,18 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="app-page">
       {actionError ? (
         <Alert variant="destructive">
           <AlertTitle>操作失败</AlertTitle>
           <AlertDescription>{actionError}</AlertDescription>
         </Alert>
       ) : null}
-      <header className="space-y-2 rounded-md border bg-[#f6f8fa] p-4">
-        <h1 className="text-xl font-semibold">
+      <header className="page-panel-muted space-y-3 p-5">
+        <h1 className="font-display text-heading-3-16-semibold text-text-primary md:text-card-title">
           {issue.title} <span className="text-muted-foreground">#{issue.number}</span>
         </h1>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-body-sm text-text-secondary">
           <IssueTaskStatusBadge status={currentTaskFlow.status} />
           <RepositoryStateBadge state={issue.state} kind="issue" />
           <span>{issue.author_username}</span>
@@ -642,7 +651,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
-          <section className="space-y-3 rounded-md border p-4">
+          <DetailSection contentClassName="space-y-3">
             <MarkdownBody content={issue.body} emptyText="(no description)" />
             <ReactionStrip
               reactions={issue.reactions}
@@ -655,7 +664,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   : undefined
               }
             />
-          </section>
+          </DetailSection>
 
           <IssueAcceptanceCriteriaPanel
             canUpdate={canUpdate}
@@ -668,14 +677,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             }}
           />
 
-          <section className="space-y-3 rounded-md border p-4">
-            <h2 className="text-base font-semibold">Comments ({comments.length})</h2>
+          <DetailSection title={`Comments (${comments.length})`} contentClassName="space-y-3">
             {comments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">暂无评论。</p>
+              <p className="text-body-sm text-text-secondary">暂无评论。</p>
             ) : (
               <ul className="space-y-3">
                 {comments.map((comment) => (
-                  <li key={comment.id} className="rounded-md border bg-muted/30 p-3">
+                  <li
+                    key={comment.id}
+                    className="rounded-[20px] border border-border-subtle bg-surface-focus p-3"
+                  >
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-medium text-foreground">{comment.author_username}</span>
                       <span>commented {formatRelativeTime(comment.created_at)}</span>
@@ -713,16 +724,14 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 ))}
               </ul>
             )}
-          </section>
+          </DetailSection>
 
           {canComment ? (
-            <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold text-slate-950">Add comment</h2>
-                <p className="text-sm text-slate-600">
-                  默认收起评论编辑器，需要补充上下文时再显式展开，减少页面噪音。
-                </p>
-              </div>
+            <DetailSection
+              variant="muted"
+              title="Add comment"
+              description="默认收起评论编辑器，需要补充上下文时再显式展开，减少页面噪音。"
+            >
               <MarkdownEditor
                 label="Comment"
                 value={commentBody}
@@ -749,22 +758,19 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   </PendingButton>
                 </div>
               ) : null}
-            </section>
+            </DetailSection>
           ) : (
-            <section className="rounded-md border p-4 text-sm text-muted-foreground">
+            <DetailSection contentClassName="text-body-sm text-text-secondary">
               仅仓库所有者或协作者可以发表评论。
-            </section>
+            </DetailSection>
           )}
         </div>
 
         <aside className="space-y-4">
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Task center</h2>
-              <p className="text-sm text-muted-foreground">
-                这里展示当前在等谁、最近一轮交付状态，以及 Issue 作为任务入口的最小控制面。
-              </p>
-            </div>
+          <DetailSection
+            title="Task center"
+            description="这里展示当前在等谁、最近一轮交付状态，以及 Issue 作为任务入口的最小控制面。"
+          >
             <div className="space-y-3 rounded-md border bg-muted/20 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <IssueTaskStatusBadge status={currentTaskFlow.status} />
@@ -811,21 +817,13 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             </div>
             {canUpdate ? (
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="issue-task-status">Task status</Label>
-                  <select
-                    id="issue-task-status"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={taskStatusDraft}
-                    onChange={(event) => setTaskStatusDraft(event.target.value as IssueTaskStatus)}
-                  >
-                    {ISSUE_TASK_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <LabeledSelectField
+                  id="issue-task-status"
+                  label="Task status"
+                  value={taskStatusDraft}
+                  onValueChange={(nextStatus) => setTaskStatusDraft(nextStatus)}
+                  options={ISSUE_TASK_STATUS_SELECT_OPTIONS}
+                />
                 <PendingButton
                   pending={taskStatusSaving}
                   pendingText="Saving task status..."
@@ -838,17 +836,16 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 </PendingButton>
               </div>
             ) : null}
-          </section>
+          </DetailSection>
 
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Linked pull requests</h2>
-              <p className="text-sm text-muted-foreground">
-                直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent、run 和验证摘要。
-              </p>
-            </div>
+          <DetailSection
+            title="Linked pull requests"
+            description="直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent、run 和验证摘要。"
+          >
             {linkedPullRequests.length === 0 ? (
-              <p className="text-sm text-muted-foreground">当前 Issue 还没有关联的 pull request。</p>
+              <p className="text-body-sm text-text-secondary">
+                当前 Issue 还没有关联的 pull request。
+              </p>
             ) : (
               <div className="space-y-3">
                 {linkedPullRequests.map((pullRequest) => {
@@ -1009,15 +1006,12 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 })}
               </div>
             )}
-          </section>
+          </DetailSection>
 
-          <section className="space-y-4 rounded-md border p-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Agent session</h2>
-              <p className="text-sm text-muted-foreground">
-                将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。
-              </p>
-            </div>
+          <DetailSection
+            title="Agent session"
+            description="将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。"
+          >
 
             {latestAgentSession ? (
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
@@ -1054,28 +1048,18 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">当前 Issue 还没有 Agent session。</p>
+              <p className="text-body-sm text-text-secondary">当前 Issue 还没有 Agent session。</p>
             )}
 
             {canRunAgents ? (
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="issue-agent-type">Agent</Label>
-                  <select
-                    id="issue-agent-type"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={selectedAgentType}
-                    onChange={(event) =>
-                      setSelectedAgentType(event.target.value as ActionAgentType)
-                    }
-                  >
-                    {allowedAgentTypes.map((agentType) => (
-                      <option key={agentType} value={agentType}>
-                        {agentType}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <LabeledSelectField
+                  id="issue-agent-type"
+                  label="Agent"
+                  value={selectedAgentType}
+                  onValueChange={(nextAgentType) => setSelectedAgentType(nextAgentType)}
+                  options={FALLBACK_AGENT_TYPE_OPTIONS}
+                />
                 <div className="space-y-2">
                   <Label htmlFor="issue-agent-instruction">Extra instruction</Label>
                   <Textarea
@@ -1084,6 +1068,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                     onChange={(event) => setAgentInstruction(event.target.value)}
                     rows={6}
                     placeholder="Optional guidance for the next session"
+                    className="min-h-[180px] bg-surface-focus"
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1118,9 +1103,9 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 仅仓库所有者或协作者可以为当前 Issue 运行 Agent。
               </p>
             )}
-          </section>
+          </DetailSection>
 
-          <section className="rounded-md border p-4">
+          <DetailSection>
             <RepositoryMetadataFields
               canEdit={canUpdate}
               participants={participants}
@@ -1131,7 +1116,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               }}
               saving={metadataSaving}
             />
-          </section>
+          </DetailSection>
         </aside>
       </div>
     </div>

@@ -295,7 +295,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                             <button
                               type="button"
                               onClick={() => updateSearch({ oid: commit.oid })}
-                              className="max-w-full truncate text-left text-sm font-medium leading-5 text-[#0969da] hover:underline"
+                              className="gh-link max-w-full truncate text-left font-display text-heading-4 leading-5"
                             >
                               {commitTitle(commit.message)}
                             </button>

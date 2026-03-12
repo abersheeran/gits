@@ -55,7 +55,7 @@ function tabCount(
 
 export function RepositoryTabs({ owner, repo, detail, active }: RepositoryTabsProps) {
   return (
-    <nav className="flex flex-wrap items-end gap-1 border-b border-border px-1" aria-label="Repository sections">
+    <nav className="segmented-control w-fit max-w-full flex-wrap" aria-label="Repository sections">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = active === tab.key;
@@ -65,16 +65,23 @@ export function RepositoryTabs({ owner, repo, detail, active }: RepositoryTabsPr
             key={tab.key}
             to={tab.href(owner, repo)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-t-md border-b-2 px-3 py-2 text-sm transition-colors",
-              isActive
-                ? "border-[#fd8c73] font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+              "segmented-control__item",
+              isActive && "bg-surface-base text-text-primary shadow-sm hover:bg-surface-base"
             )}
           >
             <Icon className="h-4 w-4" />
             {tab.label}
             {count !== null ? (
-              <span className="rounded-full border bg-muted/30 px-1.5 text-[11px]">{count}</span>
+              <span
+                className={cn(
+                  "rounded-full border border-border-subtle px-1.5 py-0.5 font-sans text-label-xs",
+                  isActive
+                    ? "bg-surface-focus text-text-primary"
+                    : "bg-surface-base text-text-supporting"
+                )}
+              >
+                {count}
+              </span>
             ) : null}
           </Link>
         );

@@ -30,12 +30,12 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-4 py-6 text-center">
-      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/80 bg-white shadow-sm">
-        <Sparkles className="h-5 w-5 text-slate-400" />
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border-subtle bg-surface-focus px-4 py-6 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-border-subtle bg-surface-base shadow-container">
+        <Sparkles className="h-5 w-5 text-text-tertiary" />
       </div>
-      <p className="mt-4 text-sm font-semibold text-slate-900">{title}</p>
-      <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">{description}</p>
+      <p className="mt-4 text-body-sm font-semibold text-text-primary">{title}</p>
+      <p className="mt-2 max-w-sm text-body-sm text-text-secondary">{description}</p>
     </div>
   );
 }
@@ -68,41 +68,29 @@ export function IssueAcceptanceCriteriaPanel({
   }
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-sky-50/80 shadow-sm">
-      <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-sky-100/80 via-white to-emerald-100/70" />
-      <div className="relative space-y-4 p-4">
+    <section className="page-panel overflow-hidden">
+      <div className="border-b border-border-subtle bg-surface-focus px-4 py-4 md:px-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm backdrop-blur">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-surface-base px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-supporting shadow-container">
+              <CheckCircle2 className="h-3.5 w-3.5 text-text-supportingStrong" />
               Delivery contract
             </div>
             <div className="space-y-2">
-              <h2 className="text-lg font-semibold tracking-tight text-slate-950">
+              <h2 className="font-display text-heading-3-16-semibold text-text-primary">
                 Acceptance criteria
               </h2>
-              <p className="max-w-2xl text-sm leading-6 text-slate-600">
+              <p className="max-w-2xl text-body-sm text-text-secondary">
                 让 Issue 里始终保留一份稳定的完成定义，供 Agent 交付和人类验收对照。
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge
-              variant="outline"
-              className="rounded-full border-white/80 bg-white/80 px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm"
-            >
+            <Badge variant="outline" className="bg-surface-base">
               Stable definition
             </Badge>
             {canUpdate && editing ? (
-              <Badge
-                variant="outline"
-                className={cn(
-                  "rounded-full px-3 py-1 text-[11px] font-medium shadow-sm",
-                  draftIsSynced
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-amber-200 bg-amber-50 text-amber-700"
-                )}
-              >
+              <Badge variant={draftIsSynced ? "outline" : "secondary"} className="bg-surface-base">
                 {draftIsSynced ? "Saved copy is current" : "Draft changed"}
               </Badge>
             ) : null}
@@ -110,7 +98,7 @@ export function IssueAcceptanceCriteriaPanel({
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-full border-white/80 bg-white/85 px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-white"
+                className="h-9 px-4"
                 onClick={startEditing}
               >
                 <PencilLine className="h-3.5 w-3.5" />
@@ -119,26 +107,30 @@ export function IssueAcceptanceCriteriaPanel({
             ) : null}
           </div>
         </div>
+      </div>
 
+      <div className="space-y-4 p-4 md:p-5">
         <div className="grid gap-4">
           {canUpdate && editing ? (
-            <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur">
+            <div className="rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
-                  <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                  <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
                     <PencilLine className="h-3.5 w-3.5" />
                     Edit surface
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-950">Refine acceptance criteria</h3>
+                  <h3 className="text-body-sm font-semibold text-text-primary">
+                    Refine acceptance criteria
+                  </h3>
                 </div>
-                <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                <div className="inline-flex items-center rounded-full bg-surface-base p-1 shadow-container">
                   <Button
                     type="button"
                     size="sm"
                     variant={mode === "write" ? "secondary" : "ghost"}
                     className={cn(
-                      "h-8 rounded-md px-3 text-xs",
-                      mode === "write" ? "shadow-sm" : "text-slate-500"
+                      "h-8 rounded-full px-3 text-xs",
+                      mode === "write" ? "shadow-sm" : "text-text-secondary"
                     )}
                     onClick={() => setMode("write")}
                   >
@@ -150,8 +142,8 @@ export function IssueAcceptanceCriteriaPanel({
                     size="sm"
                     variant={mode === "preview" ? "secondary" : "ghost"}
                     className={cn(
-                      "h-8 rounded-md px-3 text-xs",
-                      mode === "preview" ? "shadow-sm" : "text-slate-500"
+                      "h-8 rounded-full px-3 text-xs",
+                      mode === "preview" ? "shadow-sm" : "text-text-secondary"
                     )}
                     onClick={() => setMode("preview")}
                   >
@@ -162,27 +154,13 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600"
-                >
+                <Badge variant="outline" className="bg-surface-base">
                   {formatCount(lineCount, "line")}
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600"
-                >
+                <Badge variant="outline" className="bg-surface-base">
                   {formatCount(checklistItemCount, "checklist item")}
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "rounded-full px-3 py-1 text-[11px] font-medium",
-                    draftIsSynced
-                      ? "border-slate-200 bg-slate-100 text-slate-600"
-                      : "border-sky-200 bg-sky-50 text-sky-700"
-                  )}
-                >
+                <Badge variant={draftIsSynced ? "outline" : "secondary"} className="bg-surface-base">
                   {draftIsSynced ? "No local changes" : "Unsaved draft"}
                 </Badge>
               </div>
@@ -194,10 +172,10 @@ export function IssueAcceptanceCriteriaPanel({
                     value={draft}
                     onChange={(event) => onDraftChange(event.target.value)}
                     rows={10}
-                    className="min-h-[280px] rounded-lg border-slate-200 bg-white/95 px-3 py-3 text-sm leading-7 shadow-inner shadow-slate-200/40 focus-visible:ring-slate-400"
+                    className="min-h-[280px] bg-surface-base shadow-container"
                   />
                 ) : (
-                  <div className="min-h-[280px] rounded-lg border border-slate-200 bg-white/95 px-3 py-3 shadow-inner shadow-slate-200/40">
+                  <div className="min-h-[280px] rounded-[20px] border border-border-subtle bg-surface-base px-4 py-3 shadow-container">
                     {hasDraft ? (
                       <MarkdownBody content={draft} emptyText="暂无验收标准。" />
                     ) : (
@@ -211,14 +189,14 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
 
               <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <p className="text-xs leading-5 text-slate-500">
+                <p className="text-xs leading-5 text-text-secondary">
                   建议把通过条件、验证命令、预期结果和关键产物都写清楚。
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-10 rounded-lg border-slate-200 bg-white px-3.5"
+                    className="h-10 px-4"
                     disabled={saving}
                     onClick={cancelEditing}
                   >
@@ -228,7 +206,7 @@ export function IssueAcceptanceCriteriaPanel({
                     pending={saving}
                     pendingText="Saving acceptance criteria..."
                     disabled={draftIsSynced}
-                    className="h-10 rounded-lg bg-slate-950 px-4 text-white shadow-sm hover:bg-slate-800"
+                    className="h-10 px-4"
                     onClick={onSave}
                   >
                     保存验收标准
@@ -237,28 +215,20 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-sm backdrop-blur">
+            <div className="rounded-[24px] border border-border-subtle bg-surface-focus p-4 shadow-container">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                  <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
                     <FileText className="h-3.5 w-3.5" />
                     Current definition
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-950">当前生效标准</h3>
+                  <h3 className="text-body-sm font-semibold text-text-primary">当前生效标准</h3>
                 </div>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "rounded-full px-3 py-1 text-[11px] font-medium",
-                    hasContent
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-slate-200 bg-slate-100 text-slate-600"
-                  )}
-                >
+                <Badge variant={hasContent ? "secondary" : "outline"} className="bg-surface-base">
                   {hasContent ? "Ready for review" : "Waiting for definition"}
                 </Badge>
               </div>
-              <div className="mt-3 rounded-lg border border-white/80 bg-white/95 p-3 shadow-inner shadow-slate-200/40">
+              <div className="mt-3 rounded-[20px] border border-border-subtle bg-surface-base p-3 shadow-container">
                 {hasContent ? (
                   <MarkdownBody content={content} emptyText="(no acceptance criteria)" />
                 ) : (
@@ -269,13 +239,13 @@ export function IssueAcceptanceCriteriaPanel({
                 )}
               </div>
               {canUpdate ? (
-                <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/80 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs leading-5 text-slate-500">
+                <div className="mt-4 flex flex-col gap-3 border-t border-border-subtle pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs leading-5 text-text-secondary">
                     仅在进入编辑状态后显示草稿编辑器和预览切换。
                   </p>
                   <Button
                     type="button"
-                    className="h-9 rounded-lg bg-slate-950 px-3.5 text-white shadow-sm hover:bg-slate-800"
+                    className="h-9 px-4"
                     onClick={startEditing}
                   >
                     <PencilLine className="h-3.5 w-3.5" />

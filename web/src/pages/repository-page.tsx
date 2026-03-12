@@ -196,7 +196,7 @@ function BreadcrumbPath({
       <button
         type="button"
         onClick={() => onNavigate({ kind: "tree", path: "" })}
-        className="rounded px-1 py-0.5 text-[#0969da] hover:bg-muted/50 hover:underline"
+        className="gh-link rounded px-1 py-0.5"
       >
         /
       </button>
@@ -211,7 +211,7 @@ function BreadcrumbPath({
                 path: buildPath(segments, index)
               })
             }
-            className="rounded px-1 py-0.5 text-[#0969da] hover:bg-muted/50 hover:underline"
+            className="gh-link rounded px-1 py-0.5"
           >
             {segment}
           </button>
@@ -251,20 +251,20 @@ function RepositoryContentsPanel({
             </button>
           ) : null}
         </header>
-        <div className="space-y-3 border-b bg-[#f6f8fa] px-4 py-3">
+        <div className="space-y-3 border-b border-border-subtle bg-surface-focus px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline" className="rounded-md bg-background font-mono text-[11px]">
+            <Badge variant="outline" className="bg-surface-base font-mono text-[11px]">
               {shortOid(contents.file.oid)}
             </Badge>
             <span>{formatBytes(contents.file.size)}</span>
             {contents.file.content ? <span>{fileLineCount(contents.file.content)} lines</span> : null}
             {contents.file.truncated ? (
-              <Badge variant="outline" className="rounded-md bg-amber-100/70 text-amber-700">
+              <Badge variant="outline" className="bg-surface-base">
                 已截断展示
               </Badge>
             ) : null}
             {contents.file.isBinary ? (
-              <Badge variant="outline" className="rounded-md bg-muted text-muted-foreground">
+              <Badge variant="outline" className="bg-surface-base">
                 Binary file
               </Badge>
             ) : null}
@@ -566,7 +566,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
     : null;
 
   return (
-    <div className="space-y-4">
+    <div className="app-page">
       <RepositoryHeader
         owner={owner}
         repo={repo}
@@ -583,8 +583,8 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
         />
       ) : null}
 
-      <section className="rounded-md border">
-        <div className="flex flex-col gap-3 border-b bg-[#f6f8fa] px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+      <section className="page-panel overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border-subtle bg-surface-focus px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Select
               value={selectedRefInSelect}
@@ -599,7 +599,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                 });
               }}
             >
-              <SelectTrigger className="h-8 w-[220px] bg-background text-xs">
+              <SelectTrigger className="h-9 w-[220px] bg-surface-base text-label-sm">
                 <SelectValue placeholder="选择分支" />
               </SelectTrigger>
               <SelectContent>
@@ -615,14 +615,14 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground">default: {detail.defaultBranch ?? "none"}</span>
+            <span className="text-body-micro text-text-secondary">default: {detail.defaultBranch ?? "none"}</span>
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 rounded-md border bg-background px-3 py-2">
+            <div className="min-w-0 rounded-[20px] border border-border-subtle bg-surface-base px-3 py-2 shadow-container">
               <div className="flex items-center gap-2">
-                <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                <code className="block truncate text-xs">{cloneUrl}</code>
+                <Link2 className="h-3.5 w-3.5 text-text-supporting" />
+                <code className="block truncate font-mono text-body-micro text-text-primary">{cloneUrl}</code>
               </div>
             </div>
             <CopyButton value={cloneUrl} />
@@ -630,12 +630,12 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
         </div>
 
         {latestCommit ? (
-          <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle px-4 py-3 text-body-micro text-text-secondary">
             <AuthorAvatar name={latestCommit.author.name} className="h-6 w-6 text-[10px]" />
             <button
               type="button"
               onClick={() => openCommitHistory(latestCommit.oid)}
-              className="font-medium text-[#0969da] hover:underline"
+              className="gh-link font-display text-heading-4"
             >
               {commitTitle(latestCommit.message)}
             </button>
@@ -646,7 +646,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
             <button
               type="button"
               onClick={() => openCommitHistory(latestCommit.oid)}
-              className="ml-auto font-mono text-[#0969da] hover:underline"
+              className="gh-link ml-auto font-mono text-body-micro"
             >
               {shortOid(latestCommit.oid)}
             </button>
@@ -675,7 +675,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                               onClick={() => {
                                 void openCommitDetail(commit.oid);
                               }}
-                              className="block max-w-full truncate text-left text-sm font-medium leading-5 text-[#0969da] hover:underline"
+                              className="gh-link block max-w-full truncate text-left font-display text-heading-4 leading-5"
                             >
                               {commitTitle(commit.message)}
                             </button>
@@ -688,7 +688,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                           <button
                             type="button"
                             onClick={() => openCommitFiles(commit.oid)}
-                            className="font-mono text-xs text-[#0969da] hover:underline"
+                            className="gh-link font-mono text-body-micro"
                           >
                             {shortOid(commit.oid)}
                           </button>

@@ -71,3 +71,12 @@ export default defineConfig([
   },
 ])
 ```
+
+## Reusable Common Components
+
+- `web/src/components/common/detail-section.tsx`
+  - 用于 Issue / PR / Actions 这类 detail 页面里的主区块或侧边区块。
+  - 统一 section 的圆角、间距、标题和说明文案结构，优先替代手写的 `rounded-md border p-4` 卡片。
+- `web/src/components/common/labeled-select-field.tsx`
+  - 用于带 label 的单选字段，封装当前项目的 Radix `Select` 组合。
+  - 优先替代 detail 页面里的原生 `<select>`，保持触发器、下拉层和字体风格一致。

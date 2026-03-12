@@ -158,26 +158,26 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
         </Alert>
       ) : null}
 
-      <Card className="rounded-xl border-slate-200/80 shadow-sm">
-        <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-sky-50/70">
+      <Card>
+        <CardHeader className="border-b border-border-subtle bg-surface-focus">
           <CardTitle>Actions 全局默认配置</CardTitle>
           <CardDescription>
             这里编辑的是全局默认值。仓库 Actions 页面可以在此基础上保存自己的覆盖配置。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <p className="text-label-xs text-text-supporting">
                 Global defaults
               </p>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-1 text-body-sm text-text-secondary">
                 updated: {formatDateTime(config.updated_at)}
               </p>
             </div>
             {editing ? (
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" className="rounded-lg" onClick={handleCancelEditing}>
+                <Button variant="outline" onClick={handleCancelEditing}>
                   Cancel
                 </Button>
                 <PendingButton
@@ -186,13 +186,12 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
                   pending={saving}
                   disabled={!hasConfigChanges}
                   pendingText="Saving config..."
-                  className="rounded-lg"
                 >
                   保存配置
                 </PendingButton>
               </div>
             ) : (
-              <Button className="rounded-lg" onClick={handleStartEditing}>
+              <Button onClick={handleStartEditing}>
                 Edit config
               </Button>
             )}
