@@ -149,42 +149,46 @@ export function HomePage({ user }: HomePageProps) {
 
         {loading ? (
           <Card className="m-4 border-none bg-transparent shadow-none">
-            <CardContent className="pt-2">
-            <InlineLoadingState
-              title="Loading repositories"
-              description="Fetching the latest public repositories."
-              lines={3}
-            />
-          </CardContent>
+            <CardContent className="p-5 pt-5 md:p-6 md:pt-6">
+              <InlineLoadingState
+                title="Loading repositories"
+                description="Fetching the latest public repositories."
+                lines={3}
+              />
+            </CardContent>
           </Card>
         ) : repositories.length === 0 ? (
           <div className="p-6 text-body-sm text-text-secondary">暂无公开仓库。</div>
         ) : (
           <div className="grid items-start gap-4 p-4 md:grid-cols-2">
             {repositories.map((repo) => (
-              <Card key={repo.id} className="transition-transform duration-200 ease-out hover:-translate-y-1">
-                <CardContent className="flex flex-col gap-5 p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 space-y-2.5">
-                      <Link
-                        to={`/repo/${repo.owner_username}/${repo.name}`}
-                        className="gh-link block font-display text-heading-3-16-semibold"
+              <Card
+                key={repo.id}
+                className="transition-transform duration-200 ease-out hover:-translate-y-0.5"
+              >
+                <div className="flex h-full flex-col">
+                  <div className="flex flex-1 flex-col gap-4 p-5 md:p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 space-y-2">
+                        <Link
+                          to={`/repo/${repo.owner_username}/${repo.name}`}
+                          className="gh-link block font-display text-heading-3-16-semibold"
+                        >
+                          {repo.owner_username}/{repo.name}
+                        </Link>
+                        <CardDescription className="pr-2">
+                          {repo.description?.trim() ? repo.description : "No description provided."}
+                        </CardDescription>
+                      </div>
+                      <Badge
+                        variant={repo.is_private === 1 ? "destructive" : "outline"}
+                        className="shrink-0 self-start"
                       >
-                        {repo.owner_username}/{repo.name}
-                      </Link>
-                      <CardDescription className="pr-2">
-                        {repo.description?.trim() ? repo.description : "No description provided."}
-                      </CardDescription>
+                        {repo.is_private === 1 ? "Private" : "Public"}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant={repo.is_private === 1 ? "destructive" : "outline"}
-                      className="shrink-0 self-start"
-                    >
-                      {repo.is_private === 1 ? "Private" : "Public"}
-                    </Badge>
                   </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-4 text-body-micro text-text-secondary">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-4 text-body-micro text-text-secondary md:px-6 md:py-5">
                     <span>Created on {formatDateTime(repo.created_at)}</span>
                     <Link
                       to={`/repo/${repo.owner_username}/${repo.name}`}
@@ -193,7 +197,7 @@ export function HomePage({ user }: HomePageProps) {
                       查看详情
                     </Link>
                   </div>
-                </CardContent>
+                </div>
               </Card>
             ))}
           </div>
