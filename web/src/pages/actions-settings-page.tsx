@@ -105,7 +105,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
       setConfig(nextConfig);
       resetDraft(nextConfig);
       setEditing(false);
-      setSuccess("配置已更新。新的 Actions run 会使用最新设置。");
+      setSuccess("配置已更新。新的 Actions session 会使用最新设置。");
     } catch (saveError) {
       setError(formatApiError(saveError));
     } finally {

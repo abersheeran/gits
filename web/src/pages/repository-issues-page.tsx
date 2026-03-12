@@ -235,7 +235,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                           {actionRun ? (
                             <Link
                               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                              to={`/repo/${owner}/${repo}/actions?runId=${actionRun.id}`}
+                              to={`/repo/${owner}/${repo}/actions?sessionId=${actionRun.id}`}
                             >
                               <ActionStatusBadge
                                 status={actionRun.status}

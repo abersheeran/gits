@@ -930,7 +930,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       });
       const nextProvenance = await getPullRequestProvenance(owner, repo, number).catch(() => null);
       setLatestAgentSession(response.session);
-      setLatestActionRun(response.run ?? response.session);
+      setLatestActionRun(response.session);
       if (nextProvenance) {
         setProvenanceDetail(nextProvenance.latestSession);
       }
@@ -947,7 +947,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const openReviewThreadCount = reviewThreads.filter((thread) => thread.status === "open").length;
   const resolvedReviewThreadCount = reviewThreads.length - openReviewThreadCount;
   const selectedRangeSupportsSuggestion = selectedReviewRange?.side === "head";
-  const latestValidationRun = provenanceDetail?.linkedRun ?? latestActionRun;
   const latestValidationSession = provenanceDetail?.session ?? latestAgentSession;
   const latestValidationState = latestValidationStatus(
     provenanceDetail,
@@ -989,12 +988,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         ? "Resolve merge conflicts before a human decides to merge."
         : openReviewThreadCount > 0
           ? "Resolve or explicitly acknowledge the remaining open review threads."
-          : reviewSummary.changeRequests > 0
-            ? "There are still change-request reviews that need a follow-up pass."
+            : reviewSummary.changeRequests > 0
+              ? "There are still change-request reviews that need a follow-up pass."
             : unresolvedClosingIssues.length > 0
               ? "Linked issues still have unfinished task states or acceptance criteria to review."
             : !validationPassed
-              ? "Run one more successful validation pass so the final reviewer can judge the latest code state."
+              ? "Complete one more successful validation session so the final reviewer can judge the latest code state."
               : "Validation, review threads, and mergeability all look aligned for a final human decision.";
 
   return (
@@ -1017,7 +1016,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           {latestActionRun ? (
             <Link
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-              to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}
+              to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}
             >
               <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
@@ -1119,18 +1118,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             }
             contentClassName="space-y-3"
           >
-            {latestValidationRun || latestValidationSession ? (
+            {latestValidationSession ? (
               <div className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                    <p className="text-sm font-medium">Latest validation run</p>
+                    <p className="text-sm font-medium">Latest validation session</p>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      {latestValidationRun ? (
+                      {latestValidationSession ? (
                         <>
                           <Badge variant="outline">
-                            {latestValidationRun.workflow_name || "Run"} #{latestValidationRun.run_number}
+                            {latestValidationSession.workflow_name || "Session"} #{latestValidationSession.session_number}
                           </Badge>
-                          <Badge variant="outline">agent: {latestValidationRun.agent_type}</Badge>
+                          <Badge variant="outline">agent: {latestValidationSession.agent_type}</Badge>
                         </>
                       ) : null}
                       {validationDurationMs !== null ? (
@@ -1141,20 +1140,18 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                       ) : null}
                     </div>
                     <div className="space-y-1 text-xs text-muted-foreground">
-                      <p>Updated: {formatDateTime(latestValidationRun?.updated_at ?? latestValidationSession?.updated_at ?? null)}</p>
+                      <p>Updated: {formatDateTime(latestValidationSession.updated_at)}</p>
                       <p>
                         Duration:{" "}
                         {formatDuration(
-                          latestValidationRun?.started_at ?? latestValidationSession?.started_at ?? null,
-                          latestValidationRun?.completed_at ?? latestValidationSession?.completed_at ?? null
+                          latestValidationSession.started_at ?? null,
+                          latestValidationSession.completed_at ?? null
                         )}
                       </p>
-                      {latestValidationRun ? (
-                        <p>
-                          {latestValidationRun.trigger_ref ?? "-"} · triggered by{" "}
-                          {latestValidationRun.triggered_by_username ?? "system"}
-                        </p>
-                      ) : null}
+                      <p>
+                        {latestValidationSession.trigger_ref ?? "-"} · triggered by{" "}
+                        {latestValidationSession.created_by_username ?? "system"}
+                      </p>
                     </div>
                   </div>
                   <div className="space-y-2 rounded-md border bg-muted/20 p-3">
@@ -1244,7 +1241,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   </>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    当前只拿到最新 run / session 状态，尚无更完整的 provenance 摘要。
+                    当前只拿到最新 session 状态，尚无更完整的 provenance 摘要。
                   </p>
                 )}
               </div>
@@ -1889,15 +1886,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                       查看 session
                     </Link>
                   </Button>
-                  {(provenanceDetail?.session ?? latestAgentSession)?.linked_run_id ? (
-                    <Button variant="outline" size="sm" asChild>
-                      <Link
-                        to={`/repo/${owner}/${repo}/actions?runId=${(provenanceDetail?.session ?? latestAgentSession)?.linked_run_id}`}
-                      >
-                        查看对应 run
-                      </Link>
-                    </Button>
-                  ) : null}
                 </div>
               </div>
             ) : (

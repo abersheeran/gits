@@ -589,7 +589,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
             });
       setLatestAgentSession(response.session);
-      setLatestActionRun(response.run ?? response.session);
+      setLatestActionRun(response.session);
       if (response.issue) {
         setIssue(response.issue);
       }
@@ -624,7 +624,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           {latestActionRun ? (
             <Link
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-              to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}
+              to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}
             >
               <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
@@ -694,7 +694,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                       {latestRunByCommentId[comment.id] ? (
                         <Link
                           className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                          to={`/repo/${owner}/${repo}/actions?runId=${latestRunByCommentId[comment.id].id}`}
+                          to={`/repo/${owner}/${repo}/actions?sessionId=${latestRunByCommentId[comment.id].id}`}
                         >
                           <ActionStatusBadge
                             status={latestRunByCommentId[comment.id].status}
@@ -802,17 +802,17 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge status={latestActionRun.status} />
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={`/repo/${owner}/${repo}/actions?runId=${latestActionRun.id}`}>
-                      查看最新 issue run
+                    <Link to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}>
+                      查看最新 issue session
                     </Link>
                   </Button>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">当前 Issue 还没有交付 run。</p>
+                <p className="text-xs text-muted-foreground">当前 Issue 还没有交付 session。</p>
               )}
               <p className="text-xs text-muted-foreground">
                 手动修改 task status 仅作为临时覆盖；后续 assign/resume、PR review、thread
-                处理、merge 与 action run 完成都会按主流程自动回写。
+                处理、merge 与 session 完成都会按主流程自动回写。
               </p>
             </div>
             {canUpdate ? (
@@ -840,7 +840,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
           <DetailSection
             title="Linked pull requests"
-            description="直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent、run 和验证摘要。"
+            description="直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent session 和验证摘要。"
           >
             {linkedPullRequests.length === 0 ? (
               <p className="text-body-sm text-text-secondary">
@@ -851,7 +851,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                 {linkedPullRequests.map((pullRequest) => {
                   const pullRequestProvenance =
                     latestPullRequestProvenanceByNumber[pullRequest.number] ?? null;
-                  const pullRequestRun = pullRequestProvenance?.linkedRun ?? null;
                   const pullRequestSession = pullRequestProvenance?.session ?? null;
                   const pullRequestValidationStatus =
                     latestValidationStatus(pullRequestProvenance);
@@ -899,17 +898,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                         ) : (
                           <span className="text-xs text-muted-foreground">暂无 PR session</span>
                         )}
-                        {pullRequestRun ? (
-                          <Button variant="outline" size="sm" asChild>
-                            <Link
-                              to={`/repo/${owner}/${repo}/actions?runId=${pullRequestRun.id}`}
-                            >
-                              Run · {pullRequestRun.status}
-                            </Link>
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">暂无 PR run</span>
-                        )}
                       </div>
                       {pullRequestProvenance ? (
                         <div className="space-y-3 rounded-md border bg-background/70 p-3">
@@ -945,17 +933,13 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                           <div className="space-y-1 text-xs text-muted-foreground">
                             <p>
                               Updated:{" "}
-                              {formatDateTime(
-                                pullRequestRun?.updated_at ?? pullRequestSession?.updated_at ?? null
-                              )}
+                              {formatDateTime(pullRequestSession?.updated_at ?? null)}
                             </p>
                             <p>
                               Duration:{" "}
                               {formatDuration(
-                                pullRequestRun?.started_at ?? pullRequestSession?.started_at ?? null,
-                                pullRequestRun?.completed_at ??
-                                  pullRequestSession?.completed_at ??
-                                  null
+                                pullRequestSession?.started_at ?? null,
+                                pullRequestSession?.completed_at ?? null
                               )}
                             </p>
                           </div>
@@ -1036,15 +1020,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                       查看 session
                     </Link>
                   </Button>
-                  {latestAgentSession.linked_run_id ? (
-                    <Button variant="outline" size="sm" asChild>
-                      <Link
-                        to={`/repo/${owner}/${repo}/actions?runId=${latestAgentSession.linked_run_id}`}
-                      >
-                        查看对应 run
-                      </Link>
-                    </Button>
-                  ) : null}
                 </div>
               </div>
             ) : (

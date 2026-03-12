@@ -39,6 +39,7 @@ PR 是当前产品里的交付中心和评审中心。
 - closing issues 完成度摘要
 - `taskFlow` / handoff 摘要
 - 最新 session provenance 摘要
+- PR 列表与详情头部的状态徽标直接锚定到对应 session，Actions 跳转不再暴露独立 run 参数
 - PR 详情只在存在 pending session 时继续轮询 provenance 与详情，静止状态下不维持后台刷新
 
 ### 2.3 Review
@@ -105,6 +106,7 @@ PR 页面已经直接消费 session 的验证信息：
   - `partial`
   - scoped multi-step checks
 - highlighted artifacts 会按失败/通过上下文与检查命中结果做优先级排序
+- validation summary 与 Agent handoff 只围绕最新 session 展示，不再额外分出 linked run 入口
 
 ## 5. 当前关键流程
 

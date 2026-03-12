@@ -94,6 +94,7 @@ const GITS_PLATFORM_MCP_AUTH_TOKEN_ENV_KEYS = [
 ] as const;
 const MAX_CAPTURED_OUTPUT_CHARS = 256_000;
 const ABORT_KILL_TIMEOUT_MS = 5_000;
+const RUN_STREAM_KEEPALIVE_INTERVAL_MS = 5_000;
 
 function normalizeHomePath(homePath: string | undefined): string | null {
   const trimmed = homePath?.trim() ?? "";
@@ -153,6 +154,17 @@ function writeRunStreamEvent(response: http.ServerResponse, payload: RunStreamEv
   }
   try {
     response.write(`${JSON.stringify(payload)}\n`);
+  } catch {
+    // The caller will observe the closed response via the socket close event.
+  }
+}
+
+function writeRunStreamKeepalive(response: http.ServerResponse): void {
+  if (response.destroyed || response.writableEnded) {
+    return;
+  }
+  try {
+    response.write("\n");
   } catch {
     // The caller will observe the closed response via the socket close event.
   }
@@ -893,10 +905,18 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
   const startedAt = Date.now();
   let workspaceRoot: string | null = null;
   const abortController = new AbortController();
+  let keepaliveTimer: NodeJS.Timeout | null = null;
   const abortExecution = () => {
     abortController.abort();
   };
-  request.once("close", abortExecution);
+  const clearKeepalive = () => {
+    if (!keepaliveTimer) {
+      return;
+    }
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  };
+  request.once("aborted", abortExecution);
   response.once("close", abortExecution);
   try {
     const prepared = await prepareWorkspace(runRequest);
@@ -913,6 +933,10 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
     response.setHeader("content-type", "application/x-ndjson");
     response.setHeader("cache-control", "no-cache");
     response.setHeader("x-content-type-options", "nosniff");
+    keepaliveTimer = setInterval(() => {
+      writeRunStreamKeepalive(response);
+    }, RUN_STREAM_KEEPALIVE_INTERVAL_MS);
+    keepaliveTimer.unref?.();
 
     const executed = await runAgentPrompt(
       agentType,
@@ -969,7 +993,8 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
       writeJson(response, 500, result);
     }
   } finally {
-    request.off("close", abortExecution);
+    clearKeepalive();
+    request.off("aborted", abortExecution);
     response.off("close", abortExecution);
     if (workspaceRoot) {
       await rm(workspaceRoot, { recursive: true, force: true }).catch(() => undefined);

@@ -65,7 +65,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
   - 注入 agent 配置文件
   - 为 actions runtime 自动接入平台 MCP endpoint
   - 运行 agent 命令
-  - 流式回传 stdout/stderr/result
+  - 流式回传 stdout/stderr/result，并在静默执行阶段发送 keepalive，避免平台把长时间无输出误判为断流
 
 ### 2.4 记录层
 
@@ -102,6 +102,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
   - execution logs
   - timeline
   - prompt（默认折叠）
+- Actions 页的筛选、日志浏览、rerun 与来自 Issue / PR 的跳转统一围绕 `sessionId`
 
 ### 3.2 运行时输入
 
@@ -164,10 +165,11 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 ### 4.3 观测与回看
 
 1. Actions 页以 session 为主视图，支持筛选、查看日志、rerun。
-2. 未展开日志的 pending session 走后台轮询；已展开且仍在运行的 session 直接建立日志流，流关闭或报错后再回退后台 refresh。
-3. 当流式日志里的本地 session 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
-4. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
-5. 全文日志与全文 artifact 按需读取对象存储。
+2. Issue / PR 跳到 Actions 页时，前端使用 `sessionId` 锚定对应任务轮次，而不是单独的 run 入口。
+3. 未展开日志的 pending session 走后台轮询；已展开且仍在运行的 session 直接建立日志流，流关闭或报错后再回退后台 refresh。
+4. 当流式日志里的本地 session 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
+5. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
+6. 全文日志与全文 artifact 按需读取对象存储。
 
 ## 5. 当前接口
 

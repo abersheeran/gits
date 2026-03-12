@@ -335,6 +335,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const repo = params.repo ?? "";
   const selectedRunId = searchParams.get("runId")?.trim() || null;
   const selectedSessionId = searchParams.get("sessionId")?.trim() || null;
+  const selectedExecutionId = selectedSessionId ?? selectedRunId;
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [runs, setRuns] = useState<ActionRunRecord[]>([]);
@@ -428,9 +429,16 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             // Ignore missing run and keep default list.
           }
         }
-        if (selectedSessionId && !nextAgentSessions.some((session) => session.id === selectedSessionId)) {
+        if (
+          selectedExecutionId &&
+          !nextAgentSessions.some((session) => session.id === selectedExecutionId)
+        ) {
           try {
-            const selectedSession = await getRepositoryAgentSession(owner, repo, selectedSessionId);
+            const selectedSession = await getRepositoryAgentSession(
+              owner,
+              repo,
+              selectedExecutionId
+            );
             mergedSessions = [selectedSession, ...nextAgentSessions]
               .filter(
                 (session, index, array) =>
@@ -457,7 +465,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         }
       }
     },
-    [owner, repo, selectedRunId, selectedSessionId]
+    [owner, repo, selectedExecutionId, selectedRunId]
   );
 
   const refreshDataInBackground = useCallback(() => {
@@ -617,8 +625,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     [agentSessions]
   );
   const selectedAgentSession = useMemo(
-    () => agentSessions.find((session) => session.id === selectedSessionId) ?? null,
-    [agentSessions, selectedSessionId]
+    () => agentSessions.find((session) => session.id === selectedExecutionId) ?? null,
+    [agentSessions, selectedExecutionId]
   );
   const visibleAgentSessions = useMemo(() => {
     if (!selectedAgentSession) {
@@ -643,33 +651,33 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   }, [hasPendingAgentSessions, hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
 
   useEffect(() => {
-    if (!selectedRunId) {
+    if (!selectedExecutionId) {
       return;
     }
     setExpandedRunIds((current) =>
-      current.includes(selectedRunId) ? current : [...current, selectedRunId]
+      current.includes(selectedExecutionId) ? current : [...current, selectedExecutionId]
     );
     const timer = window.setTimeout(() => {
-      const element = document.getElementById(`action-run-${selectedRunId}`);
+      const element = document.getElementById(`action-run-${selectedExecutionId}`);
       element?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 80);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedRunId, runs.length]);
+  }, [selectedExecutionId, runs.length]);
 
   useEffect(() => {
-    if (!selectedSessionId) {
+    if (!selectedExecutionId) {
       return;
     }
     const timer = window.setTimeout(() => {
-      const element = document.getElementById(`agent-session-${selectedSessionId}`);
+      const element = document.getElementById(`agent-session-${selectedExecutionId}`);
       element?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 80);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedSessionId, agentSessions.length]);
+  }, [agentSessions.length, selectedExecutionId]);
 
   useEffect(() => {
     const liveRunIds = liveExpandedRunIdsKey ? liveExpandedRunIdsKey.split("|") : [];
@@ -822,7 +830,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setRunnerConfig(nextConfig);
       resetRunnerConfigDraft(nextConfig);
       setRunnerConfigEditing(false);
-      setRunnerConfigSuccess("容器配置已保存。新的 Actions run 会使用当前仓库配置。");
+      setRunnerConfigSuccess("容器配置已保存。新的 Actions session 会使用当前仓库配置。");
     } catch (saveError) {
       if (mountedRef.current) {
         setError(formatApiError(saveError));
@@ -923,7 +931,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     return (
       <PageLoadingState
         title="Loading actions"
-        description={`Fetching workflows, runs, and config for ${owner}/${repo}.`}
+        description={`Fetching workflows, sessions, and config for ${owner}/${repo}.`}
       />
     );
   }
@@ -955,7 +963,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       {loading ? (
         <InlineLoadingState
           title="Refreshing actions"
-          description="Updating workflow runs and repository-level action config."
+          description="Updating workflow sessions and repository-level action config."
         />
       ) : null}
 
@@ -1182,7 +1190,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                 <div className="space-y-1">
                   <h2 className="text-sm font-semibold">Agent sessions</h2>
                   <p className="text-xs text-muted-foreground">
-                    最近的任务级 session，会映射到具体 run、来源对象和目标分支。
+                    最近的任务轮次、来源对象和目标分支都会先收敛到这里。
                   </p>
                 </div>
                 <Badge variant="outline">{sessionSummary.total} sessions</Badge>
@@ -1277,7 +1285,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                         id={`agent-session-${session.id}`}
                         key={session.id}
                         className={`rounded-[20px] border bg-muted/20 p-3 ${
-                          selectedSessionId === session.id ? "border-fill-tertiary bg-surface-focus" : ""
+                          selectedExecutionId === session.id ? "border-fill-tertiary bg-surface-focus" : ""
                         }`}
                       >
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1315,9 +1323,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               )}
             </section>
 
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold">Session log explorer</h2>
+                <p className="text-xs text-muted-foreground">
+                  按 workflow、ref 和 actor 筛选具体交付轮次，并展开查看 prompt 与日志。
+                </p>
+              </div>
+              <Badge variant="outline">{runSummary.total} matching sessions</Badge>
+            </div>
+
             <div className="mb-4 grid gap-3 md:grid-cols-4">
               <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
-                <p className="text-xs text-muted-foreground">Visible runs</p>
+                <p className="text-xs text-muted-foreground">Visible sessions</p>
                 <p className="text-2xl font-semibold">{runSummary.total}</p>
               </div>
               <div className="rounded-[20px] border border-border-subtle bg-surface-base p-3">
@@ -1392,14 +1410,14 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             </div>
 
             {filteredRuns.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No runs yet.</p>
+              <p className="text-sm text-muted-foreground">No execution sessions yet.</p>
             ) : (
               <div className="space-y-4">
                 {groupedRuns.map(([workflowName, workflowRuns]) => (
                   <section key={workflowName} className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-sm font-semibold">{workflowName}</h3>
-                      <Badge variant="outline">{workflowRuns.length} runs</Badge>
+                      <Badge variant="outline">{workflowRuns.length} sessions</Badge>
                     </div>
                     <ul className="space-y-2">
                       {workflowRuns.map((run) => {
@@ -1412,14 +1430,14 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                             id={`action-run-${run.id}`}
                             key={run.id}
                             className={`space-y-3 rounded-[20px] border p-3 ${
-                              selectedRunId === run.id ? "border-fill-tertiary bg-surface-focus" : ""
+                              selectedExecutionId === run.id ? "border-fill-tertiary bg-surface-focus" : ""
                             }`}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0 space-y-2">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="truncate text-sm font-medium">
-                                    #{run.run_number} {run.workflow_name}
+                                    Session #{run.session_number} {run.workflow_name ?? run.origin}
                                   </p>
                                   <ActionStatusBadge status={run.status} />
                                   <Badge variant="outline">{run.agent_type}</Badge>
@@ -1452,16 +1470,16 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                     variant="outline"
                                     pending={rerunningRunId === run.id}
                                     disabled={rerunningRunId !== null && rerunningRunId !== run.id}
-                                    pendingText="Rerunning..."
+                                    pendingText="Rerunning session..."
                                     onClick={() => {
                                       void handleRerunRun(run);
                                     }}
                                   >
-                                    Rerun
+                                    Rerun session
                                   </PendingButton>
                                 ) : null}
                                 <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
-                                  {expanded ? "Hide details" : "View details"}
+                                  {expanded ? "Hide logs" : "View logs"}
                                 </Button>
                               </div>
                             </div>
@@ -1487,7 +1505,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                   <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
                                   <MonacoTextViewer
                                     value={run.prompt || "(empty prompt)"}
-                                    path={`actions/run-${run.id}.prompt.txt`}
+                                    path={`actions/session-${run.id}.prompt.txt`}
                                     scope="action-run-prompt"
                                     minHeight={120}
                                     maxHeight={220}
@@ -1497,7 +1515,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 <div className="rounded-md border bg-muted/20 p-3">
                                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                     <div>
-                                      <p className="text-xs font-medium text-foreground">Execution logs</p>
+                                      <p className="text-xs font-medium text-foreground">Session logs</p>
                                       <p className="text-[11px] text-muted-foreground">
                                         {showingExcerpt
                                           ? "Showing excerpt from D1 summary. Load full logs from object storage when needed."
@@ -1521,7 +1539,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                   </div>
                                   <MonacoTextViewer
                                     value={displayedLogs || "(empty logs)"}
-                                    path={`actions/run-${run.id}.log`}
+                                    path={`actions/session-${run.id}.log`}
                                     scope="action-run-logs"
                                     minHeight={180}
                                     maxHeight={520}

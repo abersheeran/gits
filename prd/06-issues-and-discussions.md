@@ -45,6 +45,8 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 - Issue 详情会展示关联 PR。
 - 每个关联 PR 会展示最近 session 进展。
 - Issue 页会展示关联 PR 的 validation summary 与 highlighted artifacts 摘要。
+- Issue 列表、详情头部和评论区的状态徽标都直接锚定到对应 session，而不是旧的 run 入口。
+- Linked pull request 卡片只展示最新 session 与验证摘要，不再额外暴露独立 run 按钮。
 - Issue 页不再铺开全文日志，全文入口统一回到 Actions 页或 Session detail。
 - Issue 详情只在存在 pending issue session、comment session 或关联 PR validation 时继续轮询刷新，避免无意义的前端重复请求。
 
