@@ -103,6 +103,8 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
   - timeline
   - prompt（默认折叠）
 - Actions 页的筛选、日志浏览、rerun 与来自 Issue / PR 的跳转统一围绕 `sessionId`
+- Actions 页查看态改为 session-first workspace：左侧展示最近 session 导航，右侧收敛当前 session 的摘要、prompt、日志与 rerun
+- Actions 页长列表改为渐进展开，避免把 session、workflow 和日志内容一次性平铺在同一屏
 
 ### 3.2 运行时输入
 

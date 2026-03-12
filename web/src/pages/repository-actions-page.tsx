@@ -1,32 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
-import { ActionStatusBadge } from "@/components/repository/action-status-badge";
-import { CodeConfigPanel } from "@/components/repository/code-config-panel";
+import { RepositoryActionsConfigPanel } from "@/components/repository/repository-actions-config-panel";
+import { RepositoryActionsLogView } from "@/components/repository/repository-actions-log-view";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
-import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
-import { PendingButton } from "@/components/ui/pending-button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import {
   cancelRepositoryAgentSession,
-  getActionRunLogStreamPath,
-  getActionRunLogs,
   formatApiError,
   getActionRun,
+  getActionRunLogStreamPath,
+  getActionRunLogs,
   getRepositoryAgentSession,
   getRepositoryActionsConfig,
   getRepositoryDetail,
@@ -42,290 +25,37 @@ import {
   type RepositoryActionsConfig,
   type RepositoryDetailResponse
 } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import {
+  applyRunStreamEvent,
+  insertOrReplaceRun,
+  insertOrReplaceSession,
+  isPendingAgentSession,
+  isPendingRun,
+  mergeRuns,
+  parseActionRunLogStreamEvent,
+  runGroupLabel
+} from "@/lib/action-run-utils";
+import { useParams, useSearchParams } from "react-router-dom";
 
 type RepositoryActionsPageProps = {
   user: AuthUser | null;
 };
 
-const ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS: Array<{
-  value: ActionContainerInstanceType;
-  label: string;
-  spec: string;
-}> = [
-  { value: "lite", label: "lite", spec: "1/16 vCPU · 256 MiB · 2 GB" },
-  { value: "basic", label: "basic", spec: "1/4 vCPU · 1 GiB · 4 GB" },
-  { value: "standard-1", label: "standard-1", spec: "1/2 vCPU · 4 GiB · 8 GB" },
-  { value: "standard-2", label: "standard-2", spec: "1 vCPU · 6 GiB · 12 GB" },
-  { value: "standard-3", label: "standard-3", spec: "2 vCPU · 8 GiB · 16 GB" },
-  { value: "standard-4", label: "standard-4", spec: "4 vCPU · 12 GiB · 20 GB" }
-];
+const INITIAL_SESSION_LIMIT = 8;
+const SESSION_LIMIT_STEP = 8;
+const INITIAL_RUN_LIMIT = 10;
+const RUN_LIMIT_STEP = 10;
 
-function isPendingRun(run: ActionRunRecord): boolean {
-  return run.status === "queued" || run.status === "running";
-}
-
-function isPendingAgentSession(session: AgentSessionRecord): boolean {
-  return session.status === "queued" || session.status === "running";
-}
-
-function formatDuration(startedAt: number | null, completedAt: number | null): string {
-  if (!startedAt) {
-    return "-";
+function ensureSelectedItemVisible(
+  selectedId: string | null,
+  items: Array<{ id: string }>,
+  currentLimit: number
+): number {
+  const selectedIndex = selectedId ? items.findIndex((item) => item.id === selectedId) : -1;
+  if (selectedIndex === -1) {
+    return Math.min(currentLimit, items.length);
   }
-  const end = completedAt ?? Date.now();
-  const totalSeconds = Math.max(Math.floor((end - startedAt) / 1000), 0);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${seconds}s`;
-}
-
-function runSourceLabel(run: ActionRunRecord): string {
-  if (run.trigger_source_type && run.trigger_source_number) {
-    return `${run.trigger_source_type} #${run.trigger_source_number}`;
-  }
-  if (run.source_number !== null) {
-    return `${run.source_type} #${run.source_number}`;
-  }
-  return run.workflow_name ?? run.origin;
-}
-
-function runGroupLabel(run: ActionRunRecord): string {
-  return run.workflow_name ?? run.origin ?? "session";
-}
-
-function sessionSourceLabel(session: AgentSessionRecord): string {
-  if (session.source_number !== null) {
-    return `${session.source_type} #${session.source_number}`;
-  }
-  return session.source_type;
-}
-
-function canCancelAgentSession(session: AgentSessionRecord): boolean {
-  return session.status === "queued";
-}
-
-function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
-  return (
-    value === "queued" ||
-    value === "running" ||
-    value === "success" ||
-    value === "failed" ||
-    value === "cancelled"
-  );
-}
-
-function insertOrReplaceRun(currentRuns: ActionRunRecord[], nextRun: ActionRunRecord): ActionRunRecord[] {
-  const existingIndex = currentRuns.findIndex((run) => run.id === nextRun.id);
-  if (existingIndex === -1) {
-    return [...currentRuns, nextRun].sort(
-      (left, right) =>
-        (right.run_number ?? right.session_number) - (left.run_number ?? left.session_number)
-    );
-  }
-
-  return currentRuns.map((run) => (run.id === nextRun.id ? nextRun : run));
-}
-
-function insertOrReplaceSession(
-  currentSessions: AgentSessionRecord[],
-  nextSession: AgentSessionRecord
-): AgentSessionRecord[] {
-  const existingIndex = currentSessions.findIndex((session) => session.id === nextSession.id);
-  if (existingIndex === -1) {
-    return [...currentSessions, nextSession].sort((left, right) => right.created_at - left.created_at);
-  }
-
-  return currentSessions.map((session) => (session.id === nextSession.id ? nextSession : session));
-}
-
-function shouldPreferCurrentRun(currentRun: ActionRunRecord, nextRun: ActionRunRecord): boolean {
-  if (currentRun.updated_at !== nextRun.updated_at) {
-    return currentRun.updated_at > nextRun.updated_at;
-  }
-  if (currentRun.status !== nextRun.status) {
-    return false;
-  }
-  return currentRun.logs.length > nextRun.logs.length;
-}
-
-function mergeRuns(currentRuns: ActionRunRecord[], nextRuns: ActionRunRecord[]): ActionRunRecord[] {
-  const mergedRuns = new Map(nextRuns.map((run) => [run.id, run] as const));
-
-  for (const currentRun of currentRuns) {
-    const nextRun = mergedRuns.get(currentRun.id);
-    if (!nextRun) {
-      mergedRuns.set(currentRun.id, currentRun);
-      continue;
-    }
-    if (shouldPreferCurrentRun(currentRun, nextRun)) {
-      mergedRuns.set(currentRun.id, currentRun);
-    }
-  }
-
-  return Array.from(mergedRuns.values()).sort(
-    (left, right) =>
-      (right.run_number ?? right.session_number) - (left.run_number ?? left.session_number)
-  );
-}
-
-function isActionRunRecord(value: unknown): value is ActionRunRecord {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const run = value as Partial<ActionRunRecord>;
-  return (
-    typeof run.id === "string" &&
-    typeof run.run_number === "number" &&
-    typeof run.status === "string" &&
-    typeof run.logs === "string" &&
-    typeof run.updated_at === "number"
-  );
-}
-
-function parseActionRunLogStreamEvent(
-  eventName: ActionRunLogStreamEvent["event"],
-  rawData: string
-): ActionRunLogStreamEvent | null {
-  type StreamStatusData = {
-    runId?: unknown;
-    status?: unknown;
-    exitCode?: unknown;
-    completedAt?: unknown;
-    updatedAt?: unknown;
-  };
-
-  const parsed = JSON.parse(rawData) as unknown;
-  if (!parsed || typeof parsed !== "object") {
-    return null;
-  }
-
-  if (eventName === "snapshot" || eventName === "replace") {
-    const data = parsed as { run?: unknown };
-    return isActionRunRecord(data.run)
-      ? {
-          event: eventName,
-          data: {
-            run: data.run
-          }
-        }
-      : null;
-  }
-
-  if (eventName === "append") {
-    const data = parsed as StreamStatusData & { chunk?: unknown };
-    return typeof data.runId === "string" &&
-      typeof data.chunk === "string" &&
-      isActionRunStatus(data.status) &&
-      (typeof data.exitCode === "number" || data.exitCode === null) &&
-      (typeof data.completedAt === "number" || data.completedAt === null) &&
-      typeof data.updatedAt === "number"
-      ? {
-          event: "append",
-          data: {
-            runId: data.runId,
-            chunk: data.chunk,
-            status: data.status,
-            exitCode: data.exitCode,
-            completedAt: data.completedAt,
-            updatedAt: data.updatedAt
-          }
-        }
-      : null;
-  }
-
-  if (eventName === "status" || eventName === "done") {
-    const data = parsed as StreamStatusData;
-    return typeof data.runId === "string" &&
-      isActionRunStatus(data.status) &&
-      (typeof data.exitCode === "number" || data.exitCode === null) &&
-      (typeof data.completedAt === "number" || data.completedAt === null) &&
-      typeof data.updatedAt === "number"
-      ? {
-          event: eventName,
-          data: {
-            runId: data.runId,
-            status: data.status,
-            exitCode: data.exitCode,
-            completedAt: data.completedAt,
-            updatedAt: data.updatedAt
-          }
-        }
-      : null;
-  }
-
-  if (eventName === "heartbeat") {
-    const data = parsed as { timestamp?: unknown };
-    return typeof data.timestamp === "number"
-      ? {
-          event: "heartbeat",
-          data: {
-            timestamp: data.timestamp
-          }
-        }
-      : null;
-  }
-
-  if (eventName === "stream-error") {
-    const data = parsed as { message?: unknown };
-    return typeof data.message === "string"
-      ? {
-          event: "stream-error",
-          data: {
-            message: data.message
-          }
-        }
-      : null;
-  }
-
-  return null;
-}
-
-function applyRunStreamEvent(
-  currentRuns: ActionRunRecord[],
-  streamEvent: ActionRunLogStreamEvent
-): ActionRunRecord[] {
-  if (streamEvent.event === "heartbeat" || streamEvent.event === "stream-error") {
-    return currentRuns;
-  }
-
-  if (streamEvent.event === "snapshot" || streamEvent.event === "replace") {
-    return insertOrReplaceRun(currentRuns, streamEvent.data.run);
-  }
-
-  if (streamEvent.event === "append") {
-    return currentRuns.map((run) =>
-      run.id === streamEvent.data.runId
-        ? {
-            ...run,
-            logs: `${run.logs ?? ""}${streamEvent.data.chunk}`,
-            status: streamEvent.data.status,
-            exit_code: streamEvent.data.exitCode,
-            completed_at: streamEvent.data.completedAt,
-            updated_at: streamEvent.data.updatedAt
-          }
-        : run
-    );
-  }
-
-  if (streamEvent.event === "status" || streamEvent.event === "done") {
-    return currentRuns.map((run) =>
-      run.id === streamEvent.data.runId
-        ? {
-            ...run,
-            status: streamEvent.data.status,
-            exit_code: streamEvent.data.exitCode,
-            completed_at: streamEvent.data.completedAt,
-            updated_at: streamEvent.data.updatedAt
-          }
-        : run
-    );
-  }
-
-  return currentRuns;
+  return Math.min(Math.max(currentLimit, selectedIndex + 1), items.length);
 }
 
 export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
@@ -348,7 +78,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     sessionId: string;
     action: "cancel";
   } | null>(null);
-  const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
   const [fullRunLogsById, setFullRunLogsById] = useState<Record<string, string>>({});
   const [loadingRunLogsById, setLoadingRunLogsById] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
@@ -362,37 +91,24 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
   const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
   const [runnerConfigEditing, setRunnerConfigEditing] = useState(false);
-  const [runnerInstanceType, setRunnerInstanceType] = useState<ActionContainerInstanceType>("lite");
+  const [runnerInstanceType, setRunnerInstanceType] =
+    useState<ActionContainerInstanceType>("lite");
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
   const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
+  const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_SESSION_LIMIT);
+  const [visibleRunLimit, setVisibleRunLimit] = useState(INITIAL_RUN_LIMIT);
+
   const backgroundRefreshInFlightRef = useRef(false);
   const mountedRef = useRef(true);
   const loadDataRef = useRef<((options?: { background?: boolean }) => Promise<void>) | null>(null);
   const runsRef = useRef<ActionRunRecord[]>([]);
 
   const canManageActions = Boolean(user) && Boolean(detail?.permissions.canManageActions);
-  const configEditorStyle = {
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
-  } as const;
 
   function resetRunnerConfigDraft(nextConfig: RepositoryActionsConfig) {
     setRunnerInstanceType(nextConfig.instanceType);
     setCodexConfigFileContent(nextConfig.codexConfigFileContent);
     setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
-  }
-
-  function handleStartRunnerConfigEditing() {
-    setRunnerConfigEditing(true);
-    setError(null);
-  }
-
-  function handleCancelRunnerConfigEditing() {
-    if (runnerConfig) {
-      resetRunnerConfigDraft(runnerConfig);
-    }
-    setRunnerConfigEditing(false);
-    setError(null);
   }
 
   const loadData = useCallback(
@@ -411,8 +127,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           listActionRuns(owner, repo, { limit: 50 }),
           listRepositoryAgentSessions(owner, repo, { limit: 30 })
         ]);
+
         let mergedRuns = nextRuns;
         let mergedSessions = nextAgentSessions;
+
         if (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId)) {
           try {
             const selectedRun = await getActionRun(owner, repo, selectedRunId);
@@ -429,6 +147,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             // Ignore missing run and keep default list.
           }
         }
+
         if (
           selectedExecutionId &&
           !nextAgentSessions.some((session) => session.id === selectedExecutionId)
@@ -449,9 +168,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             // Ignore missing session and keep default list.
           }
         }
+
         if (!mountedRef.current) {
           return;
         }
+
         setDetail(nextDetail);
         setRuns((currentRuns) => mergeRuns(currentRuns, mergedRuns));
         setAgentSessions(mergedSessions);
@@ -534,20 +255,32 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     void loadRunnerConfig();
   }, [canManageActions, loadRunnerConfig]);
 
-  const liveExpandedRunIds = useMemo(
-    () =>
-      runs
-        .filter((run) => expandedRunIds.includes(run.id) && isPendingRun(run))
-        .map((run) => run.id)
-        .sort(),
-    [expandedRunIds, runs]
+  const focusedExecutionId = useMemo(
+    () => selectedExecutionId ?? agentSessions[0]?.id ?? runs[0]?.id ?? null,
+    [agentSessions, runs, selectedExecutionId]
   );
-  const liveExpandedRunIdsKey = liveExpandedRunIds.join("|");
+
+  const selectedRun = useMemo(
+    () => runs.find((run) => run.id === focusedExecutionId) ?? null,
+    [focusedExecutionId, runs]
+  );
+  const selectedAgentSession = useMemo(
+    () =>
+      agentSessions.find((session) => session.id === focusedExecutionId) ??
+      (selectedRun ? selectedRun : null),
+    [agentSessions, focusedExecutionId, selectedRun]
+  );
+
+  const liveRunId = selectedRun && isPendingRun(selectedRun) ? selectedRun.id : null;
   const hasPendingRunsWithoutLiveStream = useMemo(
-    () =>
-      runs.some((run) => isPendingRun(run) && !liveExpandedRunIds.includes(run.id)),
-    [liveExpandedRunIds, runs]
+    () => runs.some((run) => isPendingRun(run) && run.id !== liveRunId),
+    [liveRunId, runs]
   );
+  const hasPendingAgentSessions = useMemo(
+    () => agentSessions.some((session) => isPendingAgentSession(session)),
+    [agentSessions]
+  );
+
   const statusOptions = useMemo(
     () => ["all", ...Array.from(new Set(runs.map((run) => run.status))).sort()],
     [runs]
@@ -557,15 +290,15 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     [runs]
   );
   const refOptions = useMemo(
-    () =>
-      [
-        "all",
-        ...Array.from(
-          new Set(runs.map((run) => run.trigger_ref).filter((value): value is string => Boolean(value)))
-        ).sort()
-      ],
+    () => [
+      "all",
+      ...Array.from(
+        new Set(runs.map((run) => run.trigger_ref).filter((value): value is string => Boolean(value)))
+      ).sort()
+    ],
     [runs]
   );
+
   const filteredRuns = useMemo(
     () =>
       runs.filter((run) => {
@@ -580,7 +313,9 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         }
         if (
           actorFilter.trim() &&
-          !(run.triggered_by_username ?? "").toLowerCase().includes(actorFilter.trim().toLowerCase())
+          !(run.triggered_by_username ?? "")
+            .toLowerCase()
+            .includes(actorFilter.trim().toLowerCase())
         ) {
           return false;
         }
@@ -588,26 +323,16 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       }),
     [actorFilter, eventFilter, refFilter, runs, statusFilter]
   );
-  const groupedRuns = useMemo(() => {
-    const groups = new Map<string, ActionRunRecord[]>();
-    for (const run of filteredRuns) {
-      const groupLabel = runGroupLabel(run);
-      const current = groups.get(groupLabel) ?? [];
-      current.push(run);
-      groups.set(groupLabel, current);
-    }
-    return Array.from(groups.entries()).sort((left, right) => {
-      const latestLeft = left[1][0]?.run_number ?? 0;
-      const latestRight = right[1][0]?.run_number ?? 0;
-      return latestRight - latestLeft;
-    });
-  }, [filteredRuns]);
+
   const runSummary = useMemo(
     () => ({
       total: filteredRuns.length,
-      running: filteredRuns.filter((run) => run.status === "running" || run.status === "queued").length,
+      running: filteredRuns.filter((run) => run.status === "running" || run.status === "queued")
+        .length,
       success: filteredRuns.filter((run) => run.status === "success").length,
-      failed: filteredRuns.filter((run) => run.status === "failed").length
+      failed: filteredRuns.filter(
+        (run) => run.status === "failed" || run.status === "cancelled"
+      ).length
     }),
     [filteredRuns]
   );
@@ -616,27 +341,37 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       total: agentSessions.length,
       running: agentSessions.filter((session) => isPendingAgentSession(session)).length,
       success: agentSessions.filter((session) => session.status === "success").length,
-      failed: agentSessions.filter((session) => session.status === "failed").length
+      failed: agentSessions.filter(
+        (session) => session.status === "failed" || session.status === "cancelled"
+      ).length
     }),
     [agentSessions]
   );
-  const hasPendingAgentSessions = useMemo(
-    () => agentSessions.some((session) => isPendingAgentSession(session)),
-    [agentSessions]
+
+  const visibleSessionCount = useMemo(
+    () => ensureSelectedItemVisible(focusedExecutionId, agentSessions, visibleSessionLimit),
+    [agentSessions, focusedExecutionId, visibleSessionLimit]
   );
-  const selectedAgentSession = useMemo(
-    () => agentSessions.find((session) => session.id === selectedExecutionId) ?? null,
-    [agentSessions, selectedExecutionId]
+  const visibleRunCount = useMemo(
+    () => ensureSelectedItemVisible(focusedExecutionId, filteredRuns, visibleRunLimit),
+    [filteredRuns, focusedExecutionId, visibleRunLimit]
   );
-  const visibleAgentSessions = useMemo(() => {
-    if (!selectedAgentSession) {
-      return agentSessions.slice(0, 12);
-    }
-    return [
-      selectedAgentSession,
-      ...agentSessions.filter((session) => session.id !== selectedAgentSession.id)
-    ].slice(0, 12);
-  }, [agentSessions, selectedAgentSession]);
+  const visibleAgentSessions = useMemo(
+    () => agentSessions.slice(0, visibleSessionCount),
+    [agentSessions, visibleSessionCount]
+  );
+  const visibleRuns = useMemo(
+    () => filteredRuns.slice(0, visibleRunCount),
+    [filteredRuns, visibleRunCount]
+  );
+
+  useEffect(() => {
+    setVisibleSessionLimit(INITIAL_SESSION_LIMIT);
+  }, [owner, repo]);
+
+  useEffect(() => {
+    setVisibleRunLimit(INITIAL_RUN_LIMIT);
+  }, [owner, repo, statusFilter, eventFilter, refFilter, actorFilter]);
 
   useEffect(() => {
     if (!hasPendingRunsWithoutLiveStream && !hasPendingAgentSessions) {
@@ -651,114 +386,95 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   }, [hasPendingAgentSessions, hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
 
   useEffect(() => {
-    if (!selectedExecutionId) {
+    if (!focusedExecutionId) {
       return;
     }
-    setExpandedRunIds((current) =>
-      current.includes(selectedExecutionId) ? current : [...current, selectedExecutionId]
-    );
     const timer = window.setTimeout(() => {
-      const element = document.getElementById(`action-run-${selectedExecutionId}`);
-      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const sessionElement = document.getElementById(`actions-session-nav-${focusedExecutionId}`);
+      sessionElement?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const runElement = document.getElementById(`actions-run-row-${focusedExecutionId}`);
+      runElement?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 80);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedExecutionId, runs.length]);
+  }, [focusedExecutionId, visibleRunCount, visibleSessionCount]);
 
   useEffect(() => {
-    if (!selectedExecutionId) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const element = document.getElementById(`agent-session-${selectedExecutionId}`);
-      element?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [agentSessions.length, selectedExecutionId]);
-
-  useEffect(() => {
-    const liveRunIds = liveExpandedRunIdsKey ? liveExpandedRunIdsKey.split("|") : [];
-    if (!owner || !repo || liveRunIds.length === 0) {
+    if (!owner || !repo || !liveRunId) {
       return;
     }
 
-    const sources = liveRunIds.map((runId) => {
-      const source = new EventSource(getActionRunLogStreamPath(owner, repo, runId));
-      const handleEvent = (streamEvent: ActionRunLogStreamEvent) => {
-        if (!mountedRef.current) {
-          source.close();
-          return;
-        }
-        if (streamEvent.event === "stream-error") {
-          source.close();
-          refreshDataInBackground();
-          return;
-        }
-        if (
-          (streamEvent.event === "append" ||
-            streamEvent.event === "status" ||
-            streamEvent.event === "done") &&
-          !runsRef.current.some((run) => run.id === streamEvent.data.runId)
-        ) {
-          refreshDataInBackground();
-          return;
-        }
-        setRuns((currentRuns) => applyRunStreamEvent(currentRuns, streamEvent));
-        if (streamEvent.event === "done") {
-          source.close();
-        }
-      };
-      const bind = (eventName: ActionRunLogStreamEvent["event"]) => {
-        source.addEventListener(eventName, (message) => {
-          try {
-            const event = parseActionRunLogStreamEvent(
-              eventName,
-              (message as MessageEvent<string>).data
-            );
-            if (!event) {
-              throw new Error(`Invalid ${eventName} event payload`);
-            }
-            handleEvent(event);
-          } catch (error) {
-            console.error("Failed to parse action run stream event", error);
-            source.close();
-            refreshDataInBackground();
-          }
-        });
-      };
-
-      bind("snapshot");
-      bind("append");
-      bind("replace");
-      bind("status");
-      bind("done");
-      bind("heartbeat");
-      bind("stream-error");
-      source.addEventListener("error", () => {
-        if (!mountedRef.current) {
-          source.close();
-          return;
-        }
-        if (source.readyState === EventSource.CLOSED) {
-          source.close();
-          refreshDataInBackground();
-          return;
-        }
-        console.warn("Action run log stream error", { runId, readyState: source.readyState });
-      });
-
-      return source;
-    });
-
-    return () => {
-      for (const source of sources) {
+    const source = new EventSource(getActionRunLogStreamPath(owner, repo, liveRunId));
+    const handleEvent = (streamEvent: ActionRunLogStreamEvent) => {
+      if (!mountedRef.current) {
+        source.close();
+        return;
+      }
+      if (streamEvent.event === "stream-error") {
+        source.close();
+        refreshDataInBackground();
+        return;
+      }
+      if (
+        (streamEvent.event === "append" ||
+          streamEvent.event === "status" ||
+          streamEvent.event === "done") &&
+        !runsRef.current.some((run) => run.id === streamEvent.data.runId)
+      ) {
+        refreshDataInBackground();
+        return;
+      }
+      setRuns((currentRuns) => applyRunStreamEvent(currentRuns, streamEvent));
+      if (streamEvent.event === "done") {
         source.close();
       }
     };
-  }, [liveExpandedRunIdsKey, owner, refreshDataInBackground, repo]);
+
+    const bind = (eventName: ActionRunLogStreamEvent["event"]) => {
+      source.addEventListener(eventName, (message) => {
+        try {
+          const event = parseActionRunLogStreamEvent(
+            eventName,
+            (message as MessageEvent<string>).data
+          );
+          if (!event) {
+            throw new Error(`Invalid ${eventName} event payload`);
+          }
+          handleEvent(event);
+        } catch (streamError) {
+          console.error("Failed to parse action run stream event", streamError);
+          source.close();
+          refreshDataInBackground();
+        }
+      });
+    };
+
+    bind("snapshot");
+    bind("append");
+    bind("replace");
+    bind("status");
+    bind("done");
+    bind("heartbeat");
+    bind("stream-error");
+
+    source.addEventListener("error", () => {
+      if (!mountedRef.current) {
+        source.close();
+        return;
+      }
+      if (source.readyState === EventSource.CLOSED) {
+        source.close();
+        refreshDataInBackground();
+        return;
+      }
+      console.warn("Action run log stream error", { runId: liveRunId, readyState: source.readyState });
+    });
+
+    return () => {
+      source.close();
+    };
+  }, [liveRunId, owner, refreshDataInBackground, repo]);
 
   async function handleRerunRun(run: ActionRunRecord) {
     if (!canManageActions || rerunningRunId) {
@@ -789,10 +505,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       if (!mountedRef.current) {
         return;
       }
-      const nextRun = response.run;
       setAgentSessions((currentSessions) =>
         insertOrReplaceSession(currentSessions, response.session)
       );
+      const nextRun = response.run;
       if (nextRun) {
         setRuns((currentRuns) => insertOrReplaceRun(currentRuns, nextRun));
       }
@@ -808,8 +524,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
-  async function handleSaveRunnerConfig(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSaveRunnerConfig() {
     if (!canManageActions || savingRunnerConfig) {
       return;
     }
@@ -899,15 +614,18 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
-  function toggleRunLogs(runId: string) {
-    const run = runsRef.current.find((item) => item.id === runId) ?? null;
-    setExpandedRunIds((current) =>
-      current.includes(runId) ? current.filter((item) => item !== runId) : [...current, runId]
-    );
-    if (run && !isPendingRun(run)) {
-      void loadFullRunLogs(runId);
-    }
+  function clearFilters() {
+    setStatusFilter("all");
+    setEventFilter("all");
+    setRefFilter("all");
+    setActorFilter("");
   }
+
+  const runnerConfigDirty =
+    !!runnerConfig &&
+    (runnerInstanceType !== runnerConfig.instanceType ||
+      codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
+      claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
 
   if (!owner || !repo) {
     return (
@@ -936,14 +654,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     );
   }
 
-  const runnerConfigDirty =
-    !!runnerConfig &&
-    (runnerInstanceType !== runnerConfig.instanceType ||
-      codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
-      claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
-
   return (
-    <div className="space-y-4">
+    <div className="app-page">
+      <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
+
       {error ? (
         <Alert variant="destructive">
           <AlertTitle>操作失败</AlertTitle>
@@ -958,605 +672,119 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </Alert>
       ) : null}
 
-      <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
-
       {loading ? (
         <InlineLoadingState
           title="Refreshing actions"
-          description="Updating workflow sessions and repository-level action config."
+          description="Updating sessions, logs, and repository-level runtime config."
         />
       ) : null}
 
-
       {canManageActions ? (
-        <div className="space-y-4">
-          <div
-            className="segmented-control w-fit"
-            role="tablist"
-            aria-label="Actions 内容切换"
+        <div className="segmented-control w-fit" role="tablist" aria-label="Actions 内容切换">
+          <button
+            id="actions-logs-tab"
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "logs"}
+            aria-controls="actions-logs-panel"
+            className="segmented-control__item"
+            data-active={activeTab === "logs"}
+            onClick={() => setActiveTab("logs")}
           >
-            <button
-              id="actions-logs-tab"
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "logs"}
-              aria-controls="actions-logs-panel"
-              className="segmented-control__item"
-              data-active={activeTab === "logs"}
-              onClick={() => setActiveTab("logs")}
-            >
-              运行日志
-            </button>
-            <button
-              id="actions-config-tab"
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "config"}
-              aria-controls="actions-config-panel"
-              className="segmented-control__item"
-              data-active={activeTab === "config"}
-              onClick={() => setActiveTab("config")}
-            >
-              配置
-            </button>
-          </div>
-
-          {activeTab === "config" ? (
-            <div className="space-y-4">
-              <Card id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
-                <CardHeader className="border-b border-border-subtle bg-surface-focus">
-                  <div className="flex items-start justify-between gap-3">
-                    <CardTitle className="text-heading-3-16-semibold">Cloudflare container config</CardTitle>
-                    <HelpTip content="这里维护仓库级的 runtime 覆盖配置，包括实例规格以及注入给 Codex / Claude Code 的配置文件。" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {loadingRunnerConfig || !runnerConfig ? (
-                    <InlineLoadingState
-                      title="Loading repository config"
-                        description="Fetching the inherited and overridden container settings."
-                      />
-                  ) : (
-                    <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                      <div className="panel-inset flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-label-xs text-text-supporting">
-                            Repository override
-                          </p>
-                          <p className="mt-1 text-body-sm text-text-secondary">
-                            updated: {formatDateTime(runnerConfig.updated_at)}
-                          </p>
-                        </div>
-                        {runnerConfigEditing ? (
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleCancelRunnerConfigEditing}
-                            >
-                              Cancel
-                            </Button>
-                            <PendingButton
-                              type="submit"
-                              pending={runnerConfigAction === "save"}
-                              disabled={
-                                !runnerConfigDirty ||
-                                (savingRunnerConfig && runnerConfigAction !== "save")
-                              }
-                              pendingText="Saving config..."
-                            >
-                              保存容器配置
-                            </PendingButton>
-                            <PendingButton
-                              type="button"
-                              variant="outline"
-                              pending={runnerConfigAction === "reset"}
-                              disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
-                              pendingText="Resetting..."
-                              onClick={() => {
-                                void handleResetRunnerConfig();
-                              }}
-                            >
-                              恢复全局默认
-                            </PendingButton>
-                          </div>
-                        ) : (
-                          <Button type="button" onClick={handleStartRunnerConfigEditing}>
-                            Edit config
-                          </Button>
-                        )}
-                      </div>
-
-                      {runnerConfigEditing ? (
-                        <section className="panel-card space-y-4">
-                          <div className="space-y-1">
-                            <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
-                            <p className="text-body-sm text-text-secondary">
-                              这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
-                            </p>
-                          </div>
-                          <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_1fr]">
-                            <div className="space-y-2">
-                              <Label htmlFor="repository-runner-instance-type">实例规格</Label>
-                              <Select
-                                value={runnerInstanceType}
-                                onValueChange={(value) =>
-                                  setRunnerInstanceType(value as ActionContainerInstanceType)
-                                }
-                              >
-                                <SelectTrigger
-                                  id="repository-runner-instance-type"
-                                  className="bg-surface-base"
-                                >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="overflow-x-auto rounded-[20px] bg-surface-focus">
-                              <table className="min-w-full text-left text-xs">
-                                <thead className="bg-surface-base text-text-supporting">
-                                  <tr>
-                                    <th className="px-3 py-2 font-medium">Instance Type</th>
-                                    <th className="px-3 py-2 font-medium">规格</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
-                                    <tr
-                                      key={option.value}
-                                      className={option.value === runnerInstanceType ? "bg-surface-base" : ""}
-                                    >
-                                      <td className="px-3 py-2 font-mono">{option.label}</td>
-                                      <td className="px-3 py-2 text-text-secondary">{option.spec}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </section>
-                      ) : (
-                        <section className="panel-card">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="space-y-1">
-                              <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
-                              <p className="text-body-sm text-text-secondary">
-                                当前仓库运行时实例规格：{runnerConfig.instanceType}
-                              </p>
-                            </div>
-                            <Badge variant="outline" className="rounded-full">
-                              {
-                                ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.find(
-                                  (option) => option.value === runnerConfig.instanceType
-                                )?.spec
-                              }
-                            </Badge>
-                          </div>
-                        </section>
-                      )}
-
-                      <CodeConfigPanel
-                        title="Codex"
-                        description="映射到容器 `/home/rootless/.codex/config.toml`。"
-                        label="Codex 配置文件内容"
-                        value={codexConfigFileContent}
-                        editing={runnerConfigEditing}
-                        onChange={setCodexConfigFileContent}
-                        style={configEditorStyle}
-                        statusText={
-                          runnerConfig.inheritsGlobalCodexConfig ? "Inheriting global" : "Repository override"
-                        }
-                      />
-
-                      <CodeConfigPanel
-                        title="Claude Code"
-                        description="映射到容器 `/home/rootless/.claude/settings.json`。"
-                        label="Claude Code 配置文件内容"
-                        value={claudeCodeConfigFileContent}
-                        editing={runnerConfigEditing}
-                        onChange={setClaudeCodeConfigFileContent}
-                        style={configEditorStyle}
-                        statusText={
-                          runnerConfig.inheritsGlobalClaudeCodeConfig
-                            ? "Inheriting global"
-                            : "Repository override"
-                        }
-                      />
-                    </form>
-                  )}
-                </CardContent>
-              </Card>
-
-            </div>
-          ) : null}
+            查看
+          </button>
+          <button
+            id="actions-config-tab"
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "config"}
+            aria-controls="actions-config-panel"
+            className="segmented-control__item"
+            data-active={activeTab === "config"}
+            onClick={() => setActiveTab("config")}
+          >
+            配置
+          </button>
         </div>
       ) : null}
 
       {!canManageActions || activeTab === "logs" ? (
-        <Card id="actions-logs-panel" role="tabpanel" aria-labelledby="actions-logs-tab">
-          <CardHeader>
-            <CardTitle className="text-base">运行日志</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <section className="mb-6 panel-card space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="space-y-1">
-                  <h2 className="text-sm font-semibold">Agent sessions</h2>
-                  <p className="text-xs text-muted-foreground">
-                    最近的任务轮次、来源对象和目标分支都会先收敛到这里。
-                  </p>
-                </div>
-                <Badge variant="outline">{sessionSummary.total} sessions</Badge>
-              </div>
+        <section id="actions-logs-panel" role="tabpanel" aria-labelledby="actions-logs-tab">
+          <RepositoryActionsLogView
+            owner={owner}
+            repo={repo}
+            selectedExecutionId={focusedExecutionId}
+            selectedAgentSession={selectedAgentSession}
+            selectedRun={selectedRun}
+            sessionSummary={sessionSummary}
+            runSummary={runSummary}
+            agentSessions={agentSessions}
+            visibleAgentSessions={visibleAgentSessions}
+            filteredRuns={filteredRuns}
+            visibleRuns={visibleRuns}
+            canShowMoreSessions={visibleSessionCount < agentSessions.length}
+            canShowMoreRuns={visibleRunCount < filteredRuns.length}
+            canManageActions={canManageActions}
+            pendingSessionAction={pendingSessionAction}
+            rerunningRunId={rerunningRunId}
+            loadingRunLogsById={loadingRunLogsById}
+            fullRunLogsById={fullRunLogsById}
+            statusFilter={statusFilter}
+            eventFilter={eventFilter}
+            refFilter={refFilter}
+            actorFilter={actorFilter}
+            statusOptions={statusOptions}
+            eventOptions={eventOptions}
+            refOptions={refOptions}
+            onStatusFilterChange={setStatusFilter}
+            onEventFilterChange={setEventFilter}
+            onRefFilterChange={setRefFilter}
+            onActorFilterChange={setActorFilter}
+            onClearFilters={clearFilters}
+            onShowMoreSessions={() =>
+              setVisibleSessionLimit((current) => current + SESSION_LIMIT_STEP)
+            }
+            onShowMoreRuns={() => setVisibleRunLimit((current) => current + RUN_LIMIT_STEP)}
+            onCancelSession={handleAgentSessionAction}
+            onRerunRun={handleRerunRun}
+            onLoadFullRunLogs={loadFullRunLogs}
+          />
+        </section>
+      ) : null}
 
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="panel-card-compact">
-                  <p className="text-xs text-muted-foreground">Visible sessions</p>
-                  <p className="text-2xl font-semibold">{sessionSummary.total}</p>
-                </div>
-                <div className="panel-card-compact">
-                  <p className="text-xs text-muted-foreground">Running</p>
-                  <p className="text-2xl font-semibold">{sessionSummary.running}</p>
-                </div>
-                <div className="panel-card-compact">
-                  <p className="text-xs text-muted-foreground">Succeeded</p>
-                  <p className="text-2xl font-semibold">{sessionSummary.success}</p>
-                </div>
-                <div className="panel-card-compact">
-                  <p className="text-xs text-muted-foreground">Failed</p>
-                  <p className="text-2xl font-semibold">{sessionSummary.failed}</p>
-                </div>
-              </div>
-
-              {agentSessions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No agent sessions yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {selectedAgentSession ? (
-                    <div className="panel-card">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <ActionStatusBadge status={selectedAgentSession.status} />
-                            <Badge variant="outline">{selectedAgentSession.agent_type}</Badge>
-                            <Badge variant="outline">{sessionSourceLabel(selectedAgentSession)}</Badge>
-                          </div>
-                          <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-                            <p>Origin: {selectedAgentSession.origin}</p>
-                            <p>Actor: {selectedAgentSession.created_by_username ?? "system"}</p>
-                            <p>Branch: {selectedAgentSession.branch_ref ?? "-"}</p>
-                            <p>Updated: {formatDateTime(selectedAgentSession.updated_at)}</p>
-                            <p>Session: {selectedAgentSession.id}</p>
-                            <p>Parent session: {selectedAgentSession.parent_session_id ?? "-"}</p>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            This panel stays focused on source, status, and handoff. Prompt and full execution
-                            details live in the session detail view.
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedAgentSession.parent_session_id ? (
-                            <Button size="sm" variant="outline" asChild>
-                              <Link to={`?sessionId=${selectedAgentSession.parent_session_id}`}>
-                                Open parent session
-                              </Link>
-                            </Button>
-                          ) : null}
-                          <Button size="sm" variant="outline" asChild>
-                            <Link to={`/repo/${owner}/${repo}/agent-sessions/${selectedAgentSession.id}`}>
-                              Open session detail
-                            </Link>
-                          </Button>
-                        </div>
-                      </div>
-                      {canManageActions ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {canCancelAgentSession(selectedAgentSession) ? (
-                            <PendingButton
-                              size="sm"
-                              variant="outline"
-                              pending={
-                                pendingSessionAction?.sessionId === selectedAgentSession.id &&
-                                pendingSessionAction.action === "cancel"
-                              }
-                              disabled={pendingSessionAction !== null}
-                              pendingText="Cancelling..."
-                              onClick={() => {
-                                void handleAgentSessionAction(selectedAgentSession);
-                              }}
-                            >
-                              Cancel queued session
-                            </PendingButton>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <ul className="space-y-2">
-                    {visibleAgentSessions.map((session) => (
-                      <li
-                        id={`agent-session-${session.id}`}
-                        key={session.id}
-                        className={`panel-inset-compact ${
-                          selectedExecutionId === session.id ? "bg-surface-base ring-1 ring-fill-tertiary" : ""
-                        }`}
-                      >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <ActionStatusBadge status={session.status} />
-                            <Badge variant="outline">{session.agent_type}</Badge>
-                            <Badge variant="outline">{sessionSourceLabel(session)}</Badge>
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>{session.origin}</span>
-                            <span>branch: {session.branch_ref ?? "-"}</span>
-                            <span>updated: {formatDateTime(session.updated_at)}</span>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button size="sm" variant="outline" asChild>
-                            <Link to={`/repo/${owner}/${repo}/agent-sessions/${session.id}`}>
-                              View session
-                            </Link>
-                          </Button>
-                          {session.parent_session_id ? (
-                            <Button size="sm" variant="outline" asChild>
-                              <Link to={`?sessionId=${session.parent_session_id}`}>
-                                View parent
-                              </Link>
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </section>
-
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold">Session log explorer</h2>
-                <p className="text-xs text-muted-foreground">
-                  按 workflow、ref 和 actor 筛选具体交付轮次，并展开查看 prompt 与日志。
-                </p>
-              </div>
-              <Badge variant="outline">{runSummary.total} matching sessions</Badge>
-            </div>
-
-            <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <div className="panel-card-compact">
-                <p className="text-xs text-muted-foreground">Visible sessions</p>
-                <p className="text-2xl font-semibold">{runSummary.total}</p>
-              </div>
-              <div className="panel-card-compact">
-                <p className="text-xs text-muted-foreground">Running</p>
-                <p className="text-2xl font-semibold">{runSummary.running}</p>
-              </div>
-              <div className="panel-card-compact">
-                <p className="text-xs text-muted-foreground">Succeeded</p>
-                <p className="text-2xl font-semibold">{runSummary.success}</p>
-              </div>
-              <div className="panel-card-compact">
-                <p className="text-xs text-muted-foreground">Failed</p>
-                <p className="text-2xl font-semibold">{runSummary.failed}</p>
-              </div>
-            </div>
-
-            <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Event</Label>
-                <Select value={eventFilter} onValueChange={setEventFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {eventOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Ref</Label>
-                <Select value={refFilter} onValueChange={setRefFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {refOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="actions-actor-filter">Actor</Label>
-                <Input
-                  id="actions-actor-filter"
-                  value={actorFilter}
-                  onChange={(event) => setActorFilter(event.target.value)}
-                  placeholder="username"
-                />
-              </div>
-            </div>
-
-            {filteredRuns.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No execution sessions yet.</p>
-            ) : (
-              <div className="space-y-4">
-                {groupedRuns.map(([workflowName, workflowRuns]) => (
-                  <section key={workflowName} className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold">{workflowName}</h3>
-                      <Badge variant="outline">{workflowRuns.length} sessions</Badge>
-                    </div>
-                    <ul className="space-y-2">
-                      {workflowRuns.map((run) => {
-                        const expanded = expandedRunIds.includes(run.id);
-                        const fullLogs = fullRunLogsById[run.id];
-                        const displayedLogs = fullLogs ?? run.logs;
-                        const showingExcerpt = !isPendingRun(run) && fullLogs === undefined;
-                        return (
-                          <li
-                            id={`action-run-${run.id}`}
-                            key={run.id}
-                            className={`panel-card-compact space-y-3 ${
-                              selectedExecutionId === run.id ? "bg-surface-focus ring-1 ring-fill-tertiary" : ""
-                            }`}
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0 space-y-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="truncate text-sm font-medium">
-                                    Session #{run.session_number} {run.workflow_name ?? run.origin}
-                                  </p>
-                                  <ActionStatusBadge status={run.status} />
-                                  <Badge variant="outline">{run.agent_type}</Badge>
-                                  <Badge variant="outline">{run.instance_type}</Badge>
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                  {runSourceLabel(run)}
-                                  {run.trigger_ref ? ` · ${run.trigger_ref}` : ""} ·{" "}
-                                  {formatDateTime(run.created_at)}
-                                </p>
-                                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="outline">
-                                    exit: {run.exit_code === null ? "-" : String(run.exit_code)}
-                                  </Badge>
-                                  <Badge variant="outline">
-                                    duration: {formatDuration(run.started_at, run.completed_at)}
-                                  </Badge>
-                                  {run.triggered_by_username ? (
-                                    <Badge variant="outline">actor: {run.triggered_by_username}</Badge>
-                                  ) : null}
-                                  {run.trigger_sha ? (
-                                    <Badge variant="outline">sha: {run.trigger_sha.slice(0, 7)}</Badge>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {canManageActions ? (
-                                  <PendingButton
-                                    size="sm"
-                                    variant="outline"
-                                    pending={rerunningRunId === run.id}
-                                    disabled={rerunningRunId !== null && rerunningRunId !== run.id}
-                                    pendingText="Rerunning session..."
-                                    onClick={() => {
-                                      void handleRerunRun(run);
-                                    }}
-                                  >
-                                    Rerun session
-                                  </PendingButton>
-                                ) : null}
-                                <Button size="sm" variant="outline" onClick={() => toggleRunLogs(run.id)}>
-                                  {expanded ? "Hide logs" : "View logs"}
-                                </Button>
-                              </div>
-                            </div>
-                            {expanded ? (
-                              <div className="space-y-3">
-                                <div className="grid gap-3 md:grid-cols-2">
-                                  <div className="panel-inset-compact text-xs text-muted-foreground">
-                                    <p>Source: {runSourceLabel(run)}</p>
-                                    <p>Created: {formatDateTime(run.created_at)}</p>
-                                    <p>Claimed: {formatDateTime(run.claimed_at)}</p>
-                                    <p>Started: {formatDateTime(run.started_at)}</p>
-                                    <p>Completed: {formatDateTime(run.completed_at)}</p>
-                                  </div>
-                                  <div className="panel-inset-compact text-xs text-muted-foreground">
-                                    <p>Container: {run.container_instance ?? "-"}</p>
-                                    <p>Actor: {run.triggered_by_username ?? "-"}</p>
-                                    <p>Ref: {run.trigger_ref ?? "-"}</p>
-                                    <p>SHA: {run.trigger_sha ?? "-"}</p>
-                                    <p>Workflow: {run.workflow_name ?? "-"}</p>
-                                  </div>
-                                </div>
-                                <div className="panel-inset-compact">
-                                  <p className="mb-2 text-xs font-medium text-foreground">Prompt</p>
-                                  <MonacoTextViewer
-                                    value={run.prompt || "(empty prompt)"}
-                                    path={`actions/session-${run.id}.prompt.txt`}
-                                    scope="action-run-prompt"
-                                    minHeight={120}
-                                    maxHeight={220}
-                                    wrap="on"
-                                  />
-                                </div>
-                                <div className="panel-inset-compact">
-                                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <div>
-                                      <p className="text-xs font-medium text-foreground">Session logs</p>
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {showingExcerpt
-                                          ? "Showing excerpt from D1 summary. Load full logs from object storage when needed."
-                                          : "Showing full execution logs."}
-                                      </p>
-                                    </div>
-                                    {showingExcerpt ? (
-                                      <PendingButton
-                                        size="sm"
-                                        variant="outline"
-                                        pending={loadingRunLogsById[run.id] === true}
-                                        disabled={loadingRunLogsById[run.id] === true}
-                                        pendingText="Loading logs..."
-                                        onClick={() => {
-                                          void loadFullRunLogs(run.id);
-                                        }}
-                                      >
-                                        Load full logs
-                                      </PendingButton>
-                                    ) : null}
-                                  </div>
-                                  <MonacoTextViewer
-                                    value={displayedLogs || "(empty logs)"}
-                                    path={`actions/session-${run.id}.log`}
-                                    scope="action-run-logs"
-                                    minHeight={180}
-                                    maxHeight={520}
-                                  />
-                                </div>
-                              </div>
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {canManageActions && activeTab === "config" ? (
+        <RepositoryActionsConfigPanel
+          loading={loadingRunnerConfig}
+          config={runnerConfig}
+          editing={runnerConfigEditing}
+          dirty={runnerConfigDirty}
+          saving={savingRunnerConfig}
+          action={runnerConfigAction}
+          instanceType={runnerInstanceType}
+          codexConfigFileContent={codexConfigFileContent}
+          claudeCodeConfigFileContent={claudeCodeConfigFileContent}
+          onInstanceTypeChange={setRunnerInstanceType}
+          onCodexConfigChange={setCodexConfigFileContent}
+          onClaudeCodeConfigChange={setClaudeCodeConfigFileContent}
+          onStartEditing={() => {
+            setRunnerConfigEditing(true);
+            setError(null);
+          }}
+          onCancelEditing={() => {
+            if (runnerConfig) {
+              resetRunnerConfigDraft(runnerConfig);
+            }
+            setRunnerConfigEditing(false);
+            setError(null);
+          }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleSaveRunnerConfig();
+          }}
+          onReset={() => {
+            void handleResetRunnerConfig();
+          }}
+        />
       ) : null}
     </div>
   );
