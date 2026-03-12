@@ -30,6 +30,8 @@ PR 是当前产品里的交付中心和评审中心。
 - ahead / behind
 - mergeability
 - 文件 diff
+- `Files changed` 默认只显示改动行以及上下 5 行代码，允许用户按需展开更多上下文
+- `Files changed` 与 commit changes 左侧展示按目录组织的文件树，并标记新增 / 修改 / 删除文件
 - review summary
 - validation summary
 - merge summary
@@ -55,6 +57,7 @@ PR 是当前产品里的交付中心和评审中心。
 - `open / resolved`
 - `Files changed` 内支持类似 GitHub 的行级 comment 草稿流：
   - 点击行号或代码行即可选中 review range
+  - 左侧文件树同步显示当前 patch 中被修改的文件，并可附带该文件的 `open / resolved` thread 数量，便于先按文件定位再进入 diff 评论
   - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview、suggested change 与提交动作
   - 一旦草稿正文或 suggested change 已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
   - 文件头展示该文件的 `open / resolved` thread 数量

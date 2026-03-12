@@ -13,6 +13,7 @@ import {
 } from "@/components/repository/repository-diff-view";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
+import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { DetailSection } from "@/components/common/detail-section";
 import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -274,6 +275,36 @@ function buildReviewThreadPathSummary(
   }
 
   return summary;
+}
+
+function renderReviewThreadSummaryBadges(
+  summary: ReviewThreadPathSummary | undefined,
+  compact = false
+) {
+  if (!summary) {
+    return null;
+  }
+
+  return (
+    <>
+      {summary.open > 0 ? (
+        <Badge
+          variant="secondary"
+          className={compact ? "bg-surface-base px-2 text-[10px]" : undefined}
+        >
+          Open {summary.open}
+        </Badge>
+      ) : null}
+      {summary.resolved > 0 ? (
+        <Badge
+          variant="outline"
+          className={compact ? "bg-surface-base px-2 text-[10px]" : undefined}
+        >
+          Resolved {summary.resolved}
+        </Badge>
+      ) : null}
+    </>
+  );
 }
 
 function buildReviewThreadLineDecorations(
@@ -1324,58 +1355,72 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                   </div>
                 </div>
               ) : null}
-              <RepositoryDiffView
+              <ChangesWorkspace
                 changes={comparison.changes}
-                onDiffLineClick={canReview ? handleDiffLineSelection : undefined}
-                isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
-                lineDecorations={reviewThreadLineDecorations}
-                renderChangeHeaderExtras={(change) => {
-                  const summary = reviewThreadSummaryByPath.get(change.path);
-                  if (!summary) {
-                    return null;
-                  }
-
-                  return (
-                    <>
-                      {summary.open > 0 ? (
-                        <Badge variant="secondary">Open threads: {summary.open}</Badge>
-                      ) : null}
-                      {summary.resolved > 0 ? (
-                        <Badge variant="outline">Resolved: {summary.resolved}</Badge>
-                      ) : null}
-                    </>
-                  );
-                }}
-                renderChangeTopPanel={(change) => {
-                  if (!canReview || !selectedReviewRange || selectedReviewRange.path !== change.path) {
-                    return null;
-                  }
-
-                  return (
-                    <PullRequestInlineThreadComposer
-                      selectedLabel={formatSelectedReviewRange(selectedReviewRange)}
-                      compareLabel={`Compare ${shortOid(selectedReviewRange.baseOid)}..${shortOid(selectedReviewRange.headOid)}`}
-                      hunkHeader={selectedReviewRange.hunkHeader}
-                      side={selectedReviewRange.side}
-                      lineCount={countSelectedReviewRangeLines(selectedReviewRange)}
-                      supportsSuggestion={selectedRangeSupportsSuggestion}
-                      body={reviewThreadBody}
-                      onBodyChange={setReviewThreadBody}
-                      suggestedCode={reviewThreadSuggestedCode}
-                      onSuggestedCodeChange={setReviewThreadSuggestedCode}
-                      onClearSelection={clearReviewThreadSelection}
-                      onDiscardDraft={discardReviewThreadDraft}
-                      onSubmit={() => {
-                        void submitReviewThread();
-                      }}
-                      submitting={reviewThreadSubmitting}
-                      disabled={
-                        reviewThreadSubmitting || pullRequest.state !== "open" || !selectedReviewRange
+                getFileBadges={(change) =>
+                  renderReviewThreadSummaryBadges(
+                    reviewThreadSummaryByPath.get(change.path),
+                    true
+                  )
+                }
+              >
+                {({ activePath, setActivePath, sectionIdForPath }) => (
+                  <RepositoryDiffView
+                    changes={comparison.changes}
+                    activePath={activePath}
+                    onChangeActivate={(change) => setActivePath(change.path)}
+                    sectionIdForPath={sectionIdForPath}
+                    onDiffLineClick={
+                      canReview
+                        ? (target) => {
+                            setActivePath(target.change.path);
+                            handleDiffLineSelection(target);
+                          }
+                        : undefined
+                    }
+                    isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
+                    lineDecorations={reviewThreadLineDecorations}
+                    renderChangeHeaderExtras={(change) =>
+                      renderReviewThreadSummaryBadges(reviewThreadSummaryByPath.get(change.path))
+                    }
+                    renderChangeTopPanel={(change) => {
+                      if (
+                        !canReview ||
+                        !selectedReviewRange ||
+                        selectedReviewRange.path !== change.path
+                      ) {
+                        return null;
                       }
-                    />
-                  );
-                }}
-              />
+
+                      return (
+                        <PullRequestInlineThreadComposer
+                          selectedLabel={formatSelectedReviewRange(selectedReviewRange)}
+                          compareLabel={`Compare ${shortOid(selectedReviewRange.baseOid)}..${shortOid(selectedReviewRange.headOid)}`}
+                          hunkHeader={selectedReviewRange.hunkHeader}
+                          side={selectedReviewRange.side}
+                          lineCount={countSelectedReviewRangeLines(selectedReviewRange)}
+                          supportsSuggestion={selectedRangeSupportsSuggestion}
+                          body={reviewThreadBody}
+                          onBodyChange={setReviewThreadBody}
+                          suggestedCode={reviewThreadSuggestedCode}
+                          onSuggestedCodeChange={setReviewThreadSuggestedCode}
+                          onClearSelection={clearReviewThreadSelection}
+                          onDiscardDraft={discardReviewThreadDraft}
+                          onSubmit={() => {
+                            void submitReviewThread();
+                          }}
+                          submitting={reviewThreadSubmitting}
+                          disabled={
+                            reviewThreadSubmitting ||
+                            pullRequest.state !== "open" ||
+                            !selectedReviewRange
+                          }
+                        />
+                      );
+                    }}
+                  />
+                )}
+              </ChangesWorkspace>
             </DetailSection>
           ) : null}
 

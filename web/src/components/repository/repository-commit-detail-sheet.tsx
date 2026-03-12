@@ -1,3 +1,4 @@
+import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -47,7 +48,7 @@ export function RepositoryCommitDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex h-dvh w-screen max-w-none flex-col gap-0 border-0 bg-surface-elevated p-0 sm:inset-y-3 sm:right-3 sm:h-[calc(100dvh-1.5rem)] sm:w-[min(92vw,960px)] sm:rounded-[32px] sm:border sm:border-border-subtle"
+        className="flex h-dvh w-screen max-w-none flex-col gap-0 border-0 bg-surface-elevated p-0 sm:inset-y-3 sm:right-3 sm:h-[calc(100dvh-1.5rem)] sm:w-[min(96vw,1320px)] sm:rounded-[32px] sm:border sm:border-border-subtle"
       >
         <SheetHeader className="gap-2 border-b border-border-subtle bg-surface-focus px-5 py-4 text-left sm:px-6">
           <SheetTitle className="pr-12">Commit detail</SheetTitle>
@@ -115,7 +116,16 @@ export function RepositoryCommitDetailSheet({
                 </div>
               </section>
 
-              <RepositoryDiffView changes={detail.changes} />
+              <ChangesWorkspace changes={detail.changes}>
+                {({ activePath, setActivePath, sectionIdForPath }) => (
+                  <RepositoryDiffView
+                    changes={detail.changes}
+                    activePath={activePath}
+                    onChangeActivate={(change) => setActivePath(change.path)}
+                    sectionIdForPath={sectionIdForPath}
+                  />
+                )}
+              </ChangesWorkspace>
             </div>
           ) : null}
         </div>

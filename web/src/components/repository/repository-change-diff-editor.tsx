@@ -9,6 +9,10 @@ import { buildMonacoModelPath, guessMonacoLanguage, monacoViewerFontFamily } fro
 import { configureMonaco } from "@/lib/monaco-runtime";
 import type { RepositoryCompareChange } from "@/lib/api";
 
+const DIFF_CONTEXT_LINE_COUNT = 5;
+const DIFF_HIDDEN_REGION_REVEAL_LINE_COUNT = 10;
+const DIFF_HIDDEN_REGION_MINIMUM_LINE_COUNT = 3;
+
 type RepositoryChangeDiffEditorProps = {
   change: RepositoryCompareChange;
   height: number;
@@ -286,6 +290,12 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
           originalEditable: false,
           overviewRulerBorder: false,
           readOnly: true,
+          hideUnchangedRegions: {
+            enabled: true,
+            contextLineCount: DIFF_CONTEXT_LINE_COUNT,
+            revealLineCount: DIFF_HIDDEN_REGION_REVEAL_LINE_COUNT,
+            minimumLineCount: DIFF_HIDDEN_REGION_MINIMUM_LINE_COUNT
+          },
           renderIndicators: true,
           renderMarginRevertIcon: false,
           renderOverviewRuler: false,

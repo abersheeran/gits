@@ -37,6 +37,8 @@
 - 单路径历史
 - 单提交详情
 - compare diff
+- commit detail / compare 默认只显示改动行以及上下 5 行代码，可按需展开更多上下文
+- commit detail changes 左侧提供按目录组织的文件树，并标记新增 / 修改 / 删除文件，便于快速切换阅读
 - ahead / behind
 - mergeability 估算
 - 统一 diff 结构：
@@ -47,6 +49,7 @@
 ### 2.4 为评审复用的 diff 能力
 
 - PR 页直接复用 compare 结构化结果
+- PR 与 commit changes 复用同一套 changes workspace 结构：左侧文件树，右侧 diff
 - Review thread 锚点依赖文件路径、range 和 hunk header
 - 新 commit 后的 thread re-anchor 与 stale 判断依赖 compare 结果再次映射
 
