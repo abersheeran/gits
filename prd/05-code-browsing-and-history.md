@@ -40,6 +40,7 @@
 - commit detail / compare 默认只显示改动行以及上下 5 行代码，可按需展开更多上下文
 - commit detail changes 左侧提供按目录组织的文件树，并标记新增 / 修改 / 删除文件，便于快速切换阅读
 - commit detail / compare 对新增或删除的文本文件会继续渲染结构化文本 diff，不会退化成 `Binary change`
+- commit detail sheet 顶部摘要栏在向下滚动 changes 区域时自动收起，向上滚动或回到顶部时恢复，释放纵向阅读空间
 - ahead / behind
 - mergeability 估算
 - 统一 diff 结构：

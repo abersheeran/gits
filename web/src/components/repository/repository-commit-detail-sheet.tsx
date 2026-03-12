@@ -1,3 +1,4 @@
+import { useRef, useState, type UIEvent } from "react";
 import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/sheet";
 import type { RepositoryCommitDetailResponse } from "@/lib/api";
 import { formatDateTime, shortOid } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 type RepositoryCommitDetailSheetProps = {
   open: boolean;
@@ -23,6 +25,9 @@ type RepositoryCommitDetailSheetProps = {
   onOpenChange: (open: boolean) => void;
   onBrowseSnapshot: (commitOid: string) => void;
 };
+
+const COMMIT_DETAIL_HEADER_HIDE_OFFSET = 48;
+const COMMIT_DETAIL_HEADER_SCROLL_DELTA = 12;
 
 function commitTitle(message: string): string {
   return (message.split("\n")[0] ?? "").trim() || "(no message)";
@@ -36,6 +41,9 @@ export function RepositoryCommitDetailSheet({
   onOpenChange,
   onBrowseSnapshot
 }: RepositoryCommitDetailSheetProps) {
+  const previousScrollTopRef = useRef(0);
+  const headerHiddenRef = useRef(false);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
   const description = detail
     ? `${shortOid(detail.commit.oid)} · ${formatDateTime(detail.commit.author.timestamp * 1000)}`
     : loading
@@ -44,20 +52,61 @@ export function RepositoryCommitDetailSheet({
         ? "Commit detail could not be loaded."
         : "Select a commit to inspect its changes.";
 
+  function updateHeaderVisibility(hidden: boolean) {
+    if (headerHiddenRef.current === hidden) {
+      return;
+    }
+    headerHiddenRef.current = hidden;
+    setIsHeaderHidden(hidden);
+  }
+
+  function handleSheetOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      previousScrollTopRef.current = 0;
+      updateHeaderVisibility(false);
+    }
+    onOpenChange(nextOpen);
+  }
+
+  function handleContentScroll(event: UIEvent<HTMLDivElement>) {
+    const nextScrollTop = event.currentTarget.scrollTop;
+    const scrollDelta = nextScrollTop - previousScrollTopRef.current;
+
+    if (nextScrollTop <= COMMIT_DETAIL_HEADER_HIDE_OFFSET) {
+      updateHeaderVisibility(false);
+    } else if (scrollDelta > COMMIT_DETAIL_HEADER_SCROLL_DELTA) {
+      updateHeaderVisibility(true);
+    } else if (scrollDelta < -COMMIT_DETAIL_HEADER_SCROLL_DELTA) {
+      updateHeaderVisibility(false);
+    }
+
+    previousScrollTopRef.current = nextScrollTop;
+  }
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleSheetOpenChange}>
       <SheetContent
         side="right"
         className="flex h-dvh w-screen max-w-none flex-col gap-0 border-0 bg-surface-elevated p-0 sm:inset-y-3 sm:right-3 sm:h-[calc(100dvh-1.5rem)] sm:w-[min(96vw,1320px)] sm:rounded-[32px] sm:border sm:border-border-subtle"
       >
-        <SheetHeader className="gap-2 border-b border-border-subtle bg-surface-focus px-5 py-4 text-left sm:px-6">
+        <SheetHeader
+          className={cn(
+            "gap-2 overflow-hidden bg-surface-focus px-5 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:px-6",
+            isHeaderHidden
+              ? "max-h-0 -translate-y-3 border-b-0 py-0 opacity-0"
+              : "max-h-24 border-b border-border-subtle py-4 opacity-100"
+          )}
+        >
           <SheetTitle className="pr-12">Commit detail</SheetTitle>
           <SheetDescription className="pr-12 text-body-micro text-text-secondary">
             {description}
           </SheetDescription>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
+          onScroll={handleContentScroll}
+        >
           {loading ? (
             <InlineLoadingState
               title="Loading commit detail"
