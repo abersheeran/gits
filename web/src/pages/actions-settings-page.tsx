@@ -163,7 +163,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
         <CardHeader className="border-b border-border-subtle bg-surface-focus">
           <div className="flex items-start justify-between gap-3">
             <CardTitle>Actions 全局默认配置</CardTitle>
-            <HelpTip content="这里维护的是全局默认值。仓库级 Actions 页面可以继续在这些默认值之上保存覆盖配置。" />
+            <HelpTip content="设置新 session 的全局默认 runtime 配置。" />
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -201,7 +201,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
           <form id="actions-global-config-form" className="space-y-6" onSubmit={handleSubmit}>
             <CodeConfigPanel
               title="Codex"
-              description="映射到容器 `/home/rootless/.codex/config.toml`。"
+              description="设置全局默认的 Codex 配置。"
               label="Codex 配置文件内容"
               value={codexConfigFileContent}
               editing={editing}
@@ -211,7 +211,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
 
             <CodeConfigPanel
               title="Claude Code"
-              description="映射到容器 `/home/rootless/.claude/settings.json`。"
+              description="设置全局默认的 Claude Code 配置。"
               label="Claude Code 配置文件内容"
               value={claudeCodeConfigFileContent}
               editing={editing}

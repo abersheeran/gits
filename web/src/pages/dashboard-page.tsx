@@ -47,7 +47,7 @@ export function DashboardPage({ user }: DashboardPageProps) {
               <Badge variant="secondary" className="w-fit">
                 Dashboard
               </Badge>
-              <HelpTip content="这里汇总你可操作的仓库入口，并保留到 Tokens 与 Actions 全局配置的直接入口。" />
+              <HelpTip content="查看仓库、Access Tokens 和 Actions 配置入口。" />
             </div>
             <div className="space-y-3">
               <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">

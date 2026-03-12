@@ -254,7 +254,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
       <div className="mx-auto w-[min(1200px,92vw)] py-10">
         <PageLoadingState
           title="Loading agent session"
-          description="Fetching session metadata, source context, and timeline."
+          description="Loading the session overview and timeline."
         />
       </div>
     );
@@ -398,7 +398,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                   <div>
                     <p className="text-xs font-medium text-foreground">Prompt</p>
                     <p className="text-xs text-muted-foreground">
-                      Keep the full handoff text collapsed unless you are debugging the exact agent instruction.
+                      需要时展开查看完整 prompt。
                     </p>
                   </div>
                   <Button
@@ -608,9 +608,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                           </div>
                         </div>
                         <p className="mt-2 text-[11px] text-muted-foreground">
-                          {showingExcerpt
-                            ? "Showing compact excerpt from the session summary."
-                            : "Showing full content loaded from object storage."}
+                          {showingExcerpt ? "当前显示节选。" : "当前显示完整输出。"}
                         </p>
                         <MonacoTextViewer
                           value={fullContent ?? artifact.content_text}

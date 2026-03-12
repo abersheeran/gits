@@ -197,7 +197,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
             </div>
             <div className="flex items-start gap-2">
               <h1 className="font-display text-card-title text-text-primary">仓库设置</h1>
-              <HelpTip content="这里管理仓库基本信息和删除操作。分支管理已经拆到独立页面。" />
+              <HelpTip content="管理仓库信息与删除操作。" />
             </div>
           </div>
           <Button variant="outline" asChild>
@@ -223,7 +223,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>General</CardTitle>
-            <HelpTip content="这里可以修改仓库名称、描述和公开/私有状态。Clone URL 会跟随仓库路径实时变化。" />
+            <HelpTip content="修改仓库名称、描述和可见性。" />
           </div>
         </CardHeader>
         <CardContent className="space-y-6">

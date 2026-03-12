@@ -769,7 +769,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         <aside className="space-y-4">
           <DetailSection
             title="Task center"
-            description="这里展示当前在等谁、最近一轮交付状态，以及 Issue 作为任务入口的最小控制面。"
+            description="查看任务状态、最近交付和 Agent 操作。"
           >
             <div className="panel-inset-compact space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -1069,9 +1069,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                     继续 Agent
                   </PendingButton>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  运行日志仍会出现在 Actions 页面；Issue 这里保留的是面向任务的 session 视图。
-                </p>
+                <p className="text-xs text-muted-foreground">运行详情可在 Actions 页面查看。</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">

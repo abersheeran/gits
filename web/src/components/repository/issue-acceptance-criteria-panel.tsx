@@ -181,7 +181,7 @@ export function IssueAcceptanceCriteriaPanel({
                     ) : (
                       <EmptyState
                         title="预览区域为空"
-                        description="切回 Write 模式输入内容后，这里会显示最终渲染结果。"
+                        description="添加验收标准以生成预览。"
                       />
                     )}
                   </div>
@@ -240,9 +240,7 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
               {canUpdate ? (
                 <div className="mt-4 flex flex-col gap-3 border-t border-border-subtle pt-4 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs leading-5 text-text-secondary">
-                    仅在进入编辑状态后显示草稿编辑器和预览切换。
-                  </p>
+                  <p className="text-xs leading-5 text-text-secondary">需要时更新验收标准并预览 Markdown。</p>
                   <Button
                     type="button"
                     className="h-9 px-4"

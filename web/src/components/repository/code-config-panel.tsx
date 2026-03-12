@@ -58,7 +58,7 @@ export function CodeConfigPanel({
   className,
   statusText,
   emptyTitle = "还没有配置内容",
-  emptyDescription = "进入编辑状态后，这里可以填写并保存对应的配置文件。"
+  emptyDescription = "编辑后可保存对应的配置文件内容。"
 }: CodeConfigPanelProps) {
   const hasValue = value.trim().length > 0;
   const lineCount = countLines(value);

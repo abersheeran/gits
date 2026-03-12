@@ -95,7 +95,7 @@ export function PullRequestInlineThreadComposer({
         expanded={expanded}
         onExpandedChange={setEditing}
         enterEditLabel="Write thread comment"
-        collapsedHint="只有进入编辑状态后，才会显示正文编辑器和 Write / Preview。"
+        collapsedHint="编写这条 review thread。"
       />
 
       {expanded ? (

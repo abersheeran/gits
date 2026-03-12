@@ -1578,7 +1578,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                                 }))
                               }
                               enterEditLabel="Reply"
-                              collapsedHint="只在需要回复这条 review thread 时，再展开编辑器并显示 Write / Preview。"
+                              collapsedHint="回复这条 review thread。"
                             />
                             {threadReplyEditorsExpanded[thread.id] ? (
                               <>
@@ -1708,7 +1708,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             <DetailSection
               variant="muted"
               title="Submit review"
-              description="默认先展示只读入口，真正提交 review 时再进入编辑状态。"
+              description="提交 review 结论与说明。"
             >
               {reviewEditorExpanded ? (
                 <div className="panel-card-compact">
@@ -1732,7 +1732,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 expanded={reviewEditorExpanded}
                 onExpandedChange={setReviewEditorExpanded}
                 enterEditLabel="Write review"
-                collapsedHint="只有进入 review 编辑状态以后，才会显示正文编辑器和 Write / Preview。"
+                collapsedHint="填写本次 review 的总结。"
               />
               {reviewEditorExpanded ? (
                 <div className="flex flex-wrap gap-2">
@@ -1816,7 +1816,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
           <DetailSection
             title="Agent handoff"
-            description="最近一轮 session、验证摘要和继续 Agent 的主入口都收在这里。"
+            description="查看最近交付、验证摘要并继续 Agent。"
           >
 
             {provenanceDetail || latestAgentSession ? (

@@ -300,7 +300,7 @@ export function RepositoryActionsLogView({
                 <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
                   Actions
                 </h1>
-                <HelpTip content="根据 PRD，session 是主视图，workflow 只是触发来源。这里优先展示任务轮次，再查看对应的 prompt 与日志。" />
+                <HelpTip content="查看最近 session，并按需回看 prompt 与日志。" />
               </div>
               <p className="max-w-3xl text-body-sm text-text-secondary">
                 以 session 为中心查看最近的任务轮次，在同一工作区里切换 prompt、日志与 rerun。
@@ -311,7 +311,7 @@ export function RepositoryActionsLogView({
               <MetricCard
                 label="Recent sessions"
                 value={sessionSummary.total}
-                hint="最近收敛到仓库 actions 页的任务轮次"
+                hint="最近的任务轮次"
               />
               <MetricCard
                 label="In progress"
@@ -369,7 +369,7 @@ export function RepositoryActionsLogView({
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <DetailSection
           title="Task Rounds"
-          description="左侧导航只保留最近任务轮次，避免把 workflow 和日志都堆在同一块。"
+          description="浏览最近的任务轮次。"
           headerActions={
             <Badge variant="outline" className="bg-surface-focus">
               {agentSessions.length} sessions
@@ -407,7 +407,7 @@ export function RepositoryActionsLogView({
         <div className="space-y-4">
           <DetailSection
             title="Execution Workspace"
-            description="当前聚焦的 session 会在这里显示摘要、prompt 和日志。"
+            description="查看当前 session 的摘要、prompt 和日志。"
             headerActions={
               focusedSession ? (
                 <>
@@ -531,8 +531,8 @@ export function RepositoryActionsLogView({
                           </div>
                           <p className="text-body-xs text-text-secondary">
                             {showingExcerpt
-                              ? "当前显示的是 D1 摘要。需要时再从对象存储加载全文。"
-                              : "当前显示的是完整或实时更新中的日志。"}
+                              ? "当前为节选日志，需要时可加载完整输出。"
+                              : "当前为完整日志或实时输出。"}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -567,14 +567,13 @@ export function RepositoryActionsLogView({
                   </div>
                 ) : (
                   <div className="panel-inset text-body-sm text-text-secondary">
-                    当前聚焦的 session 还没有可浏览的 prompt / logs 记录。可以直接打开 detail
-                    页查看完整上下文。
+                    当前 session 暂无可查看的 prompt 或日志，可打开 detail 页查看更多上下文。
                   </div>
                 )}
               </>
             ) : (
               <div className="panel-inset text-body-sm text-text-secondary">
-                选择一个 session 后，这里会展示它的执行上下文。
+                选择一个 session 查看执行上下文。
               </div>
             )}
           </DetailSection>

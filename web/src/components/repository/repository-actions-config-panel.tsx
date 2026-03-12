@@ -61,10 +61,10 @@ export function RepositoryActionsConfigPanel({
               <h2 className="font-display text-heading-3-16-semibold text-text-primary">
                 Runtime config
               </h2>
-              <HelpTip content="仓库级 runtime 覆盖配置会影响之后的新 session。查看态与编辑态都在同一空间切换。" />
+              <HelpTip content="设置当前仓库的 runtime 覆盖配置。" />
             </div>
             <p className="max-w-3xl text-body-sm text-text-secondary">
-              查看仓库级 container 规格，以及注入给 Codex / Claude Code 的配置文件覆盖。
+              查看仓库级实例规格，并调整当前仓库的运行配置。
             </p>
           </div>
           {config ? (
@@ -111,7 +111,7 @@ export function RepositoryActionsConfigPanel({
         {loading || !config ? (
           <InlineLoadingState
             title="Loading repository config"
-            description="Fetching the inherited and overridden container settings."
+            description="Loading the current repository runtime settings."
           />
         ) : (
           <form
@@ -123,7 +123,7 @@ export function RepositoryActionsConfigPanel({
               <div className="space-y-1">
                 <h3 className="text-body-sm font-medium text-text-primary">Instance type</h3>
                 <p className="text-body-sm text-text-secondary">
-                  这个设置决定 Cloudflare container 的 CPU、内存和磁盘规格。
+                  为当前仓库选择执行规格。
                 </p>
               </div>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,240px)_1fr]">
@@ -169,7 +169,7 @@ export function RepositoryActionsConfigPanel({
 
             <CodeConfigPanel
               title="Codex"
-              description="映射到容器 `/home/rootless/.codex/config.toml`。"
+              description="设置当前仓库的 Codex 配置。"
               label="Codex 配置文件内容"
               value={codexConfigFileContent}
               editing={editing}
@@ -182,7 +182,7 @@ export function RepositoryActionsConfigPanel({
 
             <CodeConfigPanel
               title="Claude Code"
-              description="映射到容器 `/home/rootless/.claude/settings.json`。"
+              description="设置当前仓库的 Claude Code 配置。"
               label="Claude Code 配置文件内容"
               value={claudeCodeConfigFileContent}
               editing={editing}

@@ -238,7 +238,7 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
             </div>
             <div className="flex items-start gap-2">
               <h1 className="font-display text-card-title text-text-primary">分支管理</h1>
-              <HelpTip content="这里负责创建分支、切换默认分支，以及删除非默认分支。" />
+              <HelpTip content="创建分支、切换默认分支或删除非默认分支。" />
             </div>
           </div>
           <div className="flex items-center gap-2">

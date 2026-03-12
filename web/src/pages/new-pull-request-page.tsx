@@ -192,7 +192,7 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>New pull request · {owner}/{repo}</CardTitle>
-            <HelpTip content="在这里选择 base 和 head 分支，提交后会创建新的 Pull Request。" />
+            <HelpTip content="选择 base 和 head 分支，然后创建 Pull Request。" />
           </div>
         </CardHeader>
         <CardContent>
