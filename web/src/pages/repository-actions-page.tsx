@@ -136,6 +136,9 @@ function shouldPreferCurrentRun(currentRun: ActionRunRecord, nextRun: ActionRunR
   if (currentRun.updated_at !== nextRun.updated_at) {
     return currentRun.updated_at > nextRun.updated_at;
   }
+  if (currentRun.status !== nextRun.status) {
+    return false;
+  }
   return currentRun.logs.length > nextRun.logs.length;
 }
 
