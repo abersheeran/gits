@@ -17,11 +17,10 @@ import {
   getRepositoryAgentSessionTimeline,
   getRepositoryDetail,
   type AgentSessionArtifactRecord,
+  type AgentSessionAttemptRecord,
   type AgentSessionDetail,
-  type AgentSessionInterventionRecord,
   type AgentSessionRecord,
   type AgentSessionTimelineEvent,
-  type AgentSessionUsageRecord,
   type AuthUser,
   type RepositoryDetailResponse
 } from "@/lib/api";
@@ -92,34 +91,31 @@ function formatArtifactSize(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function usageLabel(record: AgentSessionUsageRecord): string {
-  switch (record.kind) {
-    case "duration_ms":
-      return "Duration";
-    case "exit_code":
-      return "Exit code";
-    case "log_chars":
-      return "Session logs";
-    case "stdout_chars":
-      return "Stdout";
-    case "stderr_chars":
-      return "Stderr";
+function attemptStatusVariant(
+  status: AgentSessionAttemptRecord["status"]
+): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "success") {
+    return "default";
   }
+  if (status === "failed" || status === "retryable_failed" || status === "cancelled") {
+    return "destructive";
+  }
+  if (status === "running" || status === "booting") {
+    return "secondary";
+  }
+  return "outline";
 }
 
-function formatUsageValue(record: AgentSessionUsageRecord): string {
-  switch (record.kind) {
-    case "duration_ms":
-      return `${Math.round(record.value)} ms`;
-    case "exit_code":
-      return String(Math.round(record.value));
-    default:
-      return `${Math.round(record.value).toLocaleString()} chars`;
-  }
+function attemptStatusLabel(status: AgentSessionAttemptRecord["status"]): string {
+  return status.replaceAll("_", " ");
 }
 
-function interventionActor(intervention: AgentSessionInterventionRecord): string {
-  return intervention.created_by_username ?? "system";
+function attemptFailureLabel(attempt: AgentSessionAttemptRecord): string {
+  if (!attempt.failure_reason) {
+    return "-";
+  }
+  const stage = attempt.failure_stage ? ` · ${attempt.failure_stage}` : "";
+  return `${attempt.failure_reason.replaceAll("_", " ")}${stage}`;
 }
 
 export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
@@ -272,7 +268,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
   }
 
   const { session, sourceContext } = sessionDetail;
-  const { artifacts, usageRecords, interventions } = sessionDetail;
+  const { artifacts, attempts, events, activeAttempt, latestAttempt } = sessionDetail;
 
   return (
     <div className="mx-auto flex w-[min(1200px,92vw)] flex-col gap-6 py-6">
@@ -340,8 +336,12 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                   <p className="mt-1 text-sm font-medium">{formatDateTime(session.updated_at)}</p>
                 </div>
                 <div className="panel-card-compact">
-                  <p className="text-xs text-muted-foreground">Timeline events</p>
-                  <p className="mt-1 text-sm font-medium">{timeline.length}</p>
+                  <p className="text-xs text-muted-foreground">Attempts</p>
+                  <p className="mt-1 text-sm font-medium">{attempts.length}</p>
+                </div>
+                <div className="panel-card-compact">
+                  <p className="text-xs text-muted-foreground">Latest events</p>
+                  <p className="mt-1 text-sm font-medium">{events.length}</p>
                 </div>
               </div>
 
@@ -433,6 +433,8 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                 <Badge variant="outline">#{session.session_number}</Badge>
                 <ActionStatusBadge status={session.status} />
                 <Badge variant="outline">{session.instance_type}</Badge>
+                {activeAttempt ? <Badge variant="outline">active #{activeAttempt.attempt_number}</Badge> : null}
+                {latestAttempt ? <Badge variant="outline">latest #{latestAttempt.attempt_number}</Badge> : null}
               </div>
               <p>
                 Workflow: <span className="text-foreground">{session.workflow_name ?? "-"}</span>
@@ -446,61 +448,84 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
               <p>
                 Container: <span className="text-foreground">{session.container_instance ?? "-"}</span>
               </p>
+              <p>
+                Failure: <span className="text-foreground">{session.failure_reason ?? "-"}</span>
+              </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Usage</CardTitle>
+              <CardTitle className="text-base">Attempts</CardTitle>
             </CardHeader>
             <CardContent>
-              {usageRecords.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No structured usage records yet.</p>
+              {attempts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No attempts recorded.</p>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  {usageRecords.map((record) => (
-                    <div key={`${record.kind}-${record.id}`} className="panel-card-compact">
-                      <p className="text-xs text-muted-foreground">{usageLabel(record)}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
-                        {formatUsageValue(record)}
-                      </p>
-                      {record.detail ? (
-                        <p className="mt-1 text-xs text-muted-foreground">{record.detail}</p>
-                      ) : null}
-                    </div>
+                <ol className="space-y-3">
+                  {attempts.map((attemptItem) => (
+                    <li key={attemptItem.id} className="panel-inset-compact">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">#{attemptItem.attempt_number}</Badge>
+                            <Badge variant={attemptStatusVariant(attemptItem.status)}>
+                              {attemptStatusLabel(attemptItem.status)}
+                            </Badge>
+                            <Badge variant="outline">{attemptItem.instance_type}</Badge>
+                            {attemptItem.promoted_from_instance_type ? (
+                              <Badge variant="outline">
+                                from {attemptItem.promoted_from_instance_type}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="space-y-1 text-xs text-muted-foreground">
+                            <p>Container: {attemptItem.container_instance ?? "-"}</p>
+                            <p>
+                              Exit code:{" "}
+                              {attemptItem.exit_code === null ? "-" : String(attemptItem.exit_code)}
+                            </p>
+                            <p>Failure: {attemptFailureLabel(attemptItem)}</p>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right text-xs text-muted-foreground">
+                          <p>{formatDateTime(attemptItem.created_at)}</p>
+                          <p>{formatRelativeTime(attemptItem.created_at)}</p>
+                        </div>
+                      </div>
+                    </li>
                   ))}
-                </div>
+                </ol>
               )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Interventions</CardTitle>
+              <CardTitle className="text-base">Latest Attempt Events</CardTitle>
             </CardHeader>
             <CardContent>
-              {interventions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No interventions recorded.</p>
+              {events.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No attempt events recorded.</p>
               ) : (
                 <ol className="space-y-3">
-                  {interventions.map((intervention) => (
-                    <li key={intervention.id} className="panel-inset-compact">
+                  {events
+                    .slice()
+                    .reverse()
+                    .slice(0, 12)
+                    .map((event) => (
+                    <li key={event.id} className="panel-inset-compact">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">{intervention.kind.replaceAll("_", " ")}</Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {interventionActor(intervention)}
-                            </span>
+                            <Badge variant="outline">{event.type.replaceAll("_", " ")}</Badge>
+                            <Badge variant="outline">{event.stream}</Badge>
                           </div>
-                          <p className="text-sm font-medium">{intervention.title}</p>
-                          {intervention.detail ? (
-                            <p className="text-xs text-muted-foreground">{intervention.detail}</p>
-                          ) : null}
+                          <p className="text-sm font-medium">{event.message}</p>
                         </div>
                         <div className="shrink-0 text-right text-xs text-muted-foreground">
-                          <p>{formatDateTime(intervention.created_at)}</p>
-                          <p>{formatRelativeTime(intervention.created_at)}</p>
+                          <p>{formatDateTime(event.created_at)}</p>
+                          <p>{formatRelativeTime(event.created_at)}</p>
                         </div>
                       </div>
                     </li>

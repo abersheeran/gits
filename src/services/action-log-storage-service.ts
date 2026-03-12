@@ -41,6 +41,15 @@ export class ActionLogStorageService {
     return `repositories/${repositoryId}/sessions/${sessionId}/artifacts/${kind}.log`;
   }
 
+  buildAttemptArtifactLogKey(
+    repositoryId: string,
+    sessionId: string,
+    attemptId: string,
+    kind: AgentLogArtifactKind
+  ): string {
+    return `repositories/${repositoryId}/sessions/${sessionId}/attempts/${attemptId}/artifacts/${kind}.log`;
+  }
+
   buildRunLogKey(repositoryId: string, runId: string): string {
     return this.buildSessionLogKey(repositoryId, runId);
   }
@@ -90,6 +99,37 @@ export class ActionLogStorageService {
     }
     const object = await this.bucket.get(
       this.buildSessionArtifactLogKey(repositoryId, sessionId, kind)
+    );
+    return object ? object.text() : null;
+  }
+
+  async writeAttemptArtifactLogs(
+    repositoryId: string,
+    sessionId: string,
+    attemptId: string,
+    kind: AgentLogArtifactKind,
+    content: string
+  ): Promise<void> {
+    if (!this.canWrite()) {
+      return;
+    }
+    await this.bucket.put(
+      this.buildAttemptArtifactLogKey(repositoryId, sessionId, attemptId, kind),
+      content
+    );
+  }
+
+  async readAttemptArtifactLogs(
+    repositoryId: string,
+    sessionId: string,
+    attemptId: string,
+    kind: AgentLogArtifactKind
+  ): Promise<string | null> {
+    if (!this.canRead()) {
+      return null;
+    }
+    const object = await this.bucket.get(
+      this.buildAttemptArtifactLogKey(repositoryId, sessionId, attemptId, kind)
     );
     return object ? object.text() : null;
   }

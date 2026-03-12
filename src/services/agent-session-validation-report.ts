@@ -1,5 +1,5 @@
 import type {
-  AgentSessionUsageRecord,
+  AgentSessionAttemptEventRecord,
   AgentSessionValidationCheckKind,
   AgentSessionValidationCheckRecord,
   AgentSessionValidationCheckStatus,
@@ -193,11 +193,11 @@ export function extractValidationReportFromText(input: string): {
   };
 }
 
-export function findValidationReportInUsageRecords(
-  usageRecords: AgentSessionUsageRecord[]
+export function findValidationReportInAttemptEvents(
+  events: AgentSessionAttemptEventRecord[]
 ): AgentSessionValidationReport | null {
-  for (const record of usageRecords) {
-    const report = parseAgentSessionValidationReport(record.payload?.validationReport);
+  for (const event of events) {
+    const report = parseAgentSessionValidationReport(event.payload?.validationReport);
     if (report) {
       return report;
     }

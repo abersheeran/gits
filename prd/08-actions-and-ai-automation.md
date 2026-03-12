@@ -70,7 +70,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 ### 2.4 记录层
 
 - `agent_sessions` 记录 source、origin、branch、workflow、执行状态和日志 excerpt
-- `agent_session_steps`、`artifacts`、`usage_records`、`interventions` 用于沉淀执行过程
+- `agent_session_attempts`、`agent_session_attempt_events`、`agent_session_attempt_artifacts` 用于沉淀执行过程
 - 全量日志和全文 artifact 存在 `ACTION_LOGS_BUCKET`，D1 只保留 excerpt
 
 ### 2.5 平台 MCP 能力
@@ -116,8 +116,8 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 - stdout / stderr / session logs excerpt
 - artifacts excerpt
-- usage records
-- interventions
+- attempt event stream
+- structured warning / result report
 - structured validation report
 
 ### 3.4 平台 MCP
@@ -154,13 +154,13 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 1. issue 创建、PR 创建或 push 发生。
 2. 系统匹配启用的 workflow。
-3. 直接创建 session。
-4. runtime 执行并回写结果。
+3. 创建 session，并立即创建首个 queued attempt。
+4. queue 驱动 orchestrator 拉起 runtime，按 attempt 执行并回写结果。
 
 ### 4.2 交互式继续
 
 1. 用户从 Issue、PR 或 review thread 点击继续 Agent。
-2. 系统创建内部 workflow 对应的 session。
+2. 系统创建内部 workflow 对应的 session 和首个 attempt。
 3. prompt 会带入 Issue/PR/Review 上下文、验收标准和必要 token。
 4. 执行结果以 handoff 摘要形式回流到 Issue / PR。
 
@@ -170,8 +170,8 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 2. Issue / PR 跳到 Actions 页时，前端使用 `sessionId` 锚定对应任务轮次，而不是单独的 run 入口。
 3. 未展开日志的 pending session 走后台轮询；已展开且仍在运行的 session 直接建立日志流，流关闭或报错后再回退后台 refresh。
 4. 当流式日志里的本地 session 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
-5. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
-6. 全文日志与全文 artifact 按需读取对象存储。
+5. Session detail 负责查看 attempts、attempt events、artifacts、timeline 与 prompt。
+6. 全文日志与全文 artifact 按需从对象存储读取，并按最新 attempt 组织。
 
 ## 5. 当前接口
 
@@ -196,16 +196,20 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `POST /api/repos/:owner/:repo/agent-sessions/:sessionId/cancel`
 - `POST /api/repos/:owner/:repo/agent-sessions/:sessionId/rerun`
 
+其中：
+
+- `GET /api/repos/:owner/:repo/agent-sessions/:sessionId` 返回 `attempts`、`activeAttempt`、`latestAttempt`、`events`、`artifacts` 与 `validationSummary`。
+- `GET /api/repos/:owner/:repo/pulls/:number/provenance` 和 `GET /api/repos/:owner/:repo/pulls/provenance/latest` 复用同一套 session detail 结构。
+
 ## 6. 当前数据模型
 
 - `global_settings`
 - `repository_actions_configs`
 - `action_workflows`
 - `agent_sessions`
-- `agent_session_steps`
-- `agent_session_artifacts`
-- `agent_session_usage_records`
-- `agent_session_interventions`
+- `agent_session_attempts`
+- `agent_session_attempt_events`
+- `agent_session_attempt_artifacts`
 
 ## 7. 关键代码文件
 
@@ -234,26 +238,32 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ## 8. 当前边界与缺口
 
-### 8.1 workflow 仍是触发层，不应喧宾夺主
+### 8.1 runtime 已切到 queue-first 的 attempt 模型
+
+- session 负责归档、筛选、跳转和 rerun 入口，不再直接兼做单次执行实体。
+- 真正执行、重试、升配、日志事件与 artifact 都以 attempt 为单位组织。
+- 不再保留 enqueue 失败后的本地 fallback，也不再保留 usage / intervention 旁路结构。
+
+### 8.2 workflow 仍是触发层，不应喧宾夺主
 
 - 当前 workflow 很重要，但产品主视角应继续围绕 session 和 handoff，而不是 workflow 配置本身。
 
-### 8.2 validation summary 仍需更面向评审
+### 8.3 validation summary 仍需更面向评审
 
 - 已有 structured report、fallback 规则、highlighted artifacts。
 - 但对“这次到底测了什么、该先看什么、为什么还需要人类判断”的表达仍可继续增强。
 
-### 8.3 session 连续性表达仍不足
+### 8.4 session 连续性表达仍不足
 
 - 已有 issue assign/resume、PR resume、thread-focused resume、rerun、dispatch。
 - 但还缺更清晰的“这次 session 在延续哪条反馈、完成了什么”的压缩摘要。
 
-### 8.4 输入上下文仍偏弱
+### 8.5 输入上下文仍偏弱
 
 - runtime 已能执行。
 - 但 session 开始前仍缺代码搜索、相关文件候选、review thread 摘要和更稳定的上下文 bundle。
 
-### 8.5 本地 agent 接入仍缺更明确的产品化入口
+### 8.6 本地 agent 接入仍缺更明确的产品化入口
 
 - 平台 MCP endpoint 已可复用给本地 agent。
 - 但用户如何发现 endpoint、如何选择自己的 token、如何管理 token 粒度，仍需要后续产品入口承接。

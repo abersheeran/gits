@@ -14,6 +14,8 @@ function isActionRunQueueMessage(value: unknown): value is AgentSessionQueueMess
     payload.repositoryId.length > 0 &&
     typeof payload.sessionId === "string" &&
     payload.sessionId.length > 0 &&
+    typeof payload.attemptId === "string" &&
+    payload.attemptId.length > 0 &&
     typeof payload.requestOrigin === "string" &&
     payload.requestOrigin.length > 0
   );
@@ -54,7 +56,11 @@ export async function consumeActionRunQueueMessage(input: {
 
   const agentSessionService = new AgentSessionService(input.env.DB);
   const session = await agentSessionService.findSessionById(repository.id, input.message.sessionId);
-  if (!session || session.status !== "queued") {
+  if (!session) {
+    return;
+  }
+  const attempt = await agentSessionService.findAttemptById(repository.id, input.message.attemptId);
+  if (!attempt || attempt.session_id !== session.id || attempt.status !== "queued") {
     return;
   }
 
@@ -66,6 +72,7 @@ export async function consumeActionRunQueueMessage(input: {
     env: input.env,
     repository,
     session,
+    attempt,
     ...(triggeredByUser ? { triggeredByUser } : {}),
     requestOrigin: input.message.requestOrigin
   });

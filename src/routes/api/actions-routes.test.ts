@@ -863,10 +863,52 @@ describe("API actions and session routes", () => {
         })
       },
       {
-        when: "FROM agent_session_artifacts",
+        when: "FROM agent_session_attempts",
+        first: () => ({
+          id: "attempt-detail",
+          session_id: "session-detail",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "running",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-detail-attempt-1",
+          exit_code: null,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: now - 10_000,
+          claimed_at: now - 9_500,
+          started_at: now - 9_000,
+          completed_at: null,
+          updated_at: now - 8_000
+        }),
+        all: () => [
+          {
+            id: "attempt-detail",
+            session_id: "session-detail",
+            repository_id: "repo-1",
+            attempt_number: 1,
+            status: "running",
+            instance_type: "lite",
+            promoted_from_instance_type: null,
+            container_instance: "agent-session-session-detail-attempt-1",
+            exit_code: null,
+            failure_reason: null,
+            failure_stage: null,
+            created_at: now - 10_000,
+            claimed_at: now - 9_500,
+            started_at: now - 9_000,
+            completed_at: null,
+            updated_at: now - 8_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_attempt_artifacts",
         all: () => [
           {
             id: "artifact-1",
+            attempt_id: "attempt-detail",
             session_id: "session-detail",
             repository_id: "repo-1",
             kind: "stdout",
@@ -880,38 +922,8 @@ describe("API actions and session routes", () => {
         ]
       },
       {
-        when: "FROM agent_session_usage_records",
-        all: () => [
-          {
-            id: 1,
-            session_id: "session-detail",
-            repository_id: "repo-1",
-            kind: "duration_ms",
-            value: 250,
-            unit: "ms",
-            detail: "Container execution duration",
-            payload_json: "{\"runId\":\"run-detail\"}",
-            created_at: now - 9_000,
-            updated_at: now - 9_000
-          }
-        ]
-      },
-      {
-        when: "FROM agent_session_interventions",
-        all: () => [
-          {
-            id: 2,
-            session_id: "session-detail",
-            repository_id: "repo-1",
-            kind: "mcp_setup_warning",
-            title: "MCP setup warning",
-            detail: "platform MCP missing",
-            created_by: null,
-            created_by_username: null,
-            payload_json: "{\"runId\":\"run-detail\"}",
-            created_at: now - 8_000
-          }
-        ]
+        when: "FROM agent_session_attempt_events",
+        all: () => []
       }
     ]);
 
@@ -924,9 +936,11 @@ describe("API actions and session routes", () => {
     const body = (await response.json()) as {
       session: { id: string; source_type: string; source_number: number };
       sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
+      attempts: Array<{ id: string; attempt_number: number }>;
+      latestAttempt: { id: string; attempt_number: number } | null;
       artifacts: Array<{ kind: string; title: string }>;
-      usageRecords: Array<{ kind: string; value: number }>;
-      interventions: Array<{ kind: string; title: string }>;
+      events: Array<{ type: string }>;
+      validationSummary: { status: string | null; headline: string };
     };
     expect(body.session.id).toBe("session-detail");
     expect(body.session.source_type).toBe("issue");
@@ -935,9 +949,11 @@ describe("API actions and session routes", () => {
     expect(body.sourceContext.number).toBe(42);
     expect(body.sourceContext.title).toBe("Need login fix");
     expect(body.sourceContext.url).toBe("/repo/alice/demo/issues/42");
+    expect(body.attempts[0]?.attempt_number).toBe(1);
+    expect(body.latestAttempt?.id).toBe("attempt-detail");
     expect(body.artifacts[0]?.kind).toBe("stdout");
-    expect(body.usageRecords[0]?.kind).toBe("duration_ms");
-    expect(body.interventions[0]?.kind).toBe("mcp_setup_warning");
+    expect(body.events).toEqual([]);
+    expect(body.validationSummary.status).toBe("running");
   });
 
   it("returns full agent session artifact content from object storage when available", async () => {
@@ -1010,9 +1026,10 @@ describe("API actions and session routes", () => {
             source_number: 7,
             origin: "issue_assign",
             status: "failed",
-            logs: `run_id: run-timeline\nrun_number: 9\nagent_type: codex\nprompt: debug\n\nclaimed_at: ${new Date(now - 11_000).toISOString()}\nstarted_at: ${new Date(now - 10_000).toISOString()}\n\n[attempted]\ncodex run\n\n[stdout]\nAnalyzing repository\nApplying fix\n\n[stderr]\nTests still failing\n\n[error]\nTests still failing`,
             exit_code: 1,
-            container_instance: "agent-session-session-timeline",
+            container_instance: "agent-session-session-timeline-attempt-1",
+            active_attempt_id: "attempt-timeline",
+            latest_attempt_id: "attempt-timeline",
             created_at: now - 12_000,
             claimed_at: now - 11_000,
             started_at: now - 10_000,
@@ -1021,8 +1038,72 @@ describe("API actions and session routes", () => {
           })
       },
       {
-        when: "FROM agent_session_interventions",
-        all: () => []
+        when: "FROM agent_session_attempts",
+        first: () => ({
+          id: "attempt-timeline",
+          session_id: "session-timeline",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "failed",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-timeline-attempt-1",
+          exit_code: 1,
+          failure_reason: "agent_exit_non_zero",
+          failure_stage: "runtime",
+          created_at: now - 12_000,
+          claimed_at: now - 11_000,
+          started_at: now - 10_000,
+          completed_at: now - 1_000,
+          updated_at: now - 1_000
+        }),
+        all: () => [
+          {
+            id: "attempt-timeline",
+            session_id: "session-timeline",
+            repository_id: "repo-1",
+            attempt_number: 1,
+            status: "failed",
+            instance_type: "lite",
+            promoted_from_instance_type: null,
+            container_instance: "agent-session-session-timeline-attempt-1",
+            exit_code: 1,
+            failure_reason: "agent_exit_non_zero",
+            failure_stage: "runtime",
+            created_at: now - 12_000,
+            claimed_at: now - 11_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_attempt_events",
+        all: () => [
+          {
+            id: 1,
+            attempt_id: "attempt-timeline",
+            session_id: "session-timeline",
+            repository_id: "repo-1",
+            type: "stdout_chunk",
+            stream: "stdout",
+            message: "Analyzing repository",
+            payload_json: null,
+            created_at: now - 9_500
+          },
+          {
+            id: 2,
+            attempt_id: "attempt-timeline",
+            session_id: "session-timeline",
+            repository_id: "repo-1",
+            type: "stderr_chunk",
+            stream: "stderr",
+            message: "Tests still failing",
+            payload_json: null,
+            created_at: now - 9_000
+          }
+        ]
       }
     ]);
 
@@ -1046,22 +1127,18 @@ describe("API actions and session routes", () => {
     expect(body.events.some((event) => event.type === "session_started")).toBe(true);
     expect(
       body.events.some(
-        (event) => event.type === "log" && event.stream === "system" && event.detail === "codex run"
+        (event) => event.type === "log" && event.stream === "stdout" && event.detail === "Analyzing repository"
       )
     ).toBe(true);
     expect(
       body.events.some(
-        (event) => event.type === "log" && event.stream === "error" && event.detail === "Tests still failing"
+        (event) => event.type === "log" && event.stream === "stderr" && event.detail === "Tests still failing"
       )
     ).toBe(true);
-    expect(body.events.some((event) => event.type === "log" && event.stream === "stdout")).toBe(false);
-    expect(body.events.some((event) => event.type === "log" && event.stream === "stderr")).toBe(false);
-    expect(
-      body.events.some((event) => event.type === "session_completed" && event.title === "Session failed")
-    ).toBe(true);
+    expect(body.events.some((event) => event.type === "session_completed")).toBe(true);
   });
 
-  it("uses structured agent session steps in timeline when available", async () => {
+  it("uses synthesized attempt steps in timeline", async () => {
     const now = Date.now();
     const db = createMockD1Database([
       {
@@ -1077,6 +1154,8 @@ describe("API actions and session routes", () => {
             source_number: 5,
             origin: "issue_assign",
             status: "success",
+            active_attempt_id: "attempt-structured",
+            latest_attempt_id: "attempt-structured",
             created_at: now - 12_000,
             started_at: now - 10_000,
             completed_at: now - 1_000,
@@ -1084,56 +1163,49 @@ describe("API actions and session routes", () => {
           })
       },
       {
-        when: "FROM agent_session_steps",
+        when: "FROM agent_session_attempts",
+        first: () => ({
+          id: "attempt-structured",
+          session_id: "session-structured",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "success",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-structured-attempt-1",
+          exit_code: 0,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: now - 12_000,
+          claimed_at: now - 11_000,
+          started_at: now - 10_000,
+          completed_at: now - 1_000,
+          updated_at: now - 1_000
+        }),
         all: () => [
           {
-            id: 1,
+            id: "attempt-structured",
             session_id: "session-structured",
             repository_id: "repo-1",
-            kind: "session_created",
-            title: "Session created",
-            detail: "issue #5 · issue_assign · bob",
-            payload_json: "{\"status\":\"queued\"}",
-            created_at: now - 12_000
-          },
-          {
-            id: 2,
-            session_id: "session-structured",
-            repository_id: "repo-1",
-            kind: "session_started",
-            title: "Session started",
-            detail: "refs/heads/agent/session-structured",
-            payload_json: "{\"status\":\"running\"}",
-            created_at: now - 10_000
-          },
-          {
-            id: 3,
-            session_id: "session-structured",
-            repository_id: "repo-1",
-            kind: "session_completed",
-            title: "Session completed",
-            detail: "success",
-            payload_json: "{\"status\":\"success\"}",
-            created_at: now - 1_000
+            attempt_number: 1,
+            status: "success",
+            instance_type: "lite",
+            promoted_from_instance_type: null,
+            container_instance: "agent-session-session-structured-attempt-1",
+            exit_code: 0,
+            failure_reason: null,
+            failure_stage: null,
+            created_at: now - 12_000,
+            claimed_at: now - 11_000,
+            started_at: now - 10_000,
+            completed_at: now - 1_000,
+            updated_at: now - 1_000
           }
         ]
       },
       {
-        when: "FROM agent_session_interventions",
-        all: () => [
-          {
-            id: 4,
-            session_id: "session-structured",
-            repository_id: "repo-1",
-            kind: "cancel_requested",
-            title: "Cancellation requested",
-            detail: "Queued session cancelled by bob.",
-            created_by: "user-2",
-            created_by_username: "bob",
-            payload_json: "{\"status\":\"cancelled\"}",
-            created_at: now - 500
-          }
-        ]
+        when: "FROM agent_session_attempt_events",
+        all: () => []
       }
     ]);
 
@@ -1156,23 +1228,15 @@ describe("API actions and session routes", () => {
     );
     expect(
       body.events.some(
-        (event) =>
-          event.id === "step-2" &&
-          event.type === "session_started" &&
-          event.detail === "refs/heads/agent/session-structured"
+        (event) => event.type === "session_started" && event.detail === "lite"
       )
     ).toBe(true);
     expect(
       body.events.some(
-        (event) => event.id === "step-3" && event.type === "session_completed" && event.title === "Session completed"
+        (event) => event.type === "session_completed" && event.detail === "success"
       )
     ).toBe(true);
     expect(body.events.some((event) => event.type === "log")).toBe(false);
-    expect(
-      body.events.some(
-        (event) => event.type === "intervention" && event.title === "Cancellation requested"
-      )
-    ).toBe(true);
   });
 
   it("cancels a queued agent session before it starts running", async () => {
@@ -1198,12 +1262,35 @@ describe("API actions and session routes", () => {
           return buildAgentSessionRow({
             id: "session-cancel",
             status: sessionReadCount >= 2 ? "cancelled" : "queued",
+            active_attempt_id: "attempt-cancel",
+            latest_attempt_id: "attempt-cancel",
             completed_at: sessionReadCount >= 2 ? Date.now() : null
           });
         }
       },
       {
-        when: "SET status = 'cancelled', completed_at = ?, updated_at = ?",
+        when: "WHERE repository_id = ? AND id = ?",
+        first: () => ({
+          id: "attempt-cancel",
+          session_id: "session-cancel",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "queued",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: null,
+          exit_code: null,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: Date.now(),
+          claimed_at: null,
+          started_at: null,
+          completed_at: null,
+          updated_at: Date.now()
+        })
+      },
+      {
+        when: "UPDATE agent_session_attempts",
         run: () => ({
           success: true,
           meta: {
@@ -1212,7 +1299,16 @@ describe("API actions and session routes", () => {
         })
       },
       {
-        when: "INSERT INTO agent_session_interventions",
+        when: "UPDATE agent_sessions",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      },
+      {
+        when: "INSERT INTO agent_session_attempt_events",
         run: () => ({ success: true })
       }
     ]);

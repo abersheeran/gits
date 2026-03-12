@@ -4,8 +4,7 @@ import { ActionLogStorageService, buildLogExcerpt } from "./action-log-storage-s
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { MockR2Bucket } from "../test-utils/mock-r2";
 
-function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
-  const now = Date.now();
+function buildSessionRow(overrides?: Partial<Record<string, unknown>>) {
   return {
     id: "session-1",
     repository_id: "repo-1",
@@ -24,7 +23,6 @@ function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
     workflow_id: "workflow-1",
     workflow_name: "Issue Bot",
     parent_session_id: null,
-    linked_run_id: "run-1",
     created_by: "user-1",
     created_by_username: "alice",
     delegated_from_user_id: "user-1",
@@ -32,89 +30,52 @@ function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
     logs: "",
     exit_code: null,
     container_instance: null,
-    created_at: now,
+    active_attempt_id: "attempt-1",
+    latest_attempt_id: "attempt-1",
+    failure_reason: null,
+    failure_stage: null,
+    created_at: 100,
     claimed_at: null,
     started_at: null,
     completed_at: null,
-    updated_at: now,
+    updated_at: 100,
     ...(overrides ?? {})
   };
 }
 
-describe("AgentSessionService structured steps", () => {
+function buildAttemptRow(overrides?: Partial<Record<string, unknown>>) {
+  return {
+    id: "attempt-1",
+    session_id: "session-1",
+    repository_id: "repo-1",
+    attempt_number: 1,
+    status: "queued",
+    instance_type: "lite",
+    promoted_from_instance_type: null,
+    container_instance: null,
+    exit_code: null,
+    failure_reason: null,
+    failure_stage: null,
+    created_at: 100,
+    claimed_at: null,
+    started_at: null,
+    completed_at: null,
+    updated_at: 100,
+    ...(overrides ?? {})
+  };
+}
+
+describe("AgentSessionService", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("lists structured session steps with parsed payloads", async () => {
-    const db = createMockD1Database([
-      {
-        when: "FROM agent_session_steps",
-        all: () => [
-          {
-            id: 1,
-            session_id: "session-1",
-            repository_id: "repo-1",
-            kind: "session_completed",
-            title: "Session failed",
-            detail: "failed",
-            payload_json: "{\"status\":\"failed\",\"exitCode\":1}",
-            created_at: 123
-          }
-        ]
-      }
-    ]);
+  it("creates a queued session with an initial queued attempt and event", async () => {
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("session-created")
+      .mockReturnValueOnce("attempt-created");
 
-    const service = new AgentSessionService(db);
-    const steps = await service.listSteps("repo-1", "session-1");
-
-    expect(steps).toHaveLength(1);
-    expect(steps[0]?.kind).toBe("session_completed");
-    expect(steps[0]?.payload?.status).toBe("failed");
-    expect(steps[0]?.payload?.exitCode).toBe(1);
-  });
-
-  it("records a session-claimed step when a queued session is claimed", async () => {
-    const insertedSteps: Array<{ kind: unknown; title: unknown; detail: unknown }> = [];
-    const db = createMockD1Database([
-      {
-        when: "UPDATE agent_sessions",
-        run: () => ({
-          success: true,
-          meta: {
-            changes: 1
-          }
-        })
-      },
-      {
-        when: "INSERT INTO agent_session_steps",
-        run: (params) => {
-          insertedSteps.push({
-            kind: params[2],
-            title: params[3],
-            detail: params[4]
-          });
-          return { success: true };
-        }
-      }
-    ]);
-
-    const service = new AgentSessionService(db);
-    const claimedAt = await service.claimQueuedSession("repo-1", "session-1", "agent-session-session-1");
-
-    expect(claimedAt).not.toBeNull();
-    expect(insertedSteps).toEqual([
-      {
-        kind: "session_claimed",
-        title: "Runner claimed queued session",
-        detail: "container: agent-session-session-1"
-      }
-    ]);
-  });
-
-  it("creates session_created and session_queued steps for a new session", async () => {
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("session-created");
-    const insertedKinds: string[] = [];
+    const insertedEvents: Array<{ type: unknown; message: unknown }> = [];
     const db = createMockD1Database([
       {
         when: "RETURNING session_number_seq AS session_number",
@@ -125,23 +86,28 @@ describe("AgentSessionService structured steps", () => {
         run: () => ({ success: true })
       },
       {
-        when: "WHERE s.repository_id = ? AND s.id = ?",
-        first: () =>
-          buildAgentSessionRow({
-            id: "session-created",
-            session_number: 5,
-            source_type: "issue",
-            source_number: 42,
-            origin: "issue_assign",
-            workflow_id: "workflow-1"
-          })
+        when: "INSERT INTO agent_session_attempts",
+        run: () => ({ success: true })
       },
       {
-        when: "INSERT INTO agent_session_steps",
+        when: "INSERT INTO agent_session_attempt_events",
         run: (params) => {
-          insertedKinds.push(String(params[2] ?? ""));
+          insertedEvents.push({
+            type: params[3],
+            message: params[5]
+          });
           return { success: true };
         }
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildSessionRow({
+            id: "session-created",
+            session_number: 5,
+            active_attempt_id: "attempt-created",
+            latest_attempt_id: "attempt-created"
+          })
       }
     ]);
 
@@ -163,104 +129,87 @@ describe("AgentSessionService structured steps", () => {
     });
 
     expect(session.id).toBe("session-created");
-    expect(insertedKinds).toEqual(["session_created", "session_queued"]);
+    expect(session.active_attempt_id).toBe("attempt-created");
+    expect(session.latest_attempt_id).toBe("attempt-created");
+    expect(insertedEvents).toEqual([
+      {
+        type: "attempt_created",
+        message: "Attempt #1 queued."
+      }
+    ]);
   });
 
-  it("records started and completed steps across the session lifecycle", async () => {
-    const insertedSteps: Array<{ kind: unknown; title: unknown; detail: unknown }> = [];
+  it("creates retry attempts against the same session and promotes the next active attempt", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("attempt-retry");
+
     const db = createMockD1Database([
       {
+        when: "SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number",
+        first: () => ({ attempt_number: 2 })
+      },
+      {
+        when: "INSERT INTO agent_session_attempts",
+        run: () => ({ success: true })
+      },
+      {
         when: "UPDATE agent_sessions",
-        run: () => ({
-          success: true,
-          meta: {
-            changes: 1
-          }
-        })
+        run: () => ({ success: true, meta: { changes: 1 } })
       },
       {
-        when: "INSERT INTO agent_session_steps",
-        run: (params) => {
-          insertedSteps.push({
-            kind: params[2],
-            title: params[3],
-            detail: params[4]
-          });
-          return { success: true };
-        }
+        when: "INSERT INTO agent_session_attempt_events",
+        run: () => ({ success: true })
       },
       {
-        when: "WHERE s.repository_id = ? AND s.id = ?",
+        when: "FROM agent_session_attempts",
         first: () =>
-          buildAgentSessionRow({
-            id: "session-sync",
-            branch_ref: "refs/heads/agent/session-sync"
+          buildAttemptRow({
+            id: "attempt-retry",
+            attempt_number: 2,
+            status: "queued",
+            instance_type: "standard-1",
+            promoted_from_instance_type: "lite"
           })
       }
     ]);
 
     const service = new AgentSessionService(db);
-    await service.updateSessionToRunning("repo-1", "session-sync", "agent-session-session-sync");
-    await service.completeSession("repo-1", "session-sync", {
-      status: "failed",
-      logs: "failed logs",
-      exitCode: 1
+    const attempt = await service.createRetryAttempt({
+      repositoryId: "repo-1",
+      sessionId: "session-1",
+      instanceType: "standard-1",
+      promotedFromInstanceType: "lite"
     });
 
-    expect(insertedSteps).toEqual([
-      {
-        kind: "session_started",
-        title: "Session started",
-        detail: "refs/heads/agent/session-sync"
-      },
-      {
-        kind: "session_completed",
-        title: "Session failed",
-        detail: "failed"
-      }
-    ]);
+    expect(attempt.id).toBe("attempt-retry");
+    expect(attempt.attempt_number).toBe(2);
+    expect(attempt.promoted_from_instance_type).toBe("lite");
   });
 
-  it("records structured artifacts, usage, and interventions for a run result", async () => {
-    const artifactsByKind = new Map<string, { sizeBytes: number; contentText: string }>();
-    const usageKinds: string[] = [];
-    const interventionKinds: string[] = [];
-    const usagePayloads = new Map<string, string | null>();
-    const runLogs = `run logs ${"x".repeat(5_000)}`;
-    const stdout = `stdout payload ${"y".repeat(5_000)}`;
-    const stderr = `stderr payload ${"z".repeat(5_000)}`;
+  it("records attempt artifacts and a structured result_reported event", async () => {
     const bucket = new MockR2Bucket();
+    const insertedArtifacts: string[] = [];
+    const insertedEvents: string[] = [];
     const db = createMockD1Database([
       {
         when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () =>
-          buildAgentSessionRow({
+          buildSessionRow({
             id: "session-observe",
-            session_number: 9
+            active_attempt_id: "attempt-observe",
+            latest_attempt_id: "attempt-observe"
           })
       },
       {
-        when: "INSERT INTO agent_session_artifacts",
+        when: "INSERT INTO agent_session_attempt_artifacts",
         run: (params) => {
-          artifactsByKind.set(String(params[3] ?? ""), {
-            sizeBytes: Number(params[6] ?? 0),
-            contentText: String(params[7] ?? "")
-          });
+          insertedArtifacts.push(String(params[4] ?? ""));
           return { success: true };
         }
       },
       {
-        when: "INSERT INTO agent_session_usage_records",
+        when: "INSERT INTO agent_session_attempt_events",
         run: (params) => {
-          usageKinds.push(String(params[2] ?? ""));
-          usagePayloads.set(String(params[2] ?? ""), (params[6] as string | null) ?? null);
-          return { success: true };
-        }
-      },
-      {
-        when: "INSERT INTO agent_session_interventions",
-        run: (params) => {
-          interventionKinds.push(String(params[2] ?? ""));
+          insertedEvents.push(String(params[3] ?? ""));
           return { success: true };
         }
       }
@@ -270,21 +219,23 @@ describe("AgentSessionService structured steps", () => {
       db,
       new ActionLogStorageService(bucket as unknown as R2Bucket)
     );
+    const logs = `run logs ${"x".repeat(5_000)}`;
+    const stdout = `stdout payload ${"y".repeat(5_000)}`;
+    const stderr = `stderr payload ${"z".repeat(5_000)}`;
+
     await service.recordSessionObservability({
       repositoryId: "repo-1",
       sessionId: "session-observe",
-      logs: runLogs,
+      logs,
       result: {
+        exitCode: 1,
         stdout,
         stderr,
-        durationMs: 321,
-        exitCode: 1,
-        error: "runner failed",
-        attemptedCommand: "codex run",
-        mcpSetupWarning: "platform MCP missing",
+        durationMs: 1280,
+        attemptedCommand: "npm test",
         validationReport: {
-          headline: "Tests failed before build.",
-          detail: "Ran npm test and stopped after the first failing suite.",
+          headline: "Tests failed.",
+          detail: "npm test exited non-zero.",
           checks: [
             {
               kind: "tests",
@@ -292,203 +243,62 @@ describe("AgentSessionService structured steps", () => {
               scope: null,
               status: "failed",
               command: "npm test",
-              summary: "The login retry suite failed."
+              summary: "The test command failed."
             }
           ]
-        }
-      },
-      recordedAt: 999
-    });
-
-    expect([...artifactsByKind.keys()]).toEqual(["session_logs", "stdout", "stderr"]);
-    expect(artifactsByKind.get("session_logs")).toEqual({
-      sizeBytes: runLogs.length,
-      contentText: buildLogExcerpt(runLogs)
-    });
-    expect(artifactsByKind.get("stdout")).toEqual({
-      sizeBytes: stdout.length,
-      contentText: buildLogExcerpt(stdout)
-    });
-    expect(artifactsByKind.get("stderr")).toEqual({
-      sizeBytes: stderr.length,
-      contentText: buildLogExcerpt(stderr)
-    });
-    expect(usageKinds).toEqual([
-      "log_chars",
-      "stdout_chars",
-      "stderr_chars",
-      "duration_ms",
-      "exit_code"
-    ]);
-    expect(interventionKinds).toEqual(["mcp_setup_warning"]);
-    expect(JSON.parse(usagePayloads.get("log_chars") ?? "null")).toMatchObject({
-      sessionId: "session-observe",
-      validationReport: {
-        headline: "Tests failed before build.",
-        detail: "Ran npm test and stopped after the first failing suite."
+        },
+        mcpSetupWarning: "platform MCP missing"
       }
     });
-    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
-    await expect(logStorage.readRunLogs("repo-1", "session-observe")).resolves.toBe(runLogs);
-    await expect(
-      logStorage.readSessionArtifactLogs("repo-1", "session-observe", "stdout")
-    ).resolves.toBe(stdout);
-    await expect(
-      logStorage.readSessionArtifactLogs("repo-1", "session-observe", "stderr")
-    ).resolves.toBe(stderr);
+
+    expect(insertedArtifacts).toEqual(["session_logs", "stdout", "stderr"]);
+    expect(insertedEvents).toEqual(["result_reported", "warning"]);
+    expect(
+      await bucket.get(
+        "repositories/repo-1/sessions/session-observe/attempts/attempt-observe/artifacts/session_logs.log"
+      )
+    ).not.toBeNull();
+    expect(
+      await bucket.get(
+        "repositories/repo-1/sessions/session-observe/attempts/attempt-observe/artifacts/stdout.log"
+      )
+    ).not.toBeNull();
+    expect(buildLogExcerpt(stdout)).not.toBe(stdout);
   });
 
-  it("reads full artifact content from object storage when available", async () => {
+  it("reads attempt artifact content from storage and falls back to legacy session artifact paths", async () => {
     const bucket = new MockR2Bucket();
-    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
-    await logStorage.writeSessionArtifactLogs("repo-1", "session-read", "stdout", "full stdout");
+    await bucket.put(
+      "repositories/repo-1/sessions/session-1/artifacts/stdout.log",
+      "full stdout"
+    );
+
     const db = createMockD1Database([
       {
         when: "WHERE repository_id = ? AND session_id = ? AND id = ?",
         first: () => ({
           id: "artifact-stdout",
-          session_id: "session-read",
+          attempt_id: "attempt-1",
+          session_id: "session-1",
           repository_id: "repo-1",
           kind: "stdout",
           title: "Runner stdout",
           media_type: "text/plain",
-          size_bytes: 11,
+          size_bytes: 7,
           content_text: "excerpt",
-          created_at: 10,
-          updated_at: 11
+          created_at: 1,
+          updated_at: 1
         })
       }
     ]);
 
-    const service = new AgentSessionService(db, logStorage);
-    const content = await service.readArtifactContent("repo-1", "session-read", "artifact-stdout");
+    const service = new AgentSessionService(
+      db,
+      new ActionLogStorageService(bucket as unknown as R2Bucket)
+    );
+    const content = await service.readArtifactContent("repo-1", "session-1", "artifact-stdout");
 
     expect(content?.artifact.id).toBe("artifact-stdout");
-    expect(content?.artifact.has_full_content).toBe(true);
     expect(content?.content).toBe("full stdout");
-  });
-
-  it("lists structured artifacts, usage records, and interventions", async () => {
-    const db = createMockD1Database([
-      {
-        when: "FROM agent_session_artifacts",
-        all: () => [
-          {
-            id: "artifact-1",
-            session_id: "session-1",
-            repository_id: "repo-1",
-            kind: "stdout",
-            title: "Runner stdout",
-            media_type: "text/plain",
-            size_bytes: 12,
-            content_text: "hello world",
-            created_at: 10,
-            updated_at: 11
-          }
-        ]
-      },
-      {
-        when: "FROM agent_session_usage_records",
-        all: () => [
-          {
-            id: 2,
-            session_id: "session-1",
-            repository_id: "repo-1",
-            kind: "duration_ms",
-            value: 125,
-            unit: "ms",
-            detail: "Container execution duration",
-            payload_json: "{\"runId\":\"run-1\"}",
-            created_at: 20,
-            updated_at: 21
-          }
-        ]
-      },
-      {
-        when: "FROM agent_session_interventions",
-        all: () => [
-          {
-            id: 3,
-            session_id: "session-1",
-            repository_id: "repo-1",
-            kind: "cancel_requested",
-            title: "Cancellation requested",
-            detail: "Queued session cancelled by alice.",
-            created_by: "user-1",
-            created_by_username: "alice",
-            payload_json: "{\"status\":\"cancelled\"}",
-            created_at: 30
-          }
-        ]
-      }
-    ]);
-
-    const service = new AgentSessionService(db);
-    const [artifacts, usageRecords, interventions] = await Promise.all([
-      service.listArtifacts("repo-1", "session-1"),
-      service.listUsageRecords("repo-1", "session-1"),
-      service.listInterventions("repo-1", "session-1")
-    ]);
-
-    expect(artifacts[0]?.kind).toBe("stdout");
-    expect(usageRecords[0]?.payload?.runId).toBe("run-1");
-    expect(interventions[0]?.created_by_username).toBe("alice");
-  });
-
-  it("records a cancellation intervention when a user cancels a queued session directly", async () => {
-    const insertedInterventions: Array<{ kind: unknown; title: unknown; detail: unknown }> = [];
-    const db = createMockD1Database([
-      {
-        when: "UPDATE agent_sessions",
-        run: () => ({
-          success: true,
-          meta: {
-            changes: 1
-          }
-        })
-      },
-      {
-        when: "INSERT INTO agent_session_steps",
-        run: () => ({ success: true })
-      },
-      {
-        when: "INSERT INTO agent_session_interventions",
-        run: (params) => {
-          insertedInterventions.push({
-            kind: params[2],
-            title: params[3],
-            detail: params[4]
-          });
-          return { success: true };
-        }
-      },
-      {
-        when: "WHERE s.repository_id = ? AND s.id = ?",
-        first: () =>
-          buildAgentSessionRow({
-            id: "session-cancelled",
-            status: "cancelled",
-            completed_at: 500,
-            updated_at: 500
-          })
-      }
-    ]);
-
-    const service = new AgentSessionService(db);
-    const result = await service.cancelQueuedSession({
-      repositoryId: "repo-1",
-      sessionId: "session-cancelled",
-      completedAt: 500,
-      cancelledBy: "user-1"
-    });
-
-    expect(result.cancelled).toBe(true);
-    expect(insertedInterventions).toEqual([
-      {
-        kind: "cancel_requested",
-        title: "Cancellation requested",
-        detail: "A user cancelled the queued session before it started."
-      }
-    ]);
   });
 });

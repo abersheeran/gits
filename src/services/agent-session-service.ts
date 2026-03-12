@@ -3,16 +3,19 @@ import type {
   ActionContainerInstanceType,
   AgentSessionArtifactKind,
   AgentSessionArtifactRecord,
-  AgentSessionInterventionKind,
-  AgentSessionInterventionRecord,
+  AgentSessionAttemptEventRecord,
+  AgentSessionAttemptEventStream,
+  AgentSessionAttemptEventType,
+  AgentSessionAttemptFailureReason,
+  AgentSessionAttemptFailureStage,
+  AgentSessionAttemptRecord,
+  AgentSessionAttemptStatus,
   AgentSessionOrigin,
   AgentSessionRecord,
   AgentSessionSourceType,
   AgentSessionStatus,
   AgentSessionStepKind,
   AgentSessionStepRecord,
-  AgentSessionUsageKind,
-  AgentSessionUsageRecord,
   AgentSessionValidationReport
 } from "../types";
 import {
@@ -39,16 +42,7 @@ export type AgentSessionTimelineEvent = {
   stream: "system" | "stdout" | "stderr" | "error" | null;
 };
 
-const TIMELINE_SYSTEM_LOG_SECTIONS = new Set([
-  "attempted",
-  "mcp_setup",
-  "status_reconciliation_warning",
-  "log_stream_warning"
-]);
-
-const TIMELINE_ERROR_LOG_SECTIONS = new Set(["error", "runner_error", "runner_spawn_error"]);
-
-type AgentSessionRow = {
+type SessionRow = {
   id: string;
   repository_id: string;
   session_number: number;
@@ -73,6 +67,10 @@ type AgentSessionRow = {
   logs: string;
   exit_code: number | null;
   container_instance: string | null;
+  active_attempt_id: string | null;
+  latest_attempt_id: string | null;
+  failure_reason: AgentSessionAttemptFailureReason | null;
+  failure_stage: AgentSessionAttemptFailureStage | null;
   created_at: number;
   claimed_at: number | null;
   started_at: number | null;
@@ -80,19 +78,28 @@ type AgentSessionRow = {
   updated_at: number;
 };
 
-type AgentSessionStepRow = {
-  id: number;
+type AttemptRow = {
+  id: string;
   session_id: string;
   repository_id: string;
-  kind: AgentSessionStepKind;
-  title: string;
-  detail: string | null;
-  payload_json: string | null;
+  attempt_number: number;
+  status: AgentSessionAttemptStatus;
+  instance_type: ActionContainerInstanceType;
+  promoted_from_instance_type: ActionContainerInstanceType | null;
+  container_instance: string | null;
+  exit_code: number | null;
+  failure_reason: AgentSessionAttemptFailureReason | null;
+  failure_stage: AgentSessionAttemptFailureStage | null;
   created_at: number;
+  claimed_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
 };
 
-type AgentSessionArtifactRow = {
+type ArtifactRow = {
   id: string;
+  attempt_id: string;
   session_id: string;
   repository_id: string;
   kind: AgentSessionArtifactKind;
@@ -104,28 +111,14 @@ type AgentSessionArtifactRow = {
   updated_at: number;
 };
 
-type AgentSessionUsageRow = {
+type EventRow = {
   id: number;
+  attempt_id: string;
   session_id: string;
   repository_id: string;
-  kind: AgentSessionUsageKind;
-  value: number;
-  unit: string;
-  detail: string | null;
-  payload_json: string | null;
-  created_at: number;
-  updated_at: number;
-};
-
-type AgentSessionInterventionRow = {
-  id: number;
-  session_id: string;
-  repository_id: string;
-  kind: AgentSessionInterventionKind;
-  title: string;
-  detail: string | null;
-  created_by: string | null;
-  created_by_username: string | null;
+  type: AgentSessionAttemptEventType;
+  stream: AgentSessionAttemptEventStream;
+  message: string;
   payload_json: string | null;
   created_at: number;
 };
@@ -148,6 +141,14 @@ export type CreateAgentSessionInput = {
   delegatedFromUserId?: string | null;
 };
 
+type AttemptEventInput = {
+  type: AgentSessionAttemptEventType;
+  stream: AgentSessionAttemptEventStream;
+  message: string;
+  payload?: Record<string, unknown> | null;
+  createdAt?: number;
+};
+
 function parsePayloadJson(value: string | null): Record<string, unknown> | null {
   if (!value) {
     return null;
@@ -163,34 +164,47 @@ function parsePayloadJson(value: string | null): Record<string, unknown> | null 
   return null;
 }
 
+function asJson(value: Record<string, unknown> | null | undefined): string | null {
+  return value ? JSON.stringify(value) : null;
+}
+
 function isLogArtifactKind(kind: AgentSessionArtifactKind): kind is AgentLogArtifactKind {
   return kind === "session_logs" || kind === "stdout" || kind === "stderr";
 }
 
-function mapCompletionStep(status: AgentSessionStatus): {
-  kind: AgentSessionStepKind;
-  title: string;
-  level: AgentSessionTimelineEvent["level"];
-} {
+function mapAttemptStatusToSessionStatus(status: AgentSessionAttemptStatus): AgentSessionStatus {
+  if (status === "success") {
+    return "success";
+  }
   if (status === "cancelled") {
-    return {
-      kind: "session_cancelled",
-      title: "Session cancelled",
-      level: "warning"
-    };
+    return "cancelled";
   }
-  if (status === "failed") {
-    return {
-      kind: "session_completed",
-      title: "Session failed",
-      level: "error"
-    };
+  if (status === "failed" || status === "retryable_failed") {
+    return "failed";
   }
-  return {
-    kind: "session_completed",
-    title: "Session completed",
-    level: "success"
-  };
+  if (status === "running" || status === "booting") {
+    return "running";
+  }
+  return "queued";
+}
+
+function eventLevel(event: AgentSessionAttemptEventRecord): AgentSessionTimelineEvent["level"] {
+  if (event.stream === "error") {
+    return "error";
+  }
+  if (event.type === "warning" || event.type === "retry_scheduled") {
+    return "warning";
+  }
+  if (event.type === "attempt_completed") {
+    const status = event.payload?.status;
+    if (status === "success") {
+      return "success";
+    }
+    if (status === "failed" || status === "retryable_failed" || status === "cancelled") {
+      return status === "cancelled" ? "warning" : "error";
+    }
+  }
+  return "info";
 }
 
 export class AgentSessionService {
@@ -199,7 +213,7 @@ export class AgentSessionService {
     private readonly logStorage: ActionLogStorageService | null = null
   ) {}
 
-  private sessionSelectSql = `SELECT
+  private readonly sessionSelectSql = `SELECT
       s.id,
       s.repository_id,
       s.session_number,
@@ -224,15 +238,38 @@ export class AgentSessionService {
       s.logs,
       s.exit_code,
       s.container_instance,
+      s.active_attempt_id,
+      s.latest_attempt_id,
+      s.failure_reason,
+      s.failure_stage,
       s.created_at,
       s.claimed_at,
       s.started_at,
       s.completed_at,
       s.updated_at
-     FROM agent_sessions s
-     LEFT JOIN action_workflows w ON w.id = s.workflow_id
-     LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
-     LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id`;
+    FROM agent_sessions s
+    LEFT JOIN action_workflows w ON w.id = s.workflow_id
+    LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
+    LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id`;
+
+  private readonly attemptSelectSql = `SELECT
+      id,
+      session_id,
+      repository_id,
+      attempt_number,
+      status,
+      instance_type,
+      promoted_from_instance_type,
+      container_instance,
+      exit_code,
+      failure_reason,
+      failure_stage,
+      created_at,
+      claimed_at,
+      started_at,
+      completed_at,
+      updated_at
+    FROM agent_session_attempts`;
 
   private async nextSessionNumber(repositoryId: string): Promise<number> {
     const row = await this.db
@@ -243,21 +280,36 @@ export class AgentSessionService {
           pull_number_seq,
           session_number_seq
         )
-         VALUES (?, 0, 0, 1)
-         ON CONFLICT(repository_id)
-         DO UPDATE SET session_number_seq = session_number_seq + 1
-         RETURNING session_number_seq AS session_number`
+        VALUES (?, 0, 0, 1)
+        ON CONFLICT(repository_id)
+        DO UPDATE SET session_number_seq = session_number_seq + 1
+        RETURNING session_number_seq AS session_number`
       )
       .bind(repositoryId)
       .first<{ session_number: number }>();
-
     if (!row) {
       throw new Error("Unable to allocate agent session number");
     }
     return row.session_number;
   }
 
-  private mapRow(row: AgentSessionRow): AgentSessionRecord {
+  private async nextAttemptNumber(sessionId: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
+         FROM agent_session_attempts
+         WHERE session_id = ?`
+      )
+      .bind(sessionId)
+      .first<{ attempt_number: number }>();
+    return row?.attempt_number ?? 1;
+  }
+
+  private buildBranchRef(sessionId: string): string {
+    return `refs/heads/agent/${sessionId}`;
+  }
+
+  private mapSessionRow(row: SessionRow): AgentSessionRecord {
     const triggerSourceType = row.source_type === "manual" ? null : row.source_type;
     return {
       id: row.id,
@@ -288,11 +340,15 @@ export class AgentSessionService {
       delegated_from_username: row.delegated_from_username,
       triggered_by: row.created_by,
       triggered_by_username: row.created_by_username,
+      active_attempt_id: row.active_attempt_id,
+      latest_attempt_id: row.latest_attempt_id,
       logs: row.logs,
       has_full_logs: true,
       logs_url: null,
       exit_code: row.exit_code,
       container_instance: row.container_instance,
+      failure_reason: row.failure_reason,
+      failure_stage: row.failure_stage,
       created_at: row.created_at,
       claimed_at: row.claimed_at,
       started_at: row.started_at,
@@ -301,22 +357,31 @@ export class AgentSessionService {
     };
   }
 
-  private mapStepRow(row: AgentSessionStepRow): AgentSessionStepRecord {
+  private mapAttemptRow(row: AttemptRow): AgentSessionAttemptRecord {
     return {
       id: row.id,
       session_id: row.session_id,
       repository_id: row.repository_id,
-      kind: row.kind,
-      title: row.title,
-      detail: row.detail,
-      payload: parsePayloadJson(row.payload_json),
-      created_at: row.created_at
+      attempt_number: row.attempt_number,
+      status: row.status,
+      instance_type: row.instance_type,
+      promoted_from_instance_type: row.promoted_from_instance_type,
+      container_instance: row.container_instance,
+      exit_code: row.exit_code,
+      failure_reason: row.failure_reason,
+      failure_stage: row.failure_stage,
+      created_at: row.created_at,
+      claimed_at: row.claimed_at,
+      started_at: row.started_at,
+      completed_at: row.completed_at,
+      updated_at: row.updated_at
     };
   }
 
-  private mapArtifactRow(row: AgentSessionArtifactRow): AgentSessionArtifactRecord {
+  private mapArtifactRow(row: ArtifactRow): AgentSessionArtifactRecord {
     return {
       id: row.id,
+      attempt_id: row.attempt_id,
       session_id: row.session_id,
       repository_id: row.repository_id,
       kind: row.kind,
@@ -331,545 +396,26 @@ export class AgentSessionService {
     };
   }
 
-  private mapUsageRow(row: AgentSessionUsageRow): AgentSessionUsageRecord {
+  private mapEventRow(row: EventRow): AgentSessionAttemptEventRecord {
     return {
       id: row.id,
+      attempt_id: row.attempt_id,
       session_id: row.session_id,
       repository_id: row.repository_id,
-      kind: row.kind,
-      value: row.value,
-      unit: row.unit,
-      detail: row.detail,
-      payload: parsePayloadJson(row.payload_json),
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    };
-  }
-
-  private mapInterventionRow(row: AgentSessionInterventionRow): AgentSessionInterventionRecord {
-    return {
-      id: row.id,
-      session_id: row.session_id,
-      repository_id: row.repository_id,
-      kind: row.kind,
-      title: row.title,
-      detail: row.detail,
-      created_by: row.created_by,
-      created_by_username: row.created_by_username,
+      type: row.type,
+      stream: row.stream,
+      message: row.message,
       payload: parsePayloadJson(row.payload_json),
       created_at: row.created_at
     };
   }
 
-  private buildBranchRef(sessionId: string): string {
-    return `refs/heads/agent/${sessionId}`;
-  }
-
-  private async insertStep(input: {
-    sessionId: string;
-    repositoryId: string;
-    kind: AgentSessionStepKind;
-    title: string;
-    detail?: string | null;
-    payload?: Record<string, unknown> | null;
-    createdAt?: number;
-  }): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO agent_session_steps (
-          session_id,
-          repository_id,
-          kind,
-          title,
-          detail,
-          payload_json,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        input.sessionId,
-        input.repositoryId,
-        input.kind,
-        input.title,
-        input.detail ?? null,
-        input.payload ? JSON.stringify(input.payload) : null,
-        input.createdAt ?? Date.now()
-      )
-      .run();
-  }
-
-  private async upsertArtifact(input: {
-    sessionId: string;
-    repositoryId: string;
-    kind: AgentSessionArtifactKind;
-    title: string;
-    mediaType: string;
-    contentText: string;
-    sizeBytes?: number;
-    createdAt?: number;
-    updatedAt?: number;
-  }): Promise<void> {
-    const now = input.updatedAt ?? Date.now();
-    const createdAt = input.createdAt ?? now;
-    await this.db
-      .prepare(
-        `INSERT INTO agent_session_artifacts (
-          id,
-          session_id,
-          repository_id,
-          kind,
-          title,
-          media_type,
-          size_bytes,
-          content_text,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_id, kind)
-        DO UPDATE SET
-          title = excluded.title,
-          media_type = excluded.media_type,
-          size_bytes = excluded.size_bytes,
-          content_text = excluded.content_text,
-          updated_at = excluded.updated_at`
-      )
-      .bind(
-        crypto.randomUUID(),
-        input.sessionId,
-        input.repositoryId,
-        input.kind,
-        input.title,
-        input.mediaType,
-        input.sizeBytes ?? input.contentText.length,
-        input.contentText,
-        createdAt,
-        now
-      )
-      .run();
-  }
-
-  private async upsertUsageRecord(input: {
-    sessionId: string;
-    repositoryId: string;
-    kind: AgentSessionUsageKind;
-    value: number;
-    unit: string;
-    detail?: string | null;
-    payload?: Record<string, unknown> | null;
-    createdAt?: number;
-    updatedAt?: number;
-  }): Promise<void> {
-    const now = input.updatedAt ?? Date.now();
-    const createdAt = input.createdAt ?? now;
-    await this.db
-      .prepare(
-        `INSERT INTO agent_session_usage_records (
-          session_id,
-          repository_id,
-          kind,
-          value,
-          unit,
-          detail,
-          payload_json,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_id, kind)
-        DO UPDATE SET
-          value = excluded.value,
-          unit = excluded.unit,
-          detail = excluded.detail,
-          payload_json = excluded.payload_json,
-          updated_at = excluded.updated_at`
-      )
-      .bind(
-        input.sessionId,
-        input.repositoryId,
-        input.kind,
-        input.value,
-        input.unit,
-        input.detail ?? null,
-        input.payload ? JSON.stringify(input.payload) : null,
-        createdAt,
-        now
-      )
-      .run();
-  }
-
-  private async findRows(input: {
-    repositoryId: string;
-    limit?: number;
-    sourceType?: AgentSessionSourceType;
-    sourceNumber?: number;
-  }): Promise<AgentSessionRow[]> {
-    const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
-    const whereClauses = ["s.repository_id = ?"];
-    const params: unknown[] = [input.repositoryId];
-
-    if (input.sourceType !== undefined) {
-      whereClauses.push("s.source_type = ?");
-      params.push(input.sourceType);
-    }
-    if (input.sourceNumber !== undefined) {
-      whereClauses.push("s.source_number = ?");
-      params.push(input.sourceNumber);
-    }
-
-    const rows = await this.db
-      .prepare(
-        `${this.sessionSelectSql}
-         WHERE ${whereClauses.join(" AND ")}
-         ORDER BY s.created_at DESC
-         LIMIT ?`
-      )
-      .bind(...params, limit)
-      .all<AgentSessionRow>();
-
-    return rows.results;
-  }
-
-  private parseLogEvents(session: AgentSessionRecord): AgentSessionTimelineEvent[] {
-    const logs = session.logs ?? "";
-    if (!logs.trim()) {
-      return [];
-    }
-
-    const lines = logs.split(/\r?\n/);
-    const logEvents: AgentSessionTimelineEvent[] = [];
-    let section: string | null = null;
-    const baseTimestamp = session.started_at ?? session.created_at;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-      const sectionMatch = trimmed.match(/^\[([a-z_]+)\]$/i);
-      if (sectionMatch) {
-        section = sectionMatch[1]?.toLowerCase() ?? null;
-        continue;
-      }
-      if (!section) {
-        continue;
-      }
-      if (!TIMELINE_SYSTEM_LOG_SECTIONS.has(section) && !TIMELINE_ERROR_LOG_SECTIONS.has(section)) {
-        continue;
-      }
-      const isErrorSection = TIMELINE_ERROR_LOG_SECTIONS.has(section);
-      logEvents.push({
-        id: `${session.id}-log-${logEvents.length}`,
-        type: "log",
-        title: section.replaceAll("_", " "),
-        detail: line,
-        timestamp: baseTimestamp + logEvents.length,
-        level: isErrorSection ? "error" : section === "mcp_setup" ? "warning" : "info",
-        stream: isErrorSection ? "error" : "system"
-      });
-    }
-
-    return logEvents;
-  }
-
-  async listSessions(input: {
-    repositoryId: string;
-    limit?: number;
-    sourceType?: AgentSessionSourceType;
-    sourceNumber?: number;
-  }): Promise<AgentSessionRecord[]> {
-    const rows = await this.findRows(input);
-    return rows.map((row) => this.mapRow(row));
-  }
-
-  async listLatestSessionsBySource(
-    repositoryId: string,
-    sourceType: AgentSessionSourceType,
-    sourceNumbers: readonly number[]
-  ): Promise<AgentSessionRecord[]> {
-    if (sourceNumbers.length === 0) {
-      return [];
-    }
-
-    const uniqueSourceNumbers = Array.from(new Set(sourceNumbers));
-    const placeholders = uniqueSourceNumbers.map(() => "?").join(", ");
-    const rows = await this.db
-      .prepare(
-        `${this.sessionSelectSql}
-         WHERE s.repository_id = ?
-           AND s.source_type = ?
-           AND s.source_number IN (${placeholders})
-         ORDER BY s.created_at DESC`
-      )
-      .bind(repositoryId, sourceType, ...uniqueSourceNumbers)
-      .all<AgentSessionRow>();
-
-    const latestBySourceNumber = new Map<number, AgentSessionRecord>();
-    for (const row of rows.results) {
-      if (row.source_number === null || latestBySourceNumber.has(row.source_number)) {
-        continue;
-      }
-      latestBySourceNumber.set(row.source_number, this.mapRow(row));
-    }
-
-    return Array.from(latestBySourceNumber.values());
-  }
-
-  async listLatestSessionsByCommentIds(
-    repositoryId: string,
-    commentIds: readonly string[]
-  ): Promise<AgentSessionRecord[]> {
-    if (commentIds.length === 0) {
-      return [];
-    }
-
-    const uniqueCommentIds = Array.from(new Set(commentIds));
-    const placeholders = uniqueCommentIds.map(() => "?").join(", ");
-    const rows = await this.db
-      .prepare(
-        `${this.sessionSelectSql}
-         WHERE s.repository_id = ?
-           AND s.source_comment_id IN (${placeholders})
-         ORDER BY s.created_at DESC`
-      )
-      .bind(repositoryId, ...uniqueCommentIds)
-      .all<AgentSessionRow>();
-
-    const latestByCommentId = new Map<string, AgentSessionRecord>();
-    for (const row of rows.results) {
-      if (!row.source_comment_id || latestByCommentId.has(row.source_comment_id)) {
-        continue;
-      }
-      latestByCommentId.set(row.source_comment_id, this.mapRow(row));
-    }
-
-    return Array.from(latestByCommentId.values());
-  }
-
-  async findSessionById(
-    repositoryId: string,
-    sessionId: string
-  ): Promise<AgentSessionRecord | null> {
-    const row = await this.db
-      .prepare(
-        `${this.sessionSelectSql}
-         WHERE s.repository_id = ? AND s.id = ?
-         LIMIT 1`
-      )
-      .bind(repositoryId, sessionId)
-      .first<AgentSessionRow>();
-
-    return row ? this.mapRow(row) : null;
-  }
-
-  async listSteps(repositoryId: string, sessionId: string): Promise<AgentSessionStepRecord[]> {
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          id,
-          session_id,
-          repository_id,
-          kind,
-          title,
-          detail,
-          payload_json,
-          created_at
-         FROM agent_session_steps
-         WHERE repository_id = ? AND session_id = ?
-         ORDER BY created_at ASC, id ASC`
-      )
-      .bind(repositoryId, sessionId)
-      .all<AgentSessionStepRow>();
-
-    return rows.results.map((row) => this.mapStepRow(row));
-  }
-
-  async listArtifacts(
-    repositoryId: string,
-    sessionId: string
-  ): Promise<AgentSessionArtifactRecord[]> {
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          id,
-          session_id,
-          repository_id,
-          kind,
-          title,
-          media_type,
-          size_bytes,
-          content_text,
-          created_at,
-          updated_at
-         FROM agent_session_artifacts
-         WHERE repository_id = ? AND session_id = ?
-         ORDER BY updated_at DESC, created_at DESC, id DESC`
-      )
-      .bind(repositoryId, sessionId)
-      .all<AgentSessionArtifactRow>();
-
-    return rows.results.map((row) => this.mapArtifactRow(row));
-  }
-
-  async findArtifactById(
-    repositoryId: string,
-    sessionId: string,
-    artifactId: string
-  ): Promise<AgentSessionArtifactRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT
-          id,
-          session_id,
-          repository_id,
-          kind,
-          title,
-          media_type,
-          size_bytes,
-          content_text,
-          created_at,
-          updated_at
-         FROM agent_session_artifacts
-         WHERE repository_id = ? AND session_id = ? AND id = ?
-         LIMIT 1`
-      )
-      .bind(repositoryId, sessionId, artifactId)
-      .first<AgentSessionArtifactRow>();
-
-    return row ? this.mapArtifactRow(row) : null;
-  }
-
-  async readSessionLogs(repositoryId: string, sessionId: string): Promise<string | null> {
-    const session = await this.findSessionById(repositoryId, sessionId);
-    if (!session) {
-      return null;
-    }
-    if (this.logStorage) {
-      const fullLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
-      if (fullLogs !== null) {
-        return fullLogs;
-      }
-    }
-    return session.logs;
-  }
-
-  async readArtifactContent(
-    repositoryId: string,
-    sessionId: string,
-    artifactId: string
-  ): Promise<{ artifact: AgentSessionArtifactRecord; content: string } | null> {
-    const artifact = await this.findArtifactById(repositoryId, sessionId, artifactId);
-    if (!artifact) {
-      return null;
-    }
-
-    if (this.logStorage && isLogArtifactKind(artifact.kind)) {
-      const content =
-        artifact.kind === "session_logs"
-          ? await this.logStorage.readSessionLogs(repositoryId, sessionId)
-          : await this.logStorage.readSessionArtifactLogs(repositoryId, sessionId, artifact.kind);
-      if (content !== null) {
-        return { artifact, content };
-      }
-    }
-
-    return { artifact, content: artifact.content_text };
-  }
-
-  async listUsageRecords(
-    repositoryId: string,
-    sessionId: string
-  ): Promise<AgentSessionUsageRecord[]> {
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          id,
-          session_id,
-          repository_id,
-          kind,
-          value,
-          unit,
-          detail,
-          payload_json,
-          created_at,
-          updated_at
-         FROM agent_session_usage_records
-         WHERE repository_id = ? AND session_id = ?
-         ORDER BY updated_at DESC, id DESC`
-      )
-      .bind(repositoryId, sessionId)
-      .all<AgentSessionUsageRow>();
-
-    return rows.results.map((row) => this.mapUsageRow(row));
-  }
-
-  async listInterventions(
-    repositoryId: string,
-    sessionId: string
-  ): Promise<AgentSessionInterventionRecord[]> {
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          i.id,
-          i.session_id,
-          i.repository_id,
-          i.kind,
-          i.title,
-          i.detail,
-          i.created_by,
-          u.username AS created_by_username,
-          i.payload_json,
-          i.created_at
-         FROM agent_session_interventions i
-         LEFT JOIN users u ON u.id = i.created_by
-         WHERE i.repository_id = ? AND i.session_id = ?
-         ORDER BY i.created_at ASC, i.id ASC`
-      )
-      .bind(repositoryId, sessionId)
-      .all<AgentSessionInterventionRow>();
-
-    return rows.results.map((row) => this.mapInterventionRow(row));
-  }
-
-  async recordIntervention(input: {
-    repositoryId: string;
-    sessionId: string;
-    kind: AgentSessionInterventionKind;
-    title: string;
-    detail?: string | null;
-    createdBy?: string | null;
-    payload?: Record<string, unknown> | null;
-    createdAt?: number;
-  }): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO agent_session_interventions (
-          session_id,
-          repository_id,
-          kind,
-          title,
-          detail,
-          created_by,
-          payload_json,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        input.sessionId,
-        input.repositoryId,
-        input.kind,
-        input.title,
-        input.detail ?? null,
-        input.createdBy ?? null,
-        input.payload ? JSON.stringify(input.payload) : null,
-        input.createdAt ?? Date.now()
-      )
-      .run();
-  }
-
   async createSessionExecution(input: CreateAgentSessionInput): Promise<AgentSessionRecord> {
-    const id = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const attemptId = crypto.randomUUID();
     const now = Date.now();
     const sessionNumber = await this.nextSessionNumber(input.repositoryId);
-    const branchRef = this.buildBranchRef(id);
+    const branchRef = this.buildBranchRef(sessionId);
 
     await this.db
       .prepare(
@@ -895,15 +441,19 @@ export class AgentSessionService {
           logs,
           exit_code,
           container_instance,
+          active_attempt_id,
+          latest_attempt_id,
+          failure_reason,
+          failure_stage,
           created_at,
           claimed_at,
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
-        id,
+        sessionId,
         input.repositoryId,
         sessionNumber,
         input.sourceType,
@@ -924,6 +474,10 @@ export class AgentSessionService {
         "",
         null,
         null,
+        attemptId,
+        attemptId,
+        null,
+        null,
         now,
         null,
         null,
@@ -932,138 +486,514 @@ export class AgentSessionService {
       )
       .run();
 
-    const session = await this.findSessionById(input.repositoryId, id);
+    await this.db
+      .prepare(
+        `INSERT INTO agent_session_attempts (
+          id,
+          session_id,
+          repository_id,
+          attempt_number,
+          status,
+          instance_type,
+          promoted_from_instance_type,
+          container_instance,
+          exit_code,
+          failure_reason,
+          failure_stage,
+          created_at,
+          claimed_at,
+          started_at,
+          completed_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        attemptId,
+        sessionId,
+        input.repositoryId,
+        1,
+        "queued",
+        input.instanceType,
+        null,
+        null,
+        null,
+        null,
+        null,
+        now,
+        null,
+        null,
+        null,
+        now
+      )
+      .run();
+
+    await this.appendAttemptEvents(input.repositoryId, sessionId, attemptId, [
+      {
+        type: "attempt_created",
+        stream: "system",
+        message: "Attempt #1 queued.",
+        payload: {
+          attemptNumber: 1,
+          instanceType: input.instanceType
+        },
+        createdAt: now
+      }
+    ]);
+
+    const session = await this.findSessionById(input.repositoryId, sessionId);
     if (!session) {
       throw new Error("Created agent session not found");
     }
+    return {
+      ...session,
+      active_attempt_id: session.active_attempt_id ?? attemptId,
+      latest_attempt_id: session.latest_attempt_id ?? attemptId
+    };
+  }
 
-    const sourceLabel =
-      session.source_number !== null ? `${session.source_type} #${session.source_number}` : session.source_type;
-    await this.insertStep({
-      sessionId: session.id,
-      repositoryId: input.repositoryId,
-      kind: "session_created",
-      title: "Session created",
-      detail: `${sourceLabel} · ${session.origin} · ${session.created_by_username ?? "system"}`,
-      payload: {
-        sourceType: session.source_type,
-        sourceNumber: session.source_number,
-        origin: session.origin,
-        createdBy: session.created_by,
-        parentSessionId: session.parent_session_id
-      },
-      createdAt: now
-    });
+  async createRetryAttempt(input: {
+    repositoryId: string;
+    sessionId: string;
+    instanceType: ActionContainerInstanceType;
+    promotedFromInstanceType?: ActionContainerInstanceType | null;
+    createdAt?: number;
+  }): Promise<AgentSessionAttemptRecord> {
+    const createdAt = input.createdAt ?? Date.now();
+    const attemptId = crypto.randomUUID();
+    const attemptNumber = await this.nextAttemptNumber(input.sessionId);
+    await this.db
+      .prepare(
+        `INSERT INTO agent_session_attempts (
+          id,
+          session_id,
+          repository_id,
+          attempt_number,
+          status,
+          instance_type,
+          promoted_from_instance_type,
+          container_instance,
+          exit_code,
+          failure_reason,
+          failure_stage,
+          created_at,
+          claimed_at,
+          started_at,
+          completed_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, 'queued', ?, ?, NULL, NULL, NULL, NULL, ?, NULL, NULL, NULL, ?)`
+      )
+      .bind(
+        attemptId,
+        input.sessionId,
+        input.repositoryId,
+        attemptNumber,
+        input.instanceType,
+        input.promotedFromInstanceType ?? null,
+        createdAt,
+        createdAt
+      )
+      .run();
 
-    if (session.status === "queued") {
-      await this.insertStep({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "session_queued",
-        title: `Session #${session.session_number} queued`,
-        detail: session.workflow_name?.trim() ? `${session.workflow_name} · queued` : "queued",
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = 'queued',
+             active_attempt_id = ?,
+             latest_attempt_id = ?,
+             container_instance = NULL,
+             exit_code = NULL,
+             failure_reason = NULL,
+             failure_stage = NULL,
+             updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(attemptId, attemptId, createdAt, input.repositoryId, input.sessionId)
+      .run();
+
+    await this.appendAttemptEvents(input.repositoryId, input.sessionId, attemptId, [
+      {
+        type: "attempt_created",
+        stream: "system",
+        message: `Attempt #${attemptNumber} queued.`,
         payload: {
-          sessionId: session.id,
-          sessionNumber: session.session_number,
-          workflowId: session.workflow_id,
-          workflowName: session.workflow_name
+          attemptNumber,
+          instanceType: input.instanceType,
+          promotedFromInstanceType: input.promotedFromInstanceType ?? null
         },
-        createdAt: now
-      });
-    }
+        createdAt
+      }
+    ]);
 
-    return session;
+    const attempt = await this.findAttemptById(input.repositoryId, attemptId);
+    if (!attempt) {
+      throw new Error("Created retry attempt not found");
+    }
+    return attempt;
   }
 
-  async claimQueuedSession(
-    repositoryId: string,
-    sessionId: string,
-    containerInstance: string
-  ): Promise<number | null> {
-    const now = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET container_instance = ?, claimed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance IS NULL`
-      )
-      .bind(containerInstance, now, now, repositoryId, sessionId)
-      .run();
-
-    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
-    if (changes === 0) {
-      return null;
+  async listSessions(input: {
+    repositoryId: string;
+    limit?: number;
+    sourceType?: AgentSessionSourceType;
+    sourceNumber?: number;
+  }): Promise<AgentSessionRecord[]> {
+    const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
+    const whereClauses = ["s.repository_id = ?"];
+    const params: unknown[] = [input.repositoryId];
+    if (input.sourceType !== undefined) {
+      whereClauses.push("s.source_type = ?");
+      params.push(input.sourceType);
     }
-
-    await this.insertStep({
-      sessionId,
-      repositoryId,
-      kind: "session_claimed",
-      title: "Runner claimed queued session",
-      detail: `container: ${containerInstance}`,
-      payload: {
-        sessionId,
-        containerInstance
-      },
-      createdAt: now
-    });
-    return now;
+    if (input.sourceNumber !== undefined) {
+      whereClauses.push("s.source_number = ?");
+      params.push(input.sourceNumber);
+    }
+    const rows = await this.db
+      .prepare(
+        `${this.sessionSelectSql}
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY s.created_at DESC
+         LIMIT ?`
+      )
+      .bind(...params, limit)
+      .all<SessionRow>();
+    return rows.results.map((row) => this.mapSessionRow(row));
   }
 
-  async updateSessionToRunning(
+  async listLatestSessionsBySource(
     repositoryId: string,
-    sessionId: string,
-    containerInstance: string
-  ): Promise<number | null> {
-    const now = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET status = 'running', started_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance = ?`
-      )
-      .bind(now, now, repositoryId, sessionId, containerInstance)
-      .run();
-
-    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
-    if (changes === 0) {
-      return null;
+    sourceType: AgentSessionSourceType,
+    sourceNumbers: readonly number[]
+  ): Promise<AgentSessionRecord[]> {
+    if (sourceNumbers.length === 0) {
+      return [];
     }
+    const uniqueSourceNumbers = Array.from(new Set(sourceNumbers));
+    const placeholders = uniqueSourceNumbers.map(() => "?").join(", ");
+    const rows = await this.db
+      .prepare(
+        `${this.sessionSelectSql}
+         WHERE s.repository_id = ?
+           AND s.source_type = ?
+           AND s.source_number IN (${placeholders})
+         ORDER BY s.created_at DESC`
+      )
+      .bind(repositoryId, sourceType, ...uniqueSourceNumbers)
+      .all<SessionRow>();
+    const latestBySourceNumber = new Map<number, AgentSessionRecord>();
+    for (const row of rows.results) {
+      if (row.source_number === null || latestBySourceNumber.has(row.source_number)) {
+        continue;
+      }
+      latestBySourceNumber.set(row.source_number, this.mapSessionRow(row));
+    }
+    return Array.from(latestBySourceNumber.values());
+  }
 
+  async listLatestSessionsByCommentIds(
+    repositoryId: string,
+    commentIds: readonly string[]
+  ): Promise<AgentSessionRecord[]> {
+    if (commentIds.length === 0) {
+      return [];
+    }
+    const uniqueCommentIds = Array.from(new Set(commentIds));
+    const placeholders = uniqueCommentIds.map(() => "?").join(", ");
+    const rows = await this.db
+      .prepare(
+        `${this.sessionSelectSql}
+         WHERE s.repository_id = ?
+           AND s.source_comment_id IN (${placeholders})
+         ORDER BY s.created_at DESC`
+      )
+      .bind(repositoryId, ...uniqueCommentIds)
+      .all<SessionRow>();
+    const latestByCommentId = new Map<string, AgentSessionRecord>();
+    for (const row of rows.results) {
+      if (!row.source_comment_id || latestByCommentId.has(row.source_comment_id)) {
+        continue;
+      }
+      latestByCommentId.set(row.source_comment_id, this.mapSessionRow(row));
+    }
+    return Array.from(latestByCommentId.values());
+  }
+
+  async findSessionById(repositoryId: string, sessionId: string): Promise<AgentSessionRecord | null> {
+    const row = await this.db
+      .prepare(
+        `${this.sessionSelectSql}
+         WHERE s.repository_id = ? AND s.id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, sessionId)
+      .first<SessionRow>();
+    return row ? this.mapSessionRow(row) : null;
+  }
+
+  async listAttempts(repositoryId: string, sessionId: string): Promise<AgentSessionAttemptRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `${this.attemptSelectSql}
+         WHERE repository_id = ? AND session_id = ?
+         ORDER BY attempt_number DESC`
+      )
+      .bind(repositoryId, sessionId)
+      .all<AttemptRow>();
+    return rows.results.map((row) => this.mapAttemptRow(row));
+  }
+
+  async findAttemptById(
+    repositoryId: string,
+    attemptId: string
+  ): Promise<AgentSessionAttemptRecord | null> {
+    const row = await this.db
+      .prepare(
+        `${this.attemptSelectSql}
+         WHERE repository_id = ? AND id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, attemptId)
+      .first<AttemptRow>();
+    return row ? this.mapAttemptRow(row) : null;
+  }
+
+  async findActiveAttemptForSession(
+    repositoryId: string,
+    sessionId: string
+  ): Promise<AgentSessionAttemptRecord | null> {
     const session = await this.findSessionById(repositoryId, sessionId);
-    await this.insertStep({
-      sessionId,
-      repositoryId,
-      kind: "session_started",
-      title: "Session started",
-      detail: session?.branch_ref ?? null,
-      payload: {
-        sessionId,
-        branchRef: session?.branch_ref ?? null,
-        containerInstance
-      },
-      createdAt: now
-    });
-    return now;
+    if (!session?.active_attempt_id) {
+      return null;
+    }
+    return this.findAttemptById(repositoryId, session.active_attempt_id);
   }
 
-  async updateRunningSessionLogs(
+  async findLatestAttemptForSession(
     repositoryId: string,
-    sessionId: string,
-    logs: string
-  ): Promise<boolean> {
-    const updatedAt = Date.now();
+    sessionId: string
+  ): Promise<AgentSessionAttemptRecord | null> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    if (!session?.latest_attempt_id) {
+      return null;
+    }
+    return this.findAttemptById(repositoryId, session.latest_attempt_id);
+  }
+
+  async claimQueuedAttempt(input: {
+    repositoryId: string;
+    sessionId: string;
+    attemptId: string;
+    containerInstance: string;
+    claimedAt?: number;
+  }): Promise<number | null> {
+    const claimedAt = input.claimedAt ?? Date.now();
     const result = await this.db
       .prepare(
-        `UPDATE agent_sessions
-         SET logs = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'running'`
+        `UPDATE agent_session_attempts
+         SET status = 'booting',
+             container_instance = ?,
+             claimed_at = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND session_id = ? AND id = ? AND status = 'queued'`
       )
-      .bind(logs, updatedAt, repositoryId, sessionId)
+      .bind(
+        input.containerInstance,
+        claimedAt,
+        claimedAt,
+        input.repositoryId,
+        input.sessionId,
+        input.attemptId
+      )
+      .run();
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes === 0) {
+      return null;
+    }
+
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET claimed_at = COALESCE(claimed_at, ?),
+             active_attempt_id = ?,
+             latest_attempt_id = ?,
+             container_instance = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(
+        claimedAt,
+        input.attemptId,
+        input.attemptId,
+        input.containerInstance,
+        claimedAt,
+        input.repositoryId,
+        input.sessionId
+      )
       .run();
 
+    await this.appendAttemptEvents(input.repositoryId, input.sessionId, input.attemptId, [
+      {
+        type: "attempt_claimed",
+        stream: "system",
+        message: "Runner claimed queued attempt.",
+        payload: {
+          containerInstance: input.containerInstance
+        },
+        createdAt: claimedAt
+      }
+    ]);
+
+    return claimedAt;
+  }
+
+  async markAttemptRunning(input: {
+    repositoryId: string;
+    sessionId: string;
+    attemptId: string;
+    containerInstance: string;
+    startedAt?: number;
+  }): Promise<number | null> {
+    const startedAt = input.startedAt ?? Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_session_attempts
+         SET status = 'running',
+             container_instance = ?,
+             started_at = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND session_id = ? AND id = ?
+           AND status IN ('queued', 'booting')`
+      )
+      .bind(
+        input.containerInstance,
+        startedAt,
+        startedAt,
+        input.repositoryId,
+        input.sessionId,
+        input.attemptId
+      )
+      .run();
     const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
-    return changes > 0;
+    if (changes === 0) {
+      return null;
+    }
+
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = 'running',
+             claimed_at = COALESCE(claimed_at, ?),
+             started_at = COALESCE(started_at, ?),
+             active_attempt_id = ?,
+             latest_attempt_id = ?,
+             container_instance = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(
+        startedAt,
+        startedAt,
+        input.attemptId,
+        input.attemptId,
+        input.containerInstance,
+        startedAt,
+        input.repositoryId,
+        input.sessionId
+      )
+      .run();
+
+    await this.appendAttemptEvents(input.repositoryId, input.sessionId, input.attemptId, [
+      {
+        type: "attempt_started",
+        stream: "system",
+        message: "Attempt started.",
+        payload: {
+          containerInstance: input.containerInstance
+        },
+        createdAt: startedAt
+      }
+    ]);
+
+    return startedAt;
+  }
+
+  async appendAttemptEvents(
+    repositoryId: string,
+    sessionId: string,
+    attemptId: string,
+    events: AttemptEventInput[]
+  ): Promise<void> {
+    if (events.length === 0) {
+      return;
+    }
+    const statements = events.map((event) =>
+      this.db
+        .prepare(
+          `INSERT INTO agent_session_attempt_events (
+            attempt_id,
+            session_id,
+            repository_id,
+            type,
+            stream,
+            message,
+            payload_json,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          attemptId,
+          sessionId,
+          repositoryId,
+          event.type,
+          event.stream,
+          event.message,
+          asJson(event.payload),
+          event.createdAt ?? Date.now()
+        )
+    );
+    if (typeof this.db.batch === "function") {
+      await this.db.batch(statements);
+      return;
+    }
+    for (const statement of statements) {
+      await statement.run();
+    }
+  }
+
+  async listAttemptEvents(input: {
+    repositoryId: string;
+    sessionId: string;
+    attemptId: string;
+    afterId?: number;
+    limit?: number;
+  }): Promise<AgentSessionAttemptEventRecord[]> {
+    const limit = Math.min(Math.max(input.limit ?? 200, 1), 500);
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          id,
+          attempt_id,
+          session_id,
+          repository_id,
+          type,
+          stream,
+          message,
+          payload_json,
+          created_at
+         FROM agent_session_attempt_events
+         WHERE repository_id = ? AND session_id = ? AND attempt_id = ? AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`
+      )
+      .bind(
+        input.repositoryId,
+        input.sessionId,
+        input.attemptId,
+        input.afterId ?? 0,
+        limit
+      )
+      .all<EventRow>();
+    return rows.results.map((row) => this.mapEventRow(row));
   }
 
   async replaceSessionLogs(repositoryId: string, sessionId: string, logs: string): Promise<void> {
@@ -1077,6 +1007,574 @@ export class AgentSessionService {
       .run();
   }
 
+  async updateRunningSessionLogs(
+    repositoryId: string,
+    sessionId: string,
+    logs: string
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET logs = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'running'`
+      )
+      .bind(logs, Date.now(), repositoryId, sessionId)
+      .run();
+    return ((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+  }
+
+  async upsertAttemptArtifact(input: {
+    attemptId: string;
+    sessionId: string;
+    repositoryId: string;
+    kind: AgentSessionArtifactKind;
+    title: string;
+    mediaType: string;
+    contentText: string;
+    sizeBytes?: number;
+    createdAt?: number;
+    updatedAt?: number;
+  }): Promise<void> {
+    const updatedAt = input.updatedAt ?? Date.now();
+    const createdAt = input.createdAt ?? updatedAt;
+    await this.db
+      .prepare(
+        `INSERT INTO agent_session_attempt_artifacts (
+          id,
+          attempt_id,
+          session_id,
+          repository_id,
+          kind,
+          title,
+          media_type,
+          size_bytes,
+          content_text,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(attempt_id, kind)
+        DO UPDATE SET
+          title = excluded.title,
+          media_type = excluded.media_type,
+          size_bytes = excluded.size_bytes,
+          content_text = excluded.content_text,
+          updated_at = excluded.updated_at`
+      )
+      .bind(
+        crypto.randomUUID(),
+        input.attemptId,
+        input.sessionId,
+        input.repositoryId,
+        input.kind,
+        input.title,
+        input.mediaType,
+        input.sizeBytes ?? input.contentText.length,
+        input.contentText,
+        createdAt,
+        updatedAt
+      )
+      .run();
+  }
+
+  async listArtifacts(repositoryId: string, sessionId: string): Promise<AgentSessionArtifactRecord[]> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    const attemptId = session?.latest_attempt_id ?? session?.active_attempt_id ?? null;
+    if (!attemptId) {
+      return [];
+    }
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          id,
+          attempt_id,
+          session_id,
+          repository_id,
+          kind,
+          title,
+          media_type,
+          size_bytes,
+          content_text,
+          created_at,
+          updated_at
+         FROM agent_session_attempt_artifacts
+         WHERE repository_id = ? AND session_id = ? AND attempt_id = ?
+         ORDER BY updated_at DESC, created_at DESC, id DESC`
+      )
+      .bind(repositoryId, sessionId, attemptId)
+      .all<ArtifactRow>();
+    return rows.results.map((row) => this.mapArtifactRow(row));
+  }
+
+  async findArtifactById(
+    repositoryId: string,
+    sessionId: string,
+    artifactId: string
+  ): Promise<AgentSessionArtifactRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT
+          id,
+          attempt_id,
+          session_id,
+          repository_id,
+          kind,
+          title,
+          media_type,
+          size_bytes,
+          content_text,
+          created_at,
+          updated_at
+         FROM agent_session_attempt_artifacts
+         WHERE repository_id = ? AND session_id = ? AND id = ?
+         LIMIT 1`
+      )
+      .bind(repositoryId, sessionId, artifactId)
+      .first<ArtifactRow>();
+    return row ? this.mapArtifactRow(row) : null;
+  }
+
+  async readSessionLogs(repositoryId: string, sessionId: string): Promise<string | null> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    const attemptId = session?.latest_attempt_id ?? session?.active_attempt_id ?? null;
+    if (!session) {
+      return null;
+    }
+    if (!attemptId) {
+      if (this.logStorage) {
+        const legacyLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
+        if (legacyLogs !== null) {
+          return legacyLogs;
+        }
+      }
+      return session.logs;
+    }
+    if (this.logStorage) {
+      const fullLogs = await this.logStorage.readAttemptArtifactLogs(
+        repositoryId,
+        sessionId,
+        attemptId,
+        "session_logs"
+      );
+      if (fullLogs !== null) {
+        return fullLogs;
+      }
+      const legacyLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
+      if (legacyLogs !== null) {
+        return legacyLogs;
+      }
+    }
+    const artifacts = await this.listArtifacts(repositoryId, sessionId);
+    return artifacts.find((artifact) => artifact.kind === "session_logs")?.content_text ?? session.logs;
+  }
+
+  async readArtifactContent(
+    repositoryId: string,
+    sessionId: string,
+    artifactId: string
+  ): Promise<{ artifact: AgentSessionArtifactRecord; content: string } | null> {
+    const artifact = await this.findArtifactById(repositoryId, sessionId, artifactId);
+    if (!artifact) {
+      return null;
+    }
+    if (this.logStorage && isLogArtifactKind(artifact.kind)) {
+      const content = await this.logStorage.readAttemptArtifactLogs(
+        repositoryId,
+        sessionId,
+        artifact.attempt_id,
+        artifact.kind
+      );
+      if (content !== null) {
+        return { artifact, content };
+      }
+      const legacyContent = await this.logStorage.readSessionArtifactLogs(
+        repositoryId,
+        sessionId,
+        artifact.kind
+      );
+      if (legacyContent !== null) {
+        return { artifact, content: legacyContent };
+      }
+    }
+    return { artifact, content: artifact.content_text };
+  }
+
+  async syncSessionForAttempt(input: {
+    repositoryId: string;
+    sessionId: string;
+    sessionStatus?: AgentSessionStatus;
+    activeAttemptId?: string | null;
+    latestAttemptId?: string | null;
+    logs?: string;
+    exitCode?: number | null;
+    containerInstance?: string | null;
+    failureReason?: AgentSessionAttemptFailureReason | null;
+    failureStage?: AgentSessionAttemptFailureStage | null;
+    claimedAt?: number | null;
+    startedAt?: number | null;
+    completedAt?: number | null;
+    updatedAt?: number;
+  }): Promise<void> {
+    const updates: string[] = [];
+    const bindings: unknown[] = [];
+    if (input.sessionStatus !== undefined) {
+      updates.push("status = ?");
+      bindings.push(input.sessionStatus);
+    }
+    if (input.activeAttemptId !== undefined) {
+      updates.push("active_attempt_id = ?");
+      bindings.push(input.activeAttemptId);
+    }
+    if (input.latestAttemptId !== undefined) {
+      updates.push("latest_attempt_id = ?");
+      bindings.push(input.latestAttemptId);
+    }
+    if (input.logs !== undefined) {
+      updates.push("logs = ?");
+      bindings.push(input.logs);
+    }
+    if (input.exitCode !== undefined) {
+      updates.push("exit_code = ?");
+      bindings.push(input.exitCode);
+    }
+    if (input.containerInstance !== undefined) {
+      updates.push("container_instance = ?");
+      bindings.push(input.containerInstance);
+    }
+    if (input.failureReason !== undefined) {
+      updates.push("failure_reason = ?");
+      bindings.push(input.failureReason);
+    }
+    if (input.failureStage !== undefined) {
+      updates.push("failure_stage = ?");
+      bindings.push(input.failureStage);
+    }
+    if (input.claimedAt !== undefined) {
+      updates.push("claimed_at = ?");
+      bindings.push(input.claimedAt);
+    }
+    if (input.startedAt !== undefined) {
+      updates.push("started_at = ?");
+      bindings.push(input.startedAt);
+    }
+    if (input.completedAt !== undefined) {
+      updates.push("completed_at = ?");
+      bindings.push(input.completedAt);
+    }
+    updates.push("updated_at = ?");
+    bindings.push(input.updatedAt ?? Date.now());
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET ${updates.join(", ")}
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(...bindings, input.repositoryId, input.sessionId)
+      .run();
+  }
+
+  async completeAttempt(input: {
+    repositoryId: string;
+    sessionId: string;
+    attemptId: string;
+    status: Extract<
+      AgentSessionAttemptStatus,
+      "retryable_failed" | "failed" | "success" | "cancelled"
+    >;
+    exitCode?: number | null;
+    failureReason?: AgentSessionAttemptFailureReason | null;
+    failureStage?: AgentSessionAttemptFailureStage | null;
+    completedAt?: number;
+  }): Promise<void> {
+    const completedAt = input.completedAt ?? Date.now();
+    await this.db
+      .prepare(
+        `UPDATE agent_session_attempts
+         SET status = ?,
+             exit_code = ?,
+             failure_reason = ?,
+             failure_stage = ?,
+             completed_at = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND session_id = ? AND id = ?`
+      )
+      .bind(
+        input.status,
+        input.exitCode ?? null,
+        input.failureReason ?? null,
+        input.failureStage ?? null,
+        completedAt,
+        completedAt,
+        input.repositoryId,
+        input.sessionId,
+        input.attemptId
+      )
+      .run();
+
+    await this.appendAttemptEvents(input.repositoryId, input.sessionId, input.attemptId, [
+      {
+        type: "attempt_completed",
+        stream: input.status === "success" ? "system" : input.status === "cancelled" ? "system" : "error",
+        message:
+          input.status === "success"
+            ? "Attempt completed successfully."
+            : input.status === "retryable_failed"
+              ? "Attempt failed and is eligible for retry."
+              : input.status === "cancelled"
+                ? "Attempt cancelled."
+                : "Attempt failed.",
+        payload: {
+          status: input.status,
+          exitCode: input.exitCode ?? null,
+          failureReason: input.failureReason ?? null,
+          failureStage: input.failureStage ?? null
+        },
+        createdAt: completedAt
+      }
+    ]);
+  }
+
+  async listSteps(repositoryId: string, sessionId: string): Promise<AgentSessionStepRecord[]> {
+    const [session, attempts] = await Promise.all([
+      this.findSessionById(repositoryId, sessionId),
+      this.listAttempts(repositoryId, sessionId)
+    ]);
+    if (!session) {
+      return [];
+    }
+    const steps: AgentSessionStepRecord[] = [
+      {
+        id: 1,
+        session_id: session.id,
+        repository_id: repositoryId,
+        kind: "session_created",
+        title: "Session created",
+        detail: `${session.source_type}${session.source_number !== null ? ` #${session.source_number}` : ""}`,
+        payload: null,
+        created_at: session.created_at
+      },
+      {
+        id: 2,
+        session_id: session.id,
+        repository_id: repositoryId,
+        kind: "session_queued",
+        title: `Session #${session.session_number} queued`,
+        detail: session.workflow_name?.trim() ? `${session.workflow_name} · queued` : "queued",
+        payload: null,
+        created_at: session.created_at
+      }
+    ];
+
+    let nextId = 3;
+    for (const attempt of [...attempts].reverse()) {
+      if (attempt.claimed_at) {
+        steps.push({
+          id: nextId++,
+          session_id: session.id,
+          repository_id: repositoryId,
+          kind: "session_claimed",
+          title: `Attempt #${attempt.attempt_number} claimed`,
+          detail: attempt.container_instance ? `container: ${attempt.container_instance}` : null,
+          payload: null,
+          created_at: attempt.claimed_at
+        });
+      }
+      if (attempt.started_at) {
+        steps.push({
+          id: nextId++,
+          session_id: session.id,
+          repository_id: repositoryId,
+          kind: "session_started",
+          title: `Attempt #${attempt.attempt_number} started`,
+          detail: attempt.instance_type,
+          payload: null,
+          created_at: attempt.started_at
+        });
+      }
+      if (attempt.completed_at) {
+        const cancelled = attempt.status === "cancelled";
+        steps.push({
+          id: nextId++,
+          session_id: session.id,
+          repository_id: repositoryId,
+          kind: cancelled ? "session_cancelled" : "session_completed",
+          title: cancelled
+            ? `Attempt #${attempt.attempt_number} cancelled`
+            : `Attempt #${attempt.attempt_number} completed`,
+          detail: attempt.status,
+          payload: {
+            status: attempt.status,
+            exitCode: attempt.exit_code,
+            failureReason: attempt.failure_reason,
+            failureStage: attempt.failure_stage
+          },
+          created_at: attempt.completed_at
+        });
+      }
+    }
+
+    return steps.sort((left, right) => left.created_at - right.created_at || left.id - right.id);
+  }
+
+  buildTimeline(input: {
+    session: AgentSessionRecord;
+    steps?: AgentSessionStepRecord[];
+    events?: AgentSessionAttemptEventRecord[];
+  }): AgentSessionTimelineEvent[] {
+    const lifecycleEvents =
+      input.steps?.map<AgentSessionTimelineEvent>((step) => ({
+        id: `step-${step.id}`,
+        type: step.kind,
+        title: step.title,
+        detail: step.detail,
+        timestamp: step.created_at,
+        level:
+          step.kind === "session_cancelled"
+            ? "warning"
+            : step.kind === "session_completed" &&
+                step.payload?.status &&
+                step.payload.status !== "success"
+              ? "error"
+              : step.kind === "session_completed"
+                ? "success"
+                : "info",
+        stream: "system"
+      })) ?? [];
+
+    const logEvents =
+      input.events?.map<AgentSessionTimelineEvent>((event) => ({
+        id: `event-${event.id}`,
+        type: "log",
+        title: event.type.replaceAll("_", " "),
+        detail: event.message,
+        timestamp: event.created_at,
+        level: eventLevel(event),
+        stream: event.stream === "system" ? "system" : event.stream
+      })) ?? [];
+
+    return [...lifecycleEvents, ...logEvents].sort((left, right) => {
+      if (left.timestamp === null && right.timestamp === null) {
+        return left.id.localeCompare(right.id);
+      }
+      if (left.timestamp === null) {
+        return 1;
+      }
+      if (right.timestamp === null) {
+        return -1;
+      }
+      if (left.timestamp === right.timestamp) {
+        return left.id.localeCompare(right.id);
+      }
+      return left.timestamp - right.timestamp;
+    });
+  }
+
+  async cancelQueuedSession(input: {
+    repositoryId: string;
+    sessionId: string;
+    cancelledBy?: string | null;
+    completedAt?: number;
+  }): Promise<{ cancelled: boolean; completedAt: number }> {
+    const completedAt = input.completedAt ?? Date.now();
+    const session = await this.findSessionById(input.repositoryId, input.sessionId);
+    if (!session) {
+      return { cancelled: false, completedAt };
+    }
+    const attemptId = session.active_attempt_id ?? session.latest_attempt_id;
+    const attempt = attemptId
+      ? await this.findAttemptById(input.repositoryId, attemptId)
+      : (await this.listAttempts(input.repositoryId, input.sessionId))[0] ?? null;
+    if (!attempt || attempt.status !== "queued") {
+      return { cancelled: false, completedAt };
+    }
+
+    await this.completeAttempt({
+      repositoryId: input.repositoryId,
+      sessionId: input.sessionId,
+      attemptId: attempt.id,
+      status: "cancelled",
+      failureReason: "cancel_requested",
+      failureStage: "unknown",
+      completedAt
+    });
+    await this.syncSessionForAttempt({
+      repositoryId: input.repositoryId,
+      sessionId: input.sessionId,
+      sessionStatus: "cancelled",
+      activeAttemptId: null,
+      latestAttemptId: attempt.id,
+      exitCode: null,
+      containerInstance: null,
+      failureReason: "cancel_requested",
+      failureStage: "unknown",
+      completedAt,
+      updatedAt: completedAt
+    });
+
+    await this.appendAttemptEvents(input.repositoryId, input.sessionId, attempt.id, [
+      {
+        type: "warning",
+        stream: "system",
+        message: "Cancellation requested.",
+        payload: {
+          kind: "cancel_requested",
+          createdBy: input.cancelledBy ?? null,
+          detail: "A user cancelled the queued session before it started."
+        },
+        createdAt: completedAt
+      }
+    ]);
+
+    return { cancelled: true, completedAt };
+  }
+
+  async claimQueuedSession(
+    repositoryId: string,
+    sessionId: string,
+    containerInstance: string
+  ): Promise<number | null> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    if (!session) {
+      return null;
+    }
+    const attemptId =
+      session.active_attempt_id ??
+      session.latest_attempt_id ??
+      (await this.listAttempts(repositoryId, sessionId))[0]?.id;
+    if (!attemptId) {
+      return null;
+    }
+    return this.claimQueuedAttempt({
+      repositoryId,
+      sessionId,
+      attemptId,
+      containerInstance
+    });
+  }
+
+  async updateSessionToRunning(
+    repositoryId: string,
+    sessionId: string,
+    containerInstance: string
+  ): Promise<number | null> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    if (!session) {
+      return null;
+    }
+    const attemptId =
+      session.active_attempt_id ??
+      session.latest_attempt_id ??
+      (await this.listAttempts(repositoryId, sessionId))[0]?.id;
+    if (!attemptId) {
+      return null;
+    }
+    return this.markAttemptRunning({
+      repositoryId,
+      sessionId,
+      attemptId,
+      containerInstance
+    });
+  }
+
   async completeSession(
     repositoryId: string,
     sessionId: string,
@@ -1086,29 +1584,17 @@ export class AgentSessionService {
       exitCode?: number | null;
     }
   ): Promise<void> {
-    const now = Date.now();
-    await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET status = ?, logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(input.status, input.logs, input.exitCode ?? null, now, now, repositoryId, sessionId)
-      .run();
-
-    const completion = mapCompletionStep(input.status);
-    await this.insertStep({
-      sessionId,
+    const completedAt = Date.now();
+    await this.syncSessionForAttempt({
       repositoryId,
-      kind: completion.kind,
-      title: completion.title,
-      detail: input.status,
-      payload: {
-        sessionId,
-        status: input.status,
-        exitCode: input.exitCode ?? null
-      },
-      createdAt: now
+      sessionId,
+      sessionStatus: input.status,
+      logs: input.logs,
+      exitCode: input.exitCode ?? null,
+      containerInstance: null,
+      completedAt,
+      activeAttemptId: null,
+      updatedAt: completedAt
     });
   }
 
@@ -1134,81 +1620,8 @@ export class AgentSessionService {
       )
       .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, sessionId)
       .run();
-
-    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
-    if (changes > 0) {
-      await this.insertStep({
-        sessionId,
-        repositoryId,
-        kind: "session_completed",
-        title: "Session failed",
-        detail: "failed",
-        payload: {
-          sessionId,
-          status: "failed",
-          exitCode: input.exitCode ?? null
-        },
-        createdAt: completedAt
-      });
-    }
-
-    return {
-      updated: changes > 0,
-      completedAt
-    };
-  }
-
-  async cancelQueuedSession(input: {
-    repositoryId: string;
-    sessionId: string;
-    cancelledBy?: string | null;
-    completedAt?: number;
-  }): Promise<{ cancelled: boolean; completedAt: number }> {
-    const completedAt = input.completedAt ?? Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET status = 'cancelled', completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued'`
-      )
-      .bind(completedAt, completedAt, input.repositoryId, input.sessionId)
-      .run();
-
-    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
-    if (changes > 0) {
-      await this.insertStep({
-        sessionId: input.sessionId,
-        repositoryId: input.repositoryId,
-        kind: "session_cancelled",
-        title: "Session cancelled",
-        detail: "cancelled",
-        payload: {
-          sessionId: input.sessionId,
-          status: "cancelled"
-        },
-        createdAt: completedAt
-      });
-      if (input.cancelledBy) {
-        await this.recordIntervention({
-          repositoryId: input.repositoryId,
-          sessionId: input.sessionId,
-          kind: "cancel_requested",
-          title: "Cancellation requested",
-          detail: "A user cancelled the queued session before it started.",
-          createdBy: input.cancelledBy,
-          payload: {
-            sessionId: input.sessionId,
-            status: "cancelled"
-          },
-          createdAt: completedAt
-        });
-      }
-    }
-
-    return {
-      cancelled: changes > 0,
-      completedAt
-    };
+    const updated = ((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+    return { updated, completedAt };
   }
 
   async recordSessionObservability(input: {
@@ -1228,21 +1641,24 @@ export class AgentSessionService {
     recordedAt?: number;
   }): Promise<void> {
     const session = await this.findSessionById(input.repositoryId, input.sessionId);
-    if (!session) {
+    const attemptId = session?.latest_attempt_id ?? session?.active_attempt_id ?? null;
+    if (!session || !attemptId) {
       return;
     }
-
     const recordedAt = input.recordedAt ?? Date.now();
-    const payloadBase = {
-      sessionId: input.sessionId,
-      ...(input.result?.validationReport ? { validationReport: input.result.validationReport } : {})
-    };
 
     if (input.logs.trim()) {
       if (this.logStorage) {
-        await this.logStorage.writeSessionLogs(input.repositoryId, input.sessionId, input.logs);
+        await this.logStorage.writeAttemptArtifactLogs(
+          input.repositoryId,
+          session.id,
+          attemptId,
+          "session_logs",
+          input.logs
+        );
       }
-      await this.upsertArtifact({
+      await this.upsertAttemptArtifact({
+        attemptId,
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "session_logs",
@@ -1253,29 +1669,20 @@ export class AgentSessionService {
         createdAt: recordedAt,
         updatedAt: recordedAt
       });
-      await this.upsertUsageRecord({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "log_chars",
-        value: input.logs.length,
-        unit: "chars",
-        detail: "Persisted session log length",
-        payload: payloadBase,
-        createdAt: recordedAt,
-        updatedAt: recordedAt
-      });
     }
 
     if (input.result?.stdout?.length) {
       if (this.logStorage) {
-        await this.logStorage.writeSessionArtifactLogs(
+        await this.logStorage.writeAttemptArtifactLogs(
           input.repositoryId,
           session.id,
+          attemptId,
           "stdout",
           input.result.stdout
         );
       }
-      await this.upsertArtifact({
+      await this.upsertAttemptArtifact({
+        attemptId,
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "stdout",
@@ -1286,29 +1693,20 @@ export class AgentSessionService {
         createdAt: recordedAt,
         updatedAt: recordedAt
       });
-      await this.upsertUsageRecord({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "stdout_chars",
-        value: input.result.stdout.length,
-        unit: "chars",
-        detail: "Captured runner stdout length",
-        payload: payloadBase,
-        createdAt: recordedAt,
-        updatedAt: recordedAt
-      });
     }
 
     if (input.result?.stderr?.length) {
       if (this.logStorage) {
-        await this.logStorage.writeSessionArtifactLogs(
+        await this.logStorage.writeAttemptArtifactLogs(
           input.repositoryId,
           session.id,
+          attemptId,
           "stderr",
           input.result.stderr
         );
       }
-      await this.upsertArtifact({
+      await this.upsertAttemptArtifact({
+        attemptId,
         sessionId: session.id,
         repositoryId: input.repositoryId,
         kind: "stderr",
@@ -1319,72 +1717,45 @@ export class AgentSessionService {
         createdAt: recordedAt,
         updatedAt: recordedAt
       });
-      await this.upsertUsageRecord({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "stderr_chars",
-        value: input.result.stderr.length,
-        unit: "chars",
-        detail: "Captured runner stderr length",
-        payload: payloadBase,
-        createdAt: recordedAt,
-        updatedAt: recordedAt
-      });
     }
 
-    if (input.result?.durationMs !== undefined) {
-      await this.upsertUsageRecord({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "duration_ms",
-        value: input.result.durationMs,
-        unit: "ms",
-        detail: "Container execution duration",
-        payload: payloadBase,
-        createdAt: recordedAt,
-        updatedAt: recordedAt
-      });
-    }
-
-    if (input.result?.exitCode !== undefined) {
-      await this.upsertUsageRecord({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "exit_code",
-        value: input.result.exitCode,
-        unit: "count",
-        detail: "Runner exit code",
-        payload: {
-          ...payloadBase,
-          ...(input.result.attemptedCommand ? { attemptedCommand: input.result.attemptedCommand } : {})
-        },
-        createdAt: recordedAt,
-        updatedAt: recordedAt
-      });
+    if (input.result) {
+      await this.appendAttemptEvents(input.repositoryId, session.id, attemptId, [
+        {
+          type: "result_reported",
+          stream:
+            input.result.exitCode === undefined || input.result.exitCode === 0 ? "system" : "error",
+          message:
+            input.result.exitCode === undefined
+              ? "Attempt reported an incomplete result."
+              : `Attempt reported exit code ${input.result.exitCode}.`,
+          payload: {
+            exitCode: input.result.exitCode ?? null,
+            durationMs: input.result.durationMs ?? null,
+            stdoutChars: input.result.stdout?.length ?? 0,
+            stderrChars: input.result.stderr?.length ?? 0,
+            attemptedCommand: input.result.attemptedCommand ?? null,
+            validationReport: input.result.validationReport ?? null,
+            error: input.result.error ?? null
+          },
+          createdAt: recordedAt
+        }
+      ]);
     }
 
     if (input.result?.mcpSetupWarning?.trim()) {
-      await this.recordIntervention({
-        repositoryId: input.repositoryId,
-        sessionId: session.id,
-        kind: "mcp_setup_warning",
-        title: "MCP setup warning",
-        detail: input.result.mcpSetupWarning.trim(),
-        payload: {
-          ...payloadBase,
-          ...(input.result.attemptedCommand ? { attemptedCommand: input.result.attemptedCommand } : {}),
-          ...(input.result.error ? { runnerError: input.result.error } : {})
-        },
-        createdAt: recordedAt
-      });
+      await this.appendAttemptEvents(input.repositoryId, session.id, attemptId, [
+        {
+          type: "warning",
+          stream: "system",
+          message: "MCP setup warning",
+          payload: {
+            detail: input.result.mcpSetupWarning.trim()
+          },
+          createdAt: recordedAt
+        }
+      ]);
     }
-  }
-
-  async findSessionByRunId(
-    repositoryId: string,
-    runId: string
-  ): Promise<AgentSessionRecord | null> {
-    return this.findSessionById(repositoryId, runId);
   }
 
   async recordRunClaimed(input: {
@@ -1393,23 +1764,17 @@ export class AgentSessionService {
     containerInstance: string;
     claimedAt?: number;
   }): Promise<void> {
-    const claimedAt = input.claimedAt ?? Date.now();
-    await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET container_instance = COALESCE(container_instance, ?),
-             claimed_at = COALESCE(claimed_at, ?),
-             updated_at = ?
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(
-        input.containerInstance,
-        claimedAt,
-        claimedAt,
-        input.repositoryId,
-        input.runId
-      )
-      .run();
+    const session = await this.findSessionById(input.repositoryId, input.runId);
+    if (!session?.active_attempt_id) {
+      return;
+    }
+    await this.claimQueuedAttempt({
+      repositoryId: input.repositoryId,
+      sessionId: input.runId,
+      attemptId: session.active_attempt_id,
+      containerInstance: input.containerInstance,
+      ...(input.claimedAt !== undefined ? { claimedAt: input.claimedAt } : {})
+    });
   }
 
   async syncSessionForRun(input: {
@@ -1420,33 +1785,14 @@ export class AgentSessionService {
     completedAt?: number | null;
     updatedAt?: number;
   }): Promise<void> {
-    const updates: string[] = [];
-    const bindings: unknown[] = [];
-    if (input.status !== undefined) {
-      updates.push("status = ?");
-      bindings.push(input.status);
-    }
-    if (input.startedAt !== undefined) {
-      updates.push("started_at = ?");
-      bindings.push(input.startedAt);
-    }
-    if (input.completedAt !== undefined) {
-      updates.push("completed_at = ?");
-      bindings.push(input.completedAt);
-    }
-    updates.push("updated_at = ?");
-    bindings.push(input.updatedAt ?? Date.now());
-    if (updates.length === 0) {
-      return;
-    }
-    await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET ${updates.join(", ")}
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(...bindings, input.repositoryId, input.runId)
-      .run();
+    await this.syncSessionForAttempt({
+      repositoryId: input.repositoryId,
+      sessionId: input.runId,
+      ...(input.status !== undefined ? { sessionStatus: input.status } : {}),
+      ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+      ...(input.completedAt !== undefined ? { completedAt: input.completedAt } : {}),
+      ...(input.updatedAt !== undefined ? { updatedAt: input.updatedAt } : {})
+    });
   }
 
   async recordRunObservability(input: {
@@ -1470,146 +1816,7 @@ export class AgentSessionService {
       sessionId: input.runId,
       logs: input.logs,
       ...(input.result ? { result: input.result } : {}),
-      ...(input.recordedAt ? { recordedAt: input.recordedAt } : {})
-    });
-  }
-
-  buildTimeline(input: {
-    session: AgentSessionRecord;
-    steps?: AgentSessionStepRecord[];
-    interventions?: AgentSessionInterventionRecord[];
-  }): AgentSessionTimelineEvent[] {
-    const { session, steps = [], interventions = [] } = input;
-    const sourceLabel =
-      session.source_number !== null ? `${session.source_type} #${session.source_number}` : session.source_type;
-    const actorLabel = session.created_by_username ?? "system";
-
-    const fallbackLifecycleEvents: AgentSessionTimelineEvent[] = [
-      {
-        id: `${session.id}-created`,
-        type: "session_created",
-        title: "Session created",
-        detail: `${sourceLabel} · ${session.origin} · ${actorLabel}`,
-        timestamp: session.created_at,
-        level: "info",
-        stream: "system"
-      },
-      {
-        id: `${session.id}-queued`,
-        type: "session_queued",
-        title: `Session #${session.session_number} queued`,
-        detail: session.workflow_name?.trim() ? `${session.workflow_name} · queued` : "queued",
-        timestamp: session.created_at,
-        level: "info",
-        stream: "system"
-      },
-      ...(session.claimed_at
-        ? [
-            {
-              id: `${session.id}-claimed`,
-              type: "session_claimed" as const,
-              title: "Runner claimed queued session",
-              detail: session.container_instance ? `container: ${session.container_instance}` : null,
-              timestamp: session.claimed_at,
-              level: "info" as const,
-              stream: "system" as const
-            }
-          ]
-        : []),
-      ...(session.started_at
-        ? [
-            {
-              id: `${session.id}-started`,
-              type: "session_started" as const,
-              title: "Session started",
-              detail: session.branch_ref ?? null,
-              timestamp: session.started_at,
-              level: "info" as const,
-              stream: "system" as const
-            }
-          ]
-        : []),
-      ...(session.completed_at
-        ? [
-            {
-              id: `${session.id}-completed`,
-              type: session.status === "cancelled" ? ("session_cancelled" as const) : ("session_completed" as const),
-              title:
-                session.status === "cancelled"
-                  ? "Session cancelled"
-                  : session.status === "failed"
-                    ? "Session failed"
-                    : "Session completed",
-              detail:
-                session.exit_code !== null && session.exit_code !== undefined
-                  ? `exit code: ${session.exit_code}`
-                  : session.status,
-              timestamp: session.completed_at,
-              level:
-                session.status === "cancelled"
-                  ? ("warning" as const)
-                  : session.status === "failed"
-                    ? ("error" as const)
-                    : ("success" as const),
-              stream: "system" as const
-            }
-          ]
-        : [])
-    ];
-
-    const lifecycleEvents: AgentSessionTimelineEvent[] =
-      steps.length > 0
-        ? steps.map<AgentSessionTimelineEvent>((step) => {
-            const level =
-              step.kind === "session_cancelled"
-                ? "warning"
-                : step.kind === "session_completed" &&
-                    step.payload &&
-                    step.payload.status === "failed"
-                  ? "error"
-                  : step.kind === "session_completed"
-                    ? "success"
-                    : "info";
-            return {
-              id: `step-${step.id}`,
-              type: step.kind,
-              title: step.title,
-              detail: step.detail,
-              timestamp: step.created_at,
-              level,
-              stream: "system"
-            };
-          })
-        : fallbackLifecycleEvents;
-
-    const events = [
-      ...lifecycleEvents,
-      ...interventions.map<AgentSessionTimelineEvent>((intervention) => ({
-        id: `intervention-${intervention.id}`,
-        type: "intervention",
-        title: intervention.title,
-        detail: intervention.detail,
-        timestamp: intervention.created_at,
-        level: intervention.kind === "cancel_requested" ? "warning" : "info",
-        stream: "system"
-      })),
-      ...this.parseLogEvents(session)
-    ];
-
-    return events.sort((left, right) => {
-      if (left.timestamp === null && right.timestamp === null) {
-        return left.id.localeCompare(right.id);
-      }
-      if (left.timestamp === null) {
-        return 1;
-      }
-      if (right.timestamp === null) {
-        return -1;
-      }
-      if (left.timestamp === right.timestamp) {
-        return left.id.localeCompare(right.id);
-      }
-      return left.timestamp - right.timestamp;
+      ...(input.recordedAt !== undefined ? { recordedAt: input.recordedAt } : {})
     });
   }
 }

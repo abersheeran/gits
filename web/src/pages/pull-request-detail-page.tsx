@@ -1165,7 +1165,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                       ) : null}
                       {provenanceDetail ? (
                         <Badge variant="outline">
-                          interventions: {provenanceDetail.interventions.length}
+                          attempts: {provenanceDetail.attempts.length}
                         </Badge>
                       ) : null}
                     </div>

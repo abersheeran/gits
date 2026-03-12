@@ -1880,16 +1880,74 @@ describe("API pull request routes", () => {
             source_number: 1,
             origin: "pull_request_resume",
             status: "running",
+            active_attempt_id: "attempt-pr-provenance",
+            latest_attempt_id: "attempt-pr-provenance",
             created_at: now - 10_000,
             updated_at: now - 5_000
           })
         ]
       },
       {
-        when: "FROM agent_session_artifacts",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-pr-provenance",
+            source_number: 1,
+            origin: "pull_request_resume",
+            status: "running",
+            active_attempt_id: "attempt-pr-provenance",
+            latest_attempt_id: "attempt-pr-provenance",
+            created_at: now - 10_000,
+            updated_at: now - 5_000
+          })
+      },
+      {
+        when: "FROM agent_session_attempts",
+        first: () => ({
+          id: "attempt-pr-provenance",
+          session_id: "session-pr-provenance",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "running",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-pr-provenance-attempt-1",
+          exit_code: null,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: now - 10_000,
+          claimed_at: now - 9_500,
+          started_at: now - 9_000,
+          completed_at: null,
+          updated_at: now - 5_000
+        }),
+        all: () => [
+          {
+            id: "attempt-pr-provenance",
+            session_id: "session-pr-provenance",
+            repository_id: "repo-1",
+            attempt_number: 1,
+            status: "running",
+            instance_type: "lite",
+            promoted_from_instance_type: null,
+            container_instance: "agent-session-session-pr-provenance-attempt-1",
+            exit_code: null,
+            failure_reason: null,
+            failure_stage: null,
+            created_at: now - 10_000,
+            claimed_at: now - 9_500,
+            started_at: now - 9_000,
+            completed_at: null,
+            updated_at: now - 5_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_attempt_artifacts",
         all: () => [
           {
             id: "artifact-pr-1",
+            attempt_id: "attempt-pr-provenance",
             session_id: "session-pr-provenance",
             repository_id: "repo-1",
             kind: "stdout",
@@ -1903,35 +1961,17 @@ describe("API pull request routes", () => {
         ]
       },
       {
-        when: "FROM agent_session_usage_records",
+        when: "FROM agent_session_attempt_events",
         all: () => [
           {
             id: 1,
+            attempt_id: "attempt-pr-provenance",
             session_id: "session-pr-provenance",
             repository_id: "repo-1",
-            kind: "duration_ms",
-            value: 900,
-            unit: "ms",
-            detail: "Container execution duration",
-            payload_json: "{\"runId\":\"run-pr-provenance\"}",
-            created_at: now - 4_000,
-            updated_at: now - 4_000
-          }
-        ]
-      },
-      {
-        when: "FROM agent_session_interventions",
-        all: () => [
-          {
-            id: 2,
-            session_id: "session-pr-provenance",
-            repository_id: "repo-1",
-            kind: "mcp_setup_warning",
-            title: "MCP setup warning",
-            detail: "platform MCP missing",
-            created_by: null,
-            created_by_username: null,
-            payload_json: "{\"runId\":\"run-pr-provenance\"}",
+            type: "warning",
+            stream: "system",
+            message: "platform MCP missing",
+            payload_json: "{\"kind\":\"mcp_setup_warning\"}",
             created_at: now - 3_000
           }
         ]
@@ -1948,9 +1988,10 @@ describe("API pull request routes", () => {
       latestSession: {
         session: { id: string; origin: string };
         sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
+        attempts: Array<{ id: string; attempt_number: number }>;
+        latestAttempt: { id: string; attempt_number: number } | null;
         artifacts: Array<{ kind: string; title: string }>;
-        usageRecords: Array<{ kind: string; value: number }>;
-        interventions: Array<{ kind: string; title: string }>;
+        events: Array<{ type: string; message: string | null }>;
         validationSummary: { status: string | null; headline: string };
       } | null;
     };
@@ -1960,9 +2001,11 @@ describe("API pull request routes", () => {
     expect(body.latestSession?.sourceContext.number).toBe(1);
     expect(body.latestSession?.sourceContext.title).toBe("Improve README");
     expect(body.latestSession?.sourceContext.url).toBe("/repo/alice/demo/pulls/1");
+    expect(body.latestSession?.attempts[0]?.attempt_number).toBe(1);
+    expect(body.latestSession?.latestAttempt?.id).toBe("attempt-pr-provenance");
     expect(body.latestSession?.artifacts[0]?.kind).toBe("stdout");
-    expect(body.latestSession?.usageRecords[0]?.kind).toBe("duration_ms");
-    expect(body.latestSession?.interventions[0]?.kind).toBe("mcp_setup_warning");
+    expect(body.latestSession?.events[0]?.type).toBe("warning");
+    expect(body.latestSession?.events[0]?.message).toBe("platform MCP missing");
     expect(body.latestSession?.validationSummary.status).toBe("running");
     expect(body.latestSession?.validationSummary.headline).toBe("Validation is still running.");
   });
@@ -1982,10 +2025,26 @@ describe("API pull request routes", () => {
             source_number: 1,
             origin: "pull_request_resume",
             status: "success",
+            active_attempt_id: "attempt-pr-batch",
+            latest_attempt_id: "attempt-pr-batch",
             created_at: now - 8_000,
             updated_at: now - 4_000
           })
         ]
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-pr-batch",
+            source_number: 1,
+            origin: "pull_request_resume",
+            status: "success",
+            active_attempt_id: "attempt-pr-batch",
+            latest_attempt_id: "attempt-pr-batch",
+            created_at: now - 8_000,
+            updated_at: now - 4_000
+          })
       },
       {
         when: "WHERE pr.repository_id = ? AND pr.number = ?",
@@ -2016,10 +2075,52 @@ describe("API pull request routes", () => {
         }
       },
       {
-        when: "FROM agent_session_artifacts",
+        when: "FROM agent_session_attempts",
+        first: () => ({
+          id: "attempt-pr-batch",
+          session_id: "session-pr-batch",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "success",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-pr-batch-attempt-1",
+          exit_code: 0,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: now - 8_000,
+          claimed_at: now - 7_500,
+          started_at: now - 7_000,
+          completed_at: now - 4_000,
+          updated_at: now - 4_000
+        }),
+        all: () => [
+          {
+            id: "attempt-pr-batch",
+            session_id: "session-pr-batch",
+            repository_id: "repo-1",
+            attempt_number: 1,
+            status: "success",
+            instance_type: "lite",
+            promoted_from_instance_type: null,
+            container_instance: "agent-session-session-pr-batch-attempt-1",
+            exit_code: 0,
+            failure_reason: null,
+            failure_stage: null,
+            created_at: now - 8_000,
+            claimed_at: now - 7_500,
+            started_at: now - 7_000,
+            completed_at: now - 4_000,
+            updated_at: now - 4_000
+          }
+        ]
+      },
+      {
+        when: "FROM agent_session_attempt_artifacts",
         all: () => [
           {
             id: "artifact-pr-batch",
+            attempt_id: "attempt-pr-batch",
             session_id: "session-pr-batch",
             repository_id: "repo-1",
             kind: "stdout",
@@ -2033,25 +2134,21 @@ describe("API pull request routes", () => {
         ]
       },
       {
-        when: "FROM agent_session_usage_records",
+        when: "FROM agent_session_attempt_events",
         all: () => [
           {
             id: 1,
+            attempt_id: "attempt-pr-batch",
             session_id: "session-pr-batch",
             repository_id: "repo-1",
-            kind: "duration_ms",
-            value: 1250,
-            unit: "ms",
-            detail: "Container execution duration",
-            payload_json: "{\"runId\":\"run-pr-batch\"}",
-            created_at: now - 3_000,
-            updated_at: now - 3_000
+            type: "result_reported",
+            stream: "system",
+            message: "Runner reported final result.",
+            payload_json:
+              "{\"exitCode\":0,\"durationMs\":1250,\"stdoutChars\":24,\"stderrChars\":0}",
+            created_at: now - 3_000
           }
         ]
-      },
-      {
-        when: "FROM agent_session_interventions",
-        all: () => []
       }
     ]);
 
@@ -2067,8 +2164,9 @@ describe("API pull request routes", () => {
         latestSession: {
           session: { id: string };
           sourceContext: { type: string; number: number | null; title: string | null };
+          latestAttempt: { id: string; exit_code: number | null } | null;
           artifacts: Array<{ title: string }>;
-          usageRecords: Array<{ kind: string; value: number }>;
+          events: Array<{ type: string }>;
           validationSummary: { status: string | null; headline: string };
         } | null;
       }>;
@@ -2080,8 +2178,10 @@ describe("API pull request routes", () => {
     expect(body.items[0]?.latestSession?.sourceContext.type).toBe("pull_request");
     expect(body.items[0]?.latestSession?.sourceContext.number).toBe(1);
     expect(body.items[0]?.latestSession?.sourceContext.title).toBe("Improve README");
+    expect(body.items[0]?.latestSession?.latestAttempt?.id).toBe("attempt-pr-batch");
+    expect(body.items[0]?.latestSession?.latestAttempt?.exit_code).toBe(0);
     expect(body.items[0]?.latestSession?.artifacts[0]?.title).toBe("Runner stdout");
-    expect(body.items[0]?.latestSession?.usageRecords[0]?.value).toBe(1250);
+    expect(body.items[0]?.latestSession?.events[0]?.type).toBe("result_reported");
     expect(body.items[0]?.latestSession?.validationSummary.status).toBe("success");
     expect(body.items[0]?.latestSession?.validationSummary.headline).toBe(
       "Validation passed, but no explicit test/build/lint commands were detected."

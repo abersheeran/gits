@@ -88,6 +88,39 @@ export type AgentSessionExecutionSourceType = "issue" | "pull_request";
 export type ActionRunStatus = AgentSessionStatus;
 export type ActionRunSourceType = AgentSessionExecutionSourceType;
 
+export type AgentSessionAttemptStatus =
+  | "queued"
+  | "booting"
+  | "running"
+  | "retryable_failed"
+  | "failed"
+  | "success"
+  | "cancelled";
+
+export type AgentSessionAttemptFailureStage =
+  | "boot"
+  | "workspace"
+  | "runtime"
+  | "result"
+  | "logs"
+  | "side_effects"
+  | "unknown";
+
+export type AgentSessionAttemptFailureReason =
+  | "boot_timeout"
+  | "container_error"
+  | "dockerd_bootstrap_failed"
+  | "stream_disconnected"
+  | "missing_result"
+  | "workspace_preparation_failed"
+  | "git_clone_failed"
+  | "git_checkout_failed"
+  | "agent_exit_non_zero"
+  | "storage_write_failed"
+  | "cancel_requested"
+  | "unknown_infra_failure"
+  | "unknown_task_failure";
+
 export type AgentSessionStepKind =
   | "session_created"
   | "session_queued"
@@ -96,16 +129,21 @@ export type AgentSessionStepKind =
   | "session_completed"
   | "session_cancelled";
 
+export type AgentSessionAttemptEventStream = "system" | "stdout" | "stderr" | "error";
+
+export type AgentSessionAttemptEventType =
+  | "attempt_created"
+  | "attempt_claimed"
+  | "attempt_started"
+  | "stdout_chunk"
+  | "stderr_chunk"
+  | "heartbeat"
+  | "warning"
+  | "result_reported"
+  | "retry_scheduled"
+  | "attempt_completed";
+
 export type AgentSessionArtifactKind = "session_logs" | "stdout" | "stderr";
-
-export type AgentSessionUsageKind =
-  | "duration_ms"
-  | "exit_code"
-  | "log_chars"
-  | "stdout_chars"
-  | "stderr_chars";
-
-export type AgentSessionInterventionKind = "cancel_requested" | "mcp_setup_warning";
 
 export type AgentSessionValidationCheckKind = "tests" | "build" | "lint";
 
@@ -120,6 +158,7 @@ export type AgentSessionValidationCheckStatus =
 export type AgentSessionQueueMessage = {
   repositoryId: string;
   sessionId: string;
+  attemptId: string;
   requestOrigin: string;
 };
 
@@ -360,6 +399,8 @@ export type AgentSessionRecord = {
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
+  active_attempt_id?: string | null;
+  latest_attempt_id?: string | null;
   triggered_by?: string | null;
   triggered_by_username?: string | null;
   logs: string;
@@ -367,6 +408,8 @@ export type AgentSessionRecord = {
   logs_url?: string | null;
   exit_code: number | null;
   container_instance: string | null;
+  failure_reason?: AgentSessionAttemptFailureReason | null;
+  failure_stage?: AgentSessionAttemptFailureStage | null;
   created_at: number;
   claimed_at: number | null;
   started_at: number | null;
@@ -375,6 +418,37 @@ export type AgentSessionRecord = {
 };
 
 export type ActionRunRecord = AgentSessionRecord;
+
+export type AgentSessionAttemptRecord = {
+  id: string;
+  session_id: string;
+  repository_id: string;
+  attempt_number: number;
+  status: AgentSessionAttemptStatus;
+  instance_type: ActionContainerInstanceType;
+  promoted_from_instance_type: ActionContainerInstanceType | null;
+  container_instance: string | null;
+  exit_code: number | null;
+  failure_reason: AgentSessionAttemptFailureReason | null;
+  failure_stage: AgentSessionAttemptFailureStage | null;
+  created_at: number;
+  claimed_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
+};
+
+export type AgentSessionAttemptEventRecord = {
+  id: number;
+  attempt_id: string;
+  session_id: string;
+  repository_id: string;
+  type: AgentSessionAttemptEventType;
+  stream: AgentSessionAttemptEventStream;
+  message: string;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+};
 
 export type AgentSessionStepRecord = {
   id: number;
@@ -389,6 +463,7 @@ export type AgentSessionStepRecord = {
 
 export type AgentSessionArtifactRecord = {
   id: string;
+  attempt_id: string;
   session_id: string;
   repository_id: string;
   kind: AgentSessionArtifactKind;
@@ -411,32 +486,6 @@ export type ActionRunLogsResponse = AgentSessionLogsResponse;
 export type AgentSessionArtifactContentResponse = {
   artifact: AgentSessionArtifactRecord;
   content: string;
-};
-
-export type AgentSessionUsageRecord = {
-  id: number;
-  session_id: string;
-  repository_id: string;
-  kind: AgentSessionUsageKind;
-  value: number;
-  unit: string;
-  detail: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: number;
-  updated_at: number;
-};
-
-export type AgentSessionInterventionRecord = {
-  id: number;
-  session_id: string;
-  repository_id: string;
-  kind: AgentSessionInterventionKind;
-  title: string;
-  detail: string | null;
-  created_by: string | null;
-  created_by_username: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: number;
 };
 
 export type AgentSessionValidationCheckRecord = {

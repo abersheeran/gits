@@ -181,13 +181,15 @@ export async function buildAgentSessionDetailPayload(args: {
 }): Promise<{
   session: AgentSessionRecord;
   sourceContext: Awaited<ReturnType<typeof buildAgentSessionSourceContext>>;
+  attempts: Awaited<ReturnType<AgentSessionService["listAttempts"]>>;
+  activeAttempt: Awaited<ReturnType<AgentSessionService["findActiveAttemptForSession"]>>;
+  latestAttempt: Awaited<ReturnType<AgentSessionService["findLatestAttemptForSession"]>>;
   artifacts: Awaited<ReturnType<AgentSessionService["listArtifacts"]>>;
-  usageRecords: Awaited<ReturnType<AgentSessionService["listUsageRecords"]>>;
-  interventions: Awaited<ReturnType<AgentSessionService["listInterventions"]>>;
+  events: Awaited<ReturnType<AgentSessionService["listAttemptEvents"]>>;
   validationSummary: ReturnType<typeof buildAgentSessionValidationSummary>;
 }> {
   const agentSessionService = new AgentSessionService(args.db);
-  const [sourceContext, artifacts, usageRecords, interventions] = await Promise.all([
+  const [sourceContext, attempts, activeAttempt, latestAttempt, artifacts] = await Promise.all([
     buildAgentSessionSourceContext({
       db: args.db,
       repository: args.repository,
@@ -196,10 +198,19 @@ export async function buildAgentSessionDetailPayload(args: {
       session: args.session,
       ...(args.viewerId ? { viewerId: args.viewerId } : {})
     }),
+    agentSessionService.listAttempts(args.repository.id, args.session.id),
+    agentSessionService.findActiveAttemptForSession(args.repository.id, args.session.id),
+    agentSessionService.findLatestAttemptForSession(args.repository.id, args.session.id),
     agentSessionService.listArtifacts(args.repository.id, args.session.id),
-    agentSessionService.listUsageRecords(args.repository.id, args.session.id),
-    agentSessionService.listInterventions(args.repository.id, args.session.id)
   ]);
+  const detailAttempt = latestAttempt ?? activeAttempt;
+  const events = detailAttempt
+    ? await agentSessionService.listAttemptEvents({
+        repositoryId: args.repository.id,
+        sessionId: args.session.id,
+        attemptId: detailAttempt.id
+      })
+    : [];
 
   return {
     session: {
@@ -208,18 +219,20 @@ export async function buildAgentSessionDetailPayload(args: {
       logs_url: `/api/repos/${args.owner}/${args.repo}/agent-sessions/${args.session.id}/logs`
     },
     sourceContext,
+    attempts,
+    activeAttempt,
+    latestAttempt,
     artifacts: artifacts.map((artifact) => ({
       ...artifact,
       has_full_content: true,
       content_url: `/api/repos/${args.owner}/${args.repo}/agent-sessions/${args.session.id}/artifacts/${artifact.id}/content`
     })),
-    usageRecords,
-    interventions,
+    events,
     validationSummary: buildAgentSessionValidationSummary({
       status: args.session.status,
       artifacts,
-      usageRecords,
-      interventions
+      attempt: detailAttempt,
+      events
     })
   };
 }

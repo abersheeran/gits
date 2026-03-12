@@ -1,15 +1,14 @@
 import type {
   AgentSessionArtifactRecord,
-  AgentSessionInterventionRecord,
+  AgentSessionAttemptEventRecord,
+  AgentSessionAttemptRecord,
   AgentSessionStatus,
-  AgentSessionUsageKind,
-  AgentSessionUsageRecord,
   AgentSessionValidationCheckKind,
   AgentSessionValidationCheckRecord,
   AgentSessionValidationCheckStatus,
   AgentSessionValidationSummary
 } from "../types";
-import { findValidationReportInUsageRecords } from "./agent-session-validation-report";
+import { findValidationReportInAttemptEvents } from "./agent-session-validation-report";
 
 type ValidationCheckDefinition = {
   kind: AgentSessionValidationCheckKind;
@@ -61,14 +60,6 @@ const VALIDATION_CHECK_DEFINITIONS: ValidationCheckDefinition[] = [
 
 const EXPLICIT_COMMAND_TOKENS =
   /\b(?:npm|pnpm|yarn|bun|vitest|jest|pytest|cargo|go|ruff|eslint|biome|vite|next|tsc|webpack|phpunit|rspec|golangci-lint)\b/i;
-
-function usageRecordValue(
-  records: AgentSessionUsageRecord[],
-  kind: AgentSessionUsageKind
-): number | null {
-  const record = records.find((item) => item.kind === kind);
-  return record ? record.value : null;
-}
 
 function mapRunStatusToCheckStatus(
   status: AgentSessionStatus | null
@@ -272,16 +263,12 @@ function buildDetail(args: {
   status: AgentSessionStatus | null;
   checks: AgentSessionValidationCheckRecord[];
   exitCode: number | null;
-  interventions: AgentSessionInterventionRecord[];
 }): string {
-  const hasWarnings = args.interventions.length > 0;
   if (args.status === "queued" || args.status === "running") {
     return "Wait for the current validation run to finish before judging the latest code state.";
   }
   if (args.checks.length > 0) {
-    return hasWarnings
-      ? "Review the detected checks first, then inspect highlighted artifacts and intervention warnings for context."
-      : "Review the detected checks first, then inspect highlighted artifacts for the exact command transcript and output.";
+    return "Review the detected checks first, then inspect highlighted artifacts for the exact command transcript and output.";
   }
   if (args.status === "success") {
     return "The run completed successfully, but the captured output did not expose recognizable test/build/lint commands.";
@@ -295,22 +282,58 @@ function buildDetail(args: {
   return "No validation output is available yet.";
 }
 
+function attemptEventValue(
+  events: AgentSessionAttemptEventRecord[],
+  key: "durationMs" | "exitCode" | "stdoutChars" | "stderrChars"
+): number | null {
+  for (const event of [...events].reverse()) {
+    const value = event.payload?.[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function artifactSize(
+  artifacts: AgentSessionArtifactRecord[],
+  kind: AgentSessionArtifactRecord["kind"]
+): number | null {
+  const artifact = artifacts.find((item) => item.kind === kind);
+  return artifact ? artifact.size_bytes : null;
+}
+
+function attemptDurationMs(
+  attempt: AgentSessionAttemptRecord | null | undefined,
+  events: AgentSessionAttemptEventRecord[]
+): number | null {
+  const fromEvent = attemptEventValue(events, "durationMs");
+  if (fromEvent !== null) {
+    return fromEvent;
+  }
+  if (!attempt?.started_at || !attempt.completed_at) {
+    return null;
+  }
+  return Math.max(attempt.completed_at - attempt.started_at, 0);
+}
+
 export function buildAgentSessionValidationSummary(input: {
   status: AgentSessionStatus | null;
+  attempt?: AgentSessionAttemptRecord | null;
   artifacts: AgentSessionArtifactRecord[];
-  usageRecords: AgentSessionUsageRecord[];
-  interventions: AgentSessionInterventionRecord[];
+  events?: AgentSessionAttemptEventRecord[];
 }): AgentSessionValidationSummary {
-  const structuredReport = findValidationReportInUsageRecords(input.usageRecords);
+  const events = input.events ?? [];
+  const structuredReport = findValidationReportInAttemptEvents(events);
   const lines = collectLogLines(input.artifacts);
   const checks =
     structuredReport?.checks ??
     VALIDATION_CHECK_DEFINITIONS.flatMap((definition) => {
       const check = detectValidationCheck(definition, lines, input.status);
-      return check ? [check] : [];
-    });
+        return check ? [check] : [];
+      });
 
-  const exitCode = usageRecordValue(input.usageRecords, "exit_code");
+  const exitCode = input.attempt?.exit_code ?? attemptEventValue(events, "exitCode");
   const summary: AgentSessionValidationSummary = {
     status: input.status,
     headline:
@@ -325,13 +348,12 @@ export function buildAgentSessionValidationSummary(input: {
       buildDetail({
         status: input.status,
         checks,
-        exitCode,
-        interventions: input.interventions
+        exitCode
       }),
-    duration_ms: usageRecordValue(input.usageRecords, "duration_ms"),
+    duration_ms: attemptDurationMs(input.attempt, events),
     exit_code: exitCode,
-    stdout_chars: usageRecordValue(input.usageRecords, "stdout_chars"),
-    stderr_chars: usageRecordValue(input.usageRecords, "stderr_chars"),
+    stdout_chars: attemptEventValue(events, "stdoutChars") ?? artifactSize(input.artifacts, "stdout"),
+    stderr_chars: attemptEventValue(events, "stderrChars") ?? artifactSize(input.artifacts, "stderr"),
     checks,
     highlighted_artifact_ids: prioritizeArtifacts(input.artifacts, input.status, checks)
   };

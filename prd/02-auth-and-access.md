@@ -92,10 +92,9 @@
 - `users`
 - `access_tokens`
 - `agent_sessions`
-- `agent_session_steps`
-- `agent_session_artifacts`
-- `agent_session_usage_records`
-- `agent_session_interventions`
+- `agent_session_attempts`
+- `agent_session_attempt_events`
+- `agent_session_attempt_artifacts`
 
 ## 8. 关键代码文件
 

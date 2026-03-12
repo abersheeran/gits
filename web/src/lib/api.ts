@@ -573,6 +573,8 @@ export type AgentSessionRecord = {
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
+  active_attempt_id?: string | null;
+  latest_attempt_id?: string | null;
   triggered_by?: string | null;
   triggered_by_username?: string | null;
   logs: string;
@@ -580,6 +582,30 @@ export type AgentSessionRecord = {
   logs_url?: string | null;
   exit_code: number | null;
   container_instance: string | null;
+  failure_reason?:
+    | "runner_binding_missing"
+    | "container_start_conflict"
+    | "dockerd_bootstrap_failed"
+    | "stream_disconnected"
+    | "missing_result"
+    | "workspace_preparation_failed"
+    | "git_clone_failed"
+    | "git_checkout_failed"
+    | "agent_exit_non_zero"
+    | "storage_write_failed"
+    | "cancel_requested"
+    | "unknown_infra_failure"
+    | "unknown_task_failure"
+    | null;
+  failure_stage?:
+    | "boot"
+    | "workspace"
+    | "runtime"
+    | "result"
+    | "logs"
+    | "side_effects"
+    | "unknown"
+    | null;
   created_at: number;
   claimed_at: number | null;
   started_at: number | null;
@@ -589,8 +615,59 @@ export type AgentSessionRecord = {
 
 export type ActionRunRecord = AgentSessionRecord;
 
+export type AgentSessionAttemptStatus =
+  | "queued"
+  | "booting"
+  | "running"
+  | "retryable_failed"
+  | "failed"
+  | "success"
+  | "cancelled";
+
+export type AgentSessionAttemptRecord = {
+  id: string;
+  session_id: string;
+  repository_id: string;
+  attempt_number: number;
+  status: AgentSessionAttemptStatus;
+  instance_type: ActionContainerInstanceType;
+  promoted_from_instance_type: ActionContainerInstanceType | null;
+  container_instance: string | null;
+  exit_code: number | null;
+  failure_reason: AgentSessionRecord["failure_reason"];
+  failure_stage: AgentSessionRecord["failure_stage"];
+  created_at: number;
+  claimed_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  updated_at: number;
+};
+
+export type AgentSessionAttemptEventRecord = {
+  id: number;
+  attempt_id: string;
+  session_id: string;
+  repository_id: string;
+  type:
+    | "attempt_created"
+    | "attempt_claimed"
+    | "attempt_started"
+    | "stdout_chunk"
+    | "stderr_chunk"
+    | "heartbeat"
+    | "warning"
+    | "result_reported"
+    | "retry_scheduled"
+    | "attempt_completed";
+  stream: "system" | "stdout" | "stderr" | "error";
+  message: string;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+};
+
 export type AgentSessionArtifactRecord = {
   id: string;
+  attempt_id: string;
   session_id: string;
   repository_id: string;
   kind: "session_logs" | "stdout" | "stderr";
@@ -611,32 +688,6 @@ export type ActionRunLogsResponse = {
 export type AgentSessionArtifactContentResponse = {
   artifact: AgentSessionArtifactRecord;
   content: string;
-};
-
-export type AgentSessionUsageRecord = {
-  id: number;
-  session_id: string;
-  repository_id: string;
-  kind: "duration_ms" | "exit_code" | "log_chars" | "stdout_chars" | "stderr_chars";
-  value: number;
-  unit: string;
-  detail: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: number;
-  updated_at: number;
-};
-
-export type AgentSessionInterventionRecord = {
-  id: number;
-  session_id: string;
-  repository_id: string;
-  kind: "cancel_requested" | "mcp_setup_warning";
-  title: string;
-  detail: string | null;
-  created_by: string | null;
-  created_by_username: string | null;
-  payload: Record<string, unknown> | null;
-  created_at: number;
 };
 
 export type AgentSessionValidationCheckKind = "tests" | "build" | "lint";
@@ -682,9 +733,11 @@ export type AgentSessionDetail = {
   session: AgentSessionRecord;
   linkedRun?: ActionRunRecord | null;
   sourceContext: AgentSessionSourceContext;
+  attempts: AgentSessionAttemptRecord[];
+  activeAttempt: AgentSessionAttemptRecord | null;
+  latestAttempt: AgentSessionAttemptRecord | null;
   artifacts: AgentSessionArtifactRecord[];
-  usageRecords: AgentSessionUsageRecord[];
-  interventions: AgentSessionInterventionRecord[];
+  events: AgentSessionAttemptEventRecord[];
   validationSummary: AgentSessionValidationSummary;
 };
 

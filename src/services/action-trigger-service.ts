@@ -11,7 +11,6 @@ import type {
 } from "../types";
 import { AgentSessionService } from "./agent-session-service";
 import { enqueueActionRunExecution } from "./action-run-queue-service";
-import { executeActionRun } from "./action-runner-service";
 import { ActionsService } from "./actions-service";
 
 const ACTIONS_MENTION_PATTERN = /@\s*actions\b/i;
@@ -104,24 +103,10 @@ export function containsActionsMention(input: { title?: string; body?: string })
 function canScheduleActionRun(
   env: Pick<
     AppBindings,
-    | "ACTIONS_RUNNER"
-    | "ACTIONS_RUNNER_BASIC"
-    | "ACTIONS_RUNNER_STANDARD_1"
-    | "ACTIONS_RUNNER_STANDARD_2"
-    | "ACTIONS_RUNNER_STANDARD_3"
-    | "ACTIONS_RUNNER_STANDARD_4"
     | "ACTIONS_QUEUE"
   >
 ): boolean {
-  return Boolean(
-    env.ACTIONS_RUNNER ||
-      env.ACTIONS_RUNNER_BASIC ||
-      env.ACTIONS_RUNNER_STANDARD_1 ||
-      env.ACTIONS_RUNNER_STANDARD_2 ||
-      env.ACTIONS_RUNNER_STANDARD_3 ||
-      env.ACTIONS_RUNNER_STANDARD_4 ||
-      env.ACTIONS_QUEUE
-  );
+  return Boolean(env.ACTIONS_QUEUE);
 }
 
 export async function scheduleActionRunExecution(input: {
@@ -145,26 +130,19 @@ export async function scheduleActionRunExecution(input: {
   triggeredByUser?: AuthUser;
   requestOrigin: string;
 }): Promise<void> {
+  const attemptId = input.session.active_attempt_id ?? input.session.latest_attempt_id;
+  if (!attemptId) {
+    throw new Error(`Agent session ${input.session.id} has no active attempt to enqueue`);
+  }
+
   const enqueued = await enqueueActionRunExecution(input.env, {
     repositoryId: input.repository.id,
     sessionId: input.session.id,
+    attemptId,
     requestOrigin: input.requestOrigin
   });
-  if (enqueued) {
-    return;
-  }
-
-  const execution = executeActionRun({
-    env: input.env,
-    repository: input.repository,
-    session: input.session,
-    ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
-    requestOrigin: input.requestOrigin
-  });
-  if (input.executionCtx) {
-    input.executionCtx.waitUntil(execution);
-  } else {
-    void execution;
+  if (!enqueued) {
+    throw new Error("Actions queue binding is not configured");
   }
 }
 

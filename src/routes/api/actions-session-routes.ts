@@ -486,14 +486,21 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
         throw new HTTPException(404, { message: "Agent session not found" });
       }
 
-      const [steps, interventions] = await Promise.all([
+      const [steps, latestAttempt] = await Promise.all([
         agentSessionService.listSteps(repository.id, session.id),
-        agentSessionService.listInterventions(repository.id, session.id)
+        agentSessionService.findLatestAttemptForSession(repository.id, session.id)
       ]);
+      const attemptEvents = latestAttempt
+        ? await agentSessionService.listAttemptEvents({
+            repositoryId: repository.id,
+            sessionId: session.id,
+            attemptId: latestAttempt.id
+          })
+        : [];
       const events = agentSessionService.buildTimeline({
         session,
         steps,
-        interventions
+        events: attemptEvents
       });
 
       return c.json({ events });
