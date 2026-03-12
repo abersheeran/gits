@@ -210,6 +210,7 @@ export function configureMonaco(instance: Monaco) {
     70,
     blendColors(dangerText, 8, surfaceBase)
   );
+  const transparentBorder = mixColor(textPrimary, 0);
 
   instance.editor.defineTheme("gits-light", {
     base: "vs",
@@ -245,10 +246,10 @@ export function configureMonaco(instance: Monaco) {
       "diffEditor.diagonalFill": blendColors(borderSubtle, 72, surfaceBase),
       "diffEditor.insertedTextBackground": insertedTextBackground,
       "diffEditor.insertedLineBackground": insertedLineBackground,
-      "diffEditor.insertedTextBorder": "transparent",
+      "diffEditor.insertedTextBorder": transparentBorder,
       "diffEditor.removedTextBackground": removedTextBackground,
       "diffEditor.removedLineBackground": removedLineBackground,
-      "diffEditor.removedTextBorder": "transparent",
+      "diffEditor.removedTextBorder": transparentBorder,
       "diffEditorGutter.insertedLineBackground": blendColors(successMuted, 74, success),
       "diffEditorGutter.removedLineBackground": blendColors(dangerSurface, 76, dangerBorder),
       "diffEditor.unchangedRegionBackground": blendColors(surfaceFocus, 82, surfaceBase),
