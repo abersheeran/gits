@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
@@ -224,152 +224,168 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to={`/repo/${owner}/${repo}`}>{owner}</Link>
-            <span>/</span>
-            <span>{repo}</span>
-            <Badge variant="secondary">Branches</Badge>
+    <div className="app-page">
+      <section className="page-panel-muted p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-body-sm text-text-secondary">
+              <Link to={`/repo/${owner}/${repo}`} className="gh-link">
+                {owner}
+              </Link>
+              <span>/</span>
+              <span>{repo}</span>
+              <Badge variant="secondary">Branches</Badge>
+            </div>
+            <div className="flex items-start gap-2">
+              <h1 className="font-display text-card-title text-text-primary">分支管理</h1>
+              <HelpTip content="这里负责创建分支、切换默认分支，以及删除非默认分支。" />
+            </div>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">分支管理</h1>
-          <p className="text-sm text-muted-foreground">创建分支、切换默认分支，并删除非默认分支。</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" asChild>
+              <Link to={`/repo/${owner}/${repo}`}>代码页</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/repo/${owner}/${repo}/settings`}>仓库设置</Link>
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link to={`/repo/${owner}/${repo}`}>代码页</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to={`/repo/${owner}/${repo}/settings`}>仓库设置</Link>
-          </Button>
-        </div>
-      </div>
+      </section>
 
-      {formError ? (
-        <Alert variant="destructive">
-          <AlertTitle>操作失败</AlertTitle>
-          <AlertDescription>{formError}</AlertDescription>
-        </Alert>
-      ) : null}
-      {notice ? (
-        <Alert>
-          <AlertTitle>已更新</AlertTitle>
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
-      ) : null}
+      <div className="space-y-6">
+        {formError ? (
+          <Alert variant="destructive">
+            <AlertTitle>操作失败</AlertTitle>
+            <AlertDescription>{formError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {notice ? (
+          <Alert>
+            <AlertTitle>已更新</AlertTitle>
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>默认分支</CardTitle>
-          <CardDescription>更新仓库 HEAD 指向，代码页会自动跟随新的默认分支。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4 md:grid-cols-[1fr_220px_auto] md:items-end" onSubmit={handleUpdateDefaultBranch}>
-            <div className="space-y-2">
-              <Label htmlFor="default-branch">默认分支</Label>
-              <Select value={defaultBranchDraft} onValueChange={setDefaultBranchDraft}>
-                <SelectTrigger id="default-branch">
-                  <SelectValue placeholder="选择默认分支" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branchItems.map((branch) => (
-                    <SelectItem key={branch.name} value={branch.shortName}>
-                      {branch.shortName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle>默认分支</CardTitle>
+              <HelpTip content="更新仓库 HEAD 指向后，代码页会自动跟随新的默认分支。" />
             </div>
-            <div className="space-y-2">
-              <Label>当前默认分支</Label>
-              <div className="flex h-9 items-center rounded-md border px-3 text-sm">{currentDefaultBranch ?? "none"}</div>
-            </div>
-            <PendingButton
-              type="submit"
-              pending={defaultBranchPending}
-              pendingText="切换中..."
-              disabled={!defaultBranchDraft || defaultBranchDraft === currentDefaultBranch}
-            >
-              切换默认分支
-            </PendingButton>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>创建分支</CardTitle>
-          <CardDescription>默认预填仓库当前 HEAD commit，可替换成任意已存在的 commit SHA。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={handleCreateBranch}>
-            <div className="grid gap-4 md:grid-cols-2">
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-4 md:grid-cols-[1fr_220px_auto] md:items-end" onSubmit={handleUpdateDefaultBranch}>
               <div className="space-y-2">
-                <Label htmlFor="new-branch-name">新分支名</Label>
-                <Input
-                  id="new-branch-name"
-                  value={branchNameDraft}
-                  onChange={(event) => setBranchNameDraft(event.target.value)}
-                  placeholder="feature/new-ui"
-                  required
-                />
+                <Label htmlFor="default-branch">默认分支</Label>
+                <Select value={defaultBranchDraft} onValueChange={setDefaultBranchDraft}>
+                  <SelectTrigger id="default-branch">
+                    <SelectValue placeholder="选择默认分支" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branchItems.map((branch) => (
+                      <SelectItem key={branch.name} value={branch.shortName}>
+                        {branch.shortName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-branch-source-oid">起点 commit OID</Label>
-                <Input
-                  id="new-branch-source-oid"
-                  value={branchSourceOidDraft}
-                  onChange={(event) => setBranchSourceOidDraft(event.target.value)}
-                  placeholder="40 位 commit SHA"
-                  required
-                />
-              </div>
-            </div>
-            <PendingButton type="submit" pending={branchSubmitting} pendingText="创建中...">
-              创建分支
-            </PendingButton>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>分支列表</CardTitle>
-          <CardDescription>默认分支不可删除，仓库也至少会保留一个分支。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {branchItems.map((branch) => {
-            const isDefault = branch.shortName === currentDefaultBranch;
-            return (
-              <div
-                key={branch.name}
-                className="flex flex-col gap-3 rounded-lg border p-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{branch.shortName}</span>
-                    {isDefault ? <Badge>default</Badge> : null}
-                  </div>
-                  <div className="break-all text-xs text-muted-foreground">{branch.oid}</div>
+                <Label>当前默认分支</Label>
+                <div className="flex h-9 items-center rounded-full border border-border-subtle bg-surface-focus px-3 text-body-sm text-text-primary">
+                  {currentDefaultBranch ?? "none"}
                 </div>
-                <PendingButton
-                  type="button"
-                  variant="outline"
-                  pending={branchDeletingName === branch.shortName}
-                  pendingText="删除中..."
-                  disabled={isDefault || branchDeletingName !== null}
-                  onClick={() => {
-                    void handleDeleteBranch(branch.shortName);
-                  }}
-                >
-                  删除分支
-                </PendingButton>
               </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+              <PendingButton
+                type="submit"
+                pending={defaultBranchPending}
+                pendingText="切换中..."
+                disabled={!defaultBranchDraft || defaultBranchDraft === currentDefaultBranch}
+              >
+                切换默认分支
+              </PendingButton>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle>创建分支</CardTitle>
+              <HelpTip content="默认预填仓库当前 HEAD commit，也可以手动填写任意已存在的 commit SHA 作为起点。" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={handleCreateBranch}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="new-branch-name">新分支名</Label>
+                  <Input
+                    id="new-branch-name"
+                    value={branchNameDraft}
+                    onChange={(event) => setBranchNameDraft(event.target.value)}
+                    placeholder="feature/new-ui"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-branch-source-oid">起点 commit OID</Label>
+                  <Input
+                    id="new-branch-source-oid"
+                    value={branchSourceOidDraft}
+                    onChange={(event) => setBranchSourceOidDraft(event.target.value)}
+                    placeholder="40 位 commit SHA"
+                    required
+                  />
+                </div>
+              </div>
+              <PendingButton type="submit" pending={branchSubmitting} pendingText="创建中...">
+                创建分支
+              </PendingButton>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle>分支列表</CardTitle>
+              <HelpTip content="默认分支不可删除，仓库至少会保留一个分支。" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {branchItems.map((branch) => {
+              const isDefault = branch.shortName === currentDefaultBranch;
+              return (
+                <div
+                  key={branch.name}
+                  className="flex flex-col gap-3 rounded-[20px] border border-border-subtle bg-surface-base p-4 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-text-primary">{branch.shortName}</span>
+                      {isDefault ? <Badge>default</Badge> : null}
+                    </div>
+                    <div className="break-all text-body-xs text-text-secondary">{branch.oid}</div>
+                  </div>
+                  <PendingButton
+                    type="button"
+                    variant="outline"
+                    pending={branchDeletingName === branch.shortName}
+                    pendingText="删除中..."
+                    disabled={isDefault || branchDeletingName !== null}
+                    onClick={() => {
+                      void handleDeleteBranch(branch.shortName);
+                    }}
+                  >
+                    删除分支
+                  </PendingButton>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

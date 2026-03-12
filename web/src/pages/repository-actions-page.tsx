@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { CodeConfigPanel } from "@/components/repository/code-config-panel";
 import { RepositoryHeader } from "@/components/repository/repository-header";
@@ -941,7 +942,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       {canManageActions ? (
         <div className="space-y-4">
           <div
-            className="inline-flex items-center rounded-lg border bg-muted/30 p-1"
+            className="segmented-control w-fit"
             role="tablist"
             aria-label="Actions 内容切换"
           >
@@ -951,11 +952,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               role="tab"
               aria-selected={activeTab === "logs"}
               aria-controls="actions-logs-panel"
-              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                activeTab === "logs"
-                  ? "bg-background font-medium text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              className="segmented-control__item"
+              data-active={activeTab === "logs"}
               onClick={() => setActiveTab("logs")}
             >
               运行日志
@@ -966,11 +964,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               role="tab"
               aria-selected={activeTab === "config"}
               aria-controls="actions-config-panel"
-              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                activeTab === "config"
-                  ? "bg-background font-medium text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              className="segmented-control__item"
+              data-active={activeTab === "config"}
               onClick={() => setActiveTab("config")}
             >
               配置
@@ -980,23 +975,26 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           {activeTab === "config" ? (
             <div className="space-y-4">
               <Card id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
-                <CardHeader>
-                  <CardTitle className="text-base">Cloudflare container config</CardTitle>
+                <CardHeader className="border-b border-border-subtle bg-surface-focus">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="text-heading-3-16-semibold">Cloudflare container config</CardTitle>
+                    <HelpTip content="这里维护仓库级的 runtime 覆盖配置，包括实例规格以及注入给 Codex / Claude Code 的配置文件。" />
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {loadingRunnerConfig || !runnerConfig ? (
                     <InlineLoadingState
                       title="Loading repository config"
-                      description="Fetching the inherited and overridden container settings."
-                    />
+                        description="Fetching the inherited and overridden container settings."
+                      />
                   ) : (
                     <form className="space-y-6" onSubmit={handleSaveRunnerConfig}>
-                      <div className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          <p className="text-label-xs text-text-supporting">
                             Repository override
                           </p>
-                          <p className="mt-1 text-sm text-slate-600">
+                          <p className="mt-1 text-body-sm text-text-secondary">
                             updated: {formatDateTime(runnerConfig.updated_at)}
                           </p>
                         </div>
@@ -1005,7 +1003,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                             <Button
                               type="button"
                               variant="outline"
-                              className="rounded-lg"
                               onClick={handleCancelRunnerConfigEditing}
                             >
                               Cancel
@@ -1018,14 +1015,12 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 (savingRunnerConfig && runnerConfigAction !== "save")
                               }
                               pendingText="Saving config..."
-                              className="rounded-lg"
                             >
                               保存容器配置
                             </PendingButton>
                             <PendingButton
                               type="button"
                               variant="outline"
-                              className="rounded-lg"
                               pending={runnerConfigAction === "reset"}
                               disabled={savingRunnerConfig && runnerConfigAction !== "reset"}
                               pendingText="Resetting..."
@@ -1037,17 +1032,17 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                             </PendingButton>
                           </div>
                         ) : (
-                          <Button className="rounded-lg" type="button" onClick={handleStartRunnerConfigEditing}>
+                          <Button type="button" onClick={handleStartRunnerConfigEditing}>
                             Edit config
                           </Button>
                         )}
                       </div>
 
                       {runnerConfigEditing ? (
-                        <section className="space-y-4 rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+                        <section className="space-y-4 rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
                           <div className="space-y-1">
-                            <h2 className="text-sm font-semibold text-slate-950">Instance Type</h2>
-                            <p className="text-sm text-slate-600">
+                            <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
+                            <p className="text-body-sm text-text-secondary">
                               这个设置会决定 Cloudflare container 的 CPU、内存和磁盘规格。默认值为 lite。
                             </p>
                           </div>
@@ -1062,7 +1057,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                               >
                                 <SelectTrigger
                                   id="repository-runner-instance-type"
-                                  className="rounded-lg border-slate-200 bg-white"
+                                  className="bg-surface-base"
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
@@ -1075,9 +1070,9 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-inner shadow-slate-200/40">
+                            <div className="overflow-x-auto rounded-[20px] border border-border-subtle bg-surface-focus">
                               <table className="min-w-full text-left text-xs">
-                                <thead className="bg-slate-50 text-slate-500">
+                                <thead className="bg-surface-base text-text-supporting">
                                   <tr>
                                     <th className="px-3 py-2 font-medium">Instance Type</th>
                                     <th className="px-3 py-2 font-medium">规格</th>
@@ -1087,12 +1082,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                   {ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS.map((option) => (
                                     <tr
                                       key={option.value}
-                                      className={
-                                        option.value === runnerInstanceType ? "bg-sky-50/80" : ""
-                                      }
+                                      className={option.value === runnerInstanceType ? "bg-surface-base" : ""}
                                     >
                                       <td className="px-3 py-2 font-mono">{option.label}</td>
-                                      <td className="px-3 py-2 text-slate-600">{option.spec}</td>
+                                      <td className="px-3 py-2 text-text-secondary">{option.spec}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1101,11 +1094,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           </div>
                         </section>
                       ) : (
-                        <section className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+                        <section className="rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="space-y-1">
-                              <h2 className="text-sm font-semibold text-slate-950">Instance Type</h2>
-                              <p className="text-sm text-slate-600">
+                              <h2 className="text-body-sm font-medium text-text-primary">Instance Type</h2>
+                              <p className="text-body-sm text-text-secondary">
                                 当前仓库运行时实例规格：{runnerConfig.instanceType}
                               </p>
                             </div>

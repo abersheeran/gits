@@ -1,13 +1,13 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle
@@ -55,8 +55,10 @@ export function LoginPage({ user, onAuthChanged }: LoginPageProps) {
     <div className="mx-auto max-w-xl">
       <Card>
         <CardHeader>
-          <CardTitle>登录账号</CardTitle>
-          <CardDescription>使用用户名或邮箱登录，登录后可创建仓库并管理权限。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>登录账号</CardTitle>
+            <HelpTip content="使用用户名或邮箱登录。登录后即可创建仓库、管理协作者和访问受保护页面。" />
+          </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -93,7 +95,7 @@ export function LoginPage({ user, onAuthChanged }: LoginPageProps) {
           </form>
         </CardContent>
         <CardFooter className="justify-between">
-          <span className="text-sm text-muted-foreground">还没有账号？</span>
+          <span className="text-body-sm text-text-secondary">还没有账号？</span>
           <Button variant="outline" asChild>
             <Link to="/register">注册</Link>
           </Button>

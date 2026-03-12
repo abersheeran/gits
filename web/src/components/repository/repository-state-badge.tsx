@@ -14,7 +14,10 @@ export function RepositoryStateBadge({
 }: RepositoryStateBadgeProps) {
   if (state === "merged") {
     return (
-      <Badge variant="secondary" className="inline-flex items-center gap-1 rounded-full bg-violet-100 text-violet-800">
+      <Badge
+        variant="secondary"
+        className="inline-flex items-center gap-1 border-transparent bg-fill-secondary text-text-primary"
+      >
         <GitMerge className="h-3.5 w-3.5" />
         merged
       </Badge>
@@ -23,7 +26,10 @@ export function RepositoryStateBadge({
 
   if (state === "closed") {
     return (
-      <Badge variant="secondary" className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700">
+      <Badge
+        variant="outline"
+        className="inline-flex items-center gap-1 border-border-subtle bg-surface-base text-text-supporting-strong"
+      >
         <CheckCircle2 className="h-3.5 w-3.5" />
         closed
       </Badge>
@@ -34,7 +40,7 @@ export function RepositoryStateBadge({
   return (
     <Badge
       variant="secondary"
-      className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800"
+      className="inline-flex items-center gap-1 border-transparent bg-fill-primary text-text-primary"
     >
       {draft ? <AlertCircle className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
       {draft ? "draft" : "open"}

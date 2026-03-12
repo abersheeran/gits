@@ -169,8 +169,8 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
         />
       ) : null}
 
-      <section className="overflow-hidden rounded-md border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2">
+      <section className="page-panel overflow-hidden">
+        <div className="panel-toolbar">
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -201,7 +201,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
               All
             </Button>
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-body-xs text-text-secondary">
             {totalPullRequests} pull requests · filter: {state}
           </div>
           {canCreate ? (

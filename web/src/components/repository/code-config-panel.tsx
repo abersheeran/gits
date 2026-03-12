@@ -27,6 +27,25 @@ function countLines(value: string): number {
   return value.split(/\r?\n/).length;
 }
 
+function maskSensitiveConfigPreview(value: string): string {
+  return value
+    .replace(
+      /((?:^|[{\s,])["']?(?:authorization|token|api[_-]?key|secret|password)["']?\s*[:=]\s*["'])([^"'`\n]+)(["'])/gim,
+      (_, prefix: string, secret: string, suffix: string) => `${prefix}${maskSecret(secret)}${suffix}`
+    )
+    .replace(/\b(Bearer\s+)([^\s"',}]+)/gim, (_, prefix: string, secret: string) => `${prefix}${maskSecret(secret)}`)
+    .replace(/\b(sk-[A-Za-z0-9_-]+)\b/g, (secret: string) => maskSecret(secret));
+}
+
+function maskSecret(secret: string): string {
+  const trimmedSecret = secret.trim();
+  const bearerMatch = trimmedSecret.match(/^(Bearer\s+).+$/i);
+  if (bearerMatch) {
+    return `${bearerMatch[1]}[masked]`;
+  }
+  return "[masked]";
+}
+
 export function CodeConfigPanel({
   title,
   description,
@@ -43,44 +62,46 @@ export function CodeConfigPanel({
 }: CodeConfigPanelProps) {
   const hasValue = value.trim().length > 0;
   const lineCount = countLines(value);
+  const previewValue = maskSensitiveConfigPreview(value);
+  const previewIsMasked = previewValue !== value;
 
   return (
     <section
       className={cn(
-        "rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm",
+        "rounded-[24px] border border-border-subtle bg-surface-base p-4 shadow-container md:p-5",
         className
       )}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <div className="inline-flex items-center gap-2 text-label-xs text-text-supporting">
             <FileCog className="h-3.5 w-3.5" />
             {title}
           </div>
-          {description ? <p className="text-sm leading-6 text-slate-600">{description}</p> : null}
+          {description ? <p className="text-body-sm leading-6 text-text-secondary">{description}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {statusText ? (
             <Badge
               variant="outline"
-              className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-700"
+              className="border-border-subtle bg-surface-focus px-3 py-1 text-label-xs text-text-primary"
             >
               {statusText}
             </Badge>
           ) : null}
           <Badge
             variant="outline"
-            className="rounded-full border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-600"
+            className="border-border-subtle bg-surface-focus px-3 py-1 text-label-xs text-text-secondary"
           >
             {hasValue ? `${lineCount} lines` : "Empty"}
           </Badge>
         </div>
       </div>
 
-      <div className="mt-3 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-inner shadow-slate-200/40">
+      <div className="mt-3 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
         {editing ? (
           <div className="space-y-3">
-            <Label className="text-sm font-medium text-slate-700">{label}</Label>
+            <Label className="text-body-sm text-text-primary">{label}</Label>
             <Textarea
               aria-label={label}
               value={value}
@@ -91,28 +112,33 @@ export function CodeConfigPanel({
               autoCapitalize="off"
               autoCorrect="off"
               autoComplete="off"
-              className="overflow-x-auto whitespace-pre rounded-lg border-slate-200 bg-slate-950/[0.02] px-3 py-3 font-mono text-xs leading-5 shadow-inner shadow-slate-200/40 focus-visible:ring-slate-400"
+              className="overflow-x-auto whitespace-pre rounded-[20px] border-border-subtle bg-surface-base px-3 py-3 font-mono text-code-sm leading-6 shadow-none"
               style={style}
             />
           </div>
         ) : hasValue ? (
           <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-500">
-              <Braces className="h-3.5 w-3.5" />
-              Read-only preview
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex items-center gap-2 text-label-xs text-text-supporting">
+                <Braces className="h-3.5 w-3.5" />
+                Read-only preview
+              </div>
+              {previewIsMasked ? (
+                <span className="text-label-xs text-text-supporting">Sensitive values masked</span>
+              ) : null}
             </div>
             <pre
-              className="max-h-[20rem] overflow-auto whitespace-pre text-xs leading-6 text-slate-700"
+              className="max-h-[20rem] overflow-auto whitespace-pre rounded-[16px] bg-surface-base px-3 py-3 text-code-sm leading-6 text-text-primary"
               style={style}
             >
-              {value}
+              {previewValue}
             </pre>
           </div>
         ) : (
-          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-4 py-6 text-center">
-            <Sparkles className="h-4 w-4 text-slate-400" />
-            <p className="mt-3 text-sm font-medium text-slate-700">{emptyTitle}</p>
-            <p className="mt-1 max-w-md text-sm leading-6 text-slate-500">{emptyDescription}</p>
+          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border-subtle bg-surface-base px-4 py-6 text-center">
+            <Sparkles className="h-4 w-4 text-text-supporting" />
+            <p className="mt-3 text-body-sm font-medium text-text-primary">{emptyTitle}</p>
+            <p className="mt-1 max-w-md text-body-sm leading-6 text-text-secondary">{emptyDescription}</p>
           </div>
         )}
       </div>

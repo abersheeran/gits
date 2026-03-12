@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,19 +53,29 @@ export function HomePage({ user }: HomePageProps) {
   return (
     <div className="app-page">
       <section className="page-hero">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
-          <div className="space-y-4">
-            <Badge variant="secondary" className="w-fit">
-              Issue to Session to PR to Review
-            </Badge>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2">
+              <Badge variant="secondary" className="w-fit">
+                Explore
+              </Badge>
+              <HelpTip content="游客可以直接浏览公开仓库，并从仓库页进入代码、Issue、PR 与 Actions 上下文。" />
+            </div>
             <div className="space-y-3">
               <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
-                把仓库、任务、评审和 Agent 交付压进同一条主链路。
+                公开仓库发现
               </h1>
-              <p className="max-w-3xl text-body-sm text-text-secondary md:text-body-md">
-                gits 的前端现在围绕仓库入口、任务中心和交付回看统一组织。你可以从公开仓库开始浏览，
-                再进入 Issue、PR、Actions 与 Session 细节。
-              </p>
+              <div className="flex flex-wrap items-center gap-3 text-body-sm text-text-secondary md:text-body-md">
+                <span>{loading ? "同步中..." : `${repositories.length} 个公开仓库`}</span>
+                {repositories[0] ? (
+                  <Link
+                    to={`/repo/${repositories[0].owner_username}/${repositories[0].name}`}
+                    className="gh-link"
+                  >
+                    最新：{repositories[0].owner_username}/{repositories[0].name}
+                  </Link>
+                ) : null}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {user ? (
@@ -91,22 +102,28 @@ export function HomePage({ user }: HomePageProps) {
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <div className="page-panel-muted p-4">
-              <p className="text-label-xs text-text-supporting">公开仓库</p>
+              <p className="text-label-xs text-text-supporting">Public repositories</p>
               <p className="mt-3 font-display text-section-heading-mobile text-text-primary">
                 {loading ? "..." : repositories.length}
               </p>
-              <p className="mt-2 text-body-xs text-text-secondary">
-                浏览当前公开的仓库入口和最近新增项目。
-              </p>
             </div>
             <div className="page-panel p-4">
-              <p className="text-label-xs text-text-supporting">协作模式</p>
-              <p className="mt-3 font-display text-heading-3-16-semibold text-text-primary">
-                Repository-first
-              </p>
-              <p className="mt-2 text-body-xs text-text-secondary">
-                从仓库进入代码、Issue、PR、Actions，再回到 Session 追踪交付。
-              </p>
+              <p className="text-label-xs text-text-supporting">Latest entry</p>
+              {repositories[0] ? (
+                <Link
+                  to={`/repo/${repositories[0].owner_username}/${repositories[0].name}`}
+                  className="mt-3 block font-display text-heading-3-16-semibold text-text-primary transition-colors duration-100 ease-in-out hover:text-text-supportingStrong"
+                >
+                  {repositories[0].owner_username}/{repositories[0].name}
+                </Link>
+              ) : (
+                <p className="mt-3 font-display text-heading-3-16-semibold text-text-primary">
+                  Waiting for repos
+                </p>
+              )}
+              {repositories[0]?.description?.trim() ? (
+                <p className="mt-2 text-body-xs text-text-secondary">{repositories[0].description}</p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -121,13 +138,11 @@ export function HomePage({ user }: HomePageProps) {
 
       <section className="page-panel overflow-hidden">
         <div className="panel-toolbar">
-          <div className="space-y-1">
+          <div className="flex items-center gap-2">
             <h2 className="font-display text-heading-3-16-semibold text-text-primary">
               Explore public repositories
             </h2>
-            <p className="text-body-sm text-text-secondary">
-              公开仓库发现页保持轻量，但已经可以直接跳转到代码与交付上下文。
-            </p>
+            <HelpTip content="列表展示最近可访问的公开仓库，直接跳转到仓库详情页。" />
           </div>
           <Badge variant="outline">{loading ? "Refreshing" : `${repositories.length} repositories`}</Badge>
         </div>

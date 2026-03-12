@@ -164,11 +164,11 @@
   }
 
   .page-panel {
-    @apply rounded-[28px] border border-border-subtle bg-surface-base shadow-container;
+    @apply overflow-hidden rounded-[28px] border border-border-subtle bg-surface-base shadow-container;
   }
 
   .page-panel-muted {
-    @apply rounded-[28px] border border-border-subtle bg-surface-focus;
+    @apply overflow-hidden rounded-[28px] border border-border-subtle bg-surface-focus;
   }
 
   .panel-toolbar {
@@ -193,5 +193,59 @@
 
   .soft-code {
     @apply rounded-2xl border border-border-subtle bg-surface-focus px-2 py-1 font-mono text-code-sm text-text-primary;
+  }
+}
+
+@layer utilities {
+  .text-muted-foreground {
+    color: var(--text-secondary);
+  }
+
+  .text-foreground {
+    color: var(--text-primary);
+  }
+
+  .bg-background {
+    background-color: var(--color-surface-base);
+  }
+
+  .bg-background\/70 {
+    background-color: color-mix(in srgb, var(--color-surface-base) 70%, transparent);
+  }
+
+  .bg-background\/80 {
+    background-color: color-mix(in srgb, var(--color-surface-base) 80%, transparent);
+  }
+
+  .bg-card {
+    background-color: var(--color-surface-base);
+  }
+
+  .bg-muted\/10 {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 42%, transparent);
+  }
+
+  .bg-muted\/20 {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 56%, transparent);
+  }
+
+  .bg-muted\/30 {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 72%, transparent);
+  }
+
+  .bg-muted\/40 {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 84%, transparent);
+  }
+
+  .bg-muted\/60 {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 100%, transparent);
+  }
+
+  .hover\:bg-muted\/30:hover {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 72%, transparent);
+  }
+
+  .hover\:bg-muted\/40:hover {
+    background-color: color-mix(in srgb, var(--color-surface-focus) 84%, transparent);
   }
 }

@@ -5,15 +5,15 @@ import { cn } from "@/lib/utils";
 
 function actionStatusDotClass(status: ActionRunRecord["status"]): string {
   if (status === "success") {
-    return "bg-emerald-500";
+    return "bg-action-primaryBg";
   }
   if (status === "failed" || status === "cancelled") {
-    return "bg-red-500";
+    return "bg-danger";
   }
   if (status === "running") {
-    return "bg-sky-500";
+    return "bg-fill-secondary";
   }
-  return "bg-slate-400";
+  return "bg-fill-tertiary";
 }
 
 function actionStatusBadgeVariant(

@@ -77,10 +77,10 @@ export function RepositoryHeader({
         {extra}
         {user?.username === detail.repository.owner_username ? (
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" className="bg-background" asChild>
+            <Button variant="outline" size="sm" className="bg-surface-base" asChild>
               <Link to={`/repo/${owner}/${repo}/branches`}>Branches</Link>
             </Button>
-            <Button variant="outline" size="sm" className="bg-background" asChild>
+            <Button variant="outline" size="sm" className="bg-surface-base" asChild>
               <Link to={`/repo/${owner}/${repo}/settings`}>Settings</Link>
             </Button>
           </div>

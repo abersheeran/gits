@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,17 +43,28 @@ export function DashboardPage({ user }: DashboardPageProps) {
     <div className="app-page">
       <section className="page-hero">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-4">
-            <Badge variant="secondary" className="w-fit">
-              Personal workspace
-            </Badge>
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2">
+              <Badge variant="secondary" className="w-fit">
+                Dashboard
+              </Badge>
+              <HelpTip content="这里汇总你可操作的仓库入口，并保留到 Tokens 与 Actions 全局配置的直接入口。" />
+            </div>
             <div className="space-y-3">
               <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
-                {user.username} 的交付工作面
+                {user.username} 的工作台
               </h1>
-              <p className="max-w-3xl text-body-sm text-text-secondary md:text-body-md">
-                Dashboard 聚合了你拥有和参与的仓库，也保留了到 Tokens、Actions 配置和新仓库创建的直接入口。
-              </p>
+              <div className="flex flex-wrap items-center gap-3 text-body-sm text-text-secondary md:text-body-md">
+                <span>{loading ? "同步中..." : `${repositories.length} 个仓库入口`}</span>
+                {repositories[0] ? (
+                  <Link
+                    className="gh-link"
+                    to={`/repo/${repositories[0].owner_username}/${repositories[0].name}`}
+                  >
+                    最近访问：{repositories[0].owner_username}/{repositories[0].name}
+                  </Link>
+                ) : null}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button asChild>
@@ -92,11 +104,9 @@ export function DashboardPage({ user }: DashboardPageProps) {
 
       <section className="page-panel overflow-hidden">
         <div className="panel-toolbar">
-          <div className="space-y-1">
+          <div className="flex items-center gap-2">
             <h2 className="font-display text-heading-3-16-semibold text-text-primary">你的仓库</h2>
-            <p className="text-body-sm text-text-secondary">
-              包含 owner 和 collaborator 两种角色。
-            </p>
+            <HelpTip content="列表同时包含你拥有的仓库和你以 collaborator 身份参与的仓库。" />
           </div>
           <Button asChild>
             <Link to="/repositories/new">新建仓库</Link>
@@ -115,7 +125,9 @@ export function DashboardPage({ user }: DashboardPageProps) {
               description="Refreshing your repositories and collaborator access."
             />
           ) : repositories.length === 0 ? (
-            <p className="text-body-sm text-text-secondary">还没有仓库，先创建一个。</p>
+            <div className="page-panel-muted p-4 text-body-sm text-text-secondary">
+              还没有仓库，先创建一个。
+            </div>
           ) : (
             <Table>
               <TableHeader>

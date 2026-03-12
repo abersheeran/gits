@@ -1,13 +1,13 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle
@@ -56,13 +56,18 @@ export function RegisterPage({ user, onAuthChanged }: RegisterPageProps) {
     <div className="mx-auto max-w-xl">
       <Card>
         <CardHeader>
-          <CardTitle>创建账号</CardTitle>
-          <CardDescription>账号创建后自动登录。密码长度至少 8 位。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>创建账号</CardTitle>
+            <HelpTip content="注册成功后会自动登录。密码至少 8 位。" />
+          </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <Label htmlFor="username">用户名</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="username">用户名</Label>
+                <HelpTip content="允许字母、数字和 . _ -，长度 1-32，首尾不能是标点。" />
+              </div>
               <Input
                 id="username"
                 autoComplete="username"
@@ -70,9 +75,6 @@ export function RegisterPage({ user, onAuthChanged }: RegisterPageProps) {
                 onChange={(event) => setUsername(event.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                允许字母、数字和 . _ -，长度 1-32，首尾不能是标点。
-              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">邮箱</Label>
@@ -114,7 +116,7 @@ export function RegisterPage({ user, onAuthChanged }: RegisterPageProps) {
           </form>
         </CardContent>
         <CardFooter className="justify-between">
-          <span className="text-sm text-muted-foreground">已有账号？</span>
+          <span className="text-body-sm text-text-secondary">已有账号？</span>
           <Button variant="outline" asChild>
             <Link to="/login">去登录</Link>
           </Button>

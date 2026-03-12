@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { CopyButton } from "@/components/copy-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
@@ -183,22 +183,28 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to={`/repo/${owner}/${repo}`}>{owner}</Link>
-            <span>/</span>
-            <span>{repo}</span>
-            <Badge variant="secondary">Settings</Badge>
+    <div className="app-page">
+      <section className="page-panel-muted p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-body-sm text-text-secondary">
+              <Link to={`/repo/${owner}/${repo}`} className="gh-link">
+                {owner}
+              </Link>
+              <span>/</span>
+              <span>{repo}</span>
+              <Badge variant="secondary">Settings</Badge>
+            </div>
+            <div className="flex items-start gap-2">
+              <h1 className="font-display text-card-title text-text-primary">仓库设置</h1>
+              <HelpTip content="这里管理仓库基本信息和删除操作。分支管理已经拆到独立页面。" />
+            </div>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">仓库设置</h1>
-          <p className="text-sm text-muted-foreground">管理仓库基本信息与删除操作。分支管理位于独立页面。</p>
+          <Button variant="outline" asChild>
+            <Link to={`/repo/${owner}/${repo}/branches`}>管理分支</Link>
+          </Button>
         </div>
-        <Button variant="outline" asChild>
-          <Link to={`/repo/${owner}/${repo}/branches`}>管理分支</Link>
-        </Button>
-      </div>
+      </section>
 
       {formError ? (
         <Alert variant="destructive">
@@ -215,8 +221,10 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>General</CardTitle>
-          <CardDescription>修改仓库名称、描述和可见性。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>General</CardTitle>
+            <HelpTip content="这里可以修改仓库名称、描述和公开/私有状态。Clone URL 会跟随仓库路径实时变化。" />
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
@@ -259,8 +267,10 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
 
       <Card className="border-destructive/50">
         <CardHeader>
-          <CardTitle>Danger Zone</CardTitle>
-          <CardDescription>删除后不可恢复，仓库对象也会从存储中移除。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>Danger Zone</CardTitle>
+            <HelpTip content="删除仓库后不可恢复，底层对象与元数据都会一起清理。" />
+          </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleDelete}>

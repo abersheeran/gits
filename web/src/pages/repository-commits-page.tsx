@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { History } from "lucide-react";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
-import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
+import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -138,14 +138,15 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
       return;
     }
 
-    const targetOid = selectedCommitOid ?? history.commits[0]?.oid ?? null;
-    if (!targetOid) {
+    if (!selectedCommitOid) {
       setSelectedCommitDetail(null);
       setCommitDetailError(null);
+      setCommitDetailLoading(false);
       return;
     }
 
-    void loadCommitDetail(targetOid);
+    setSelectedCommitDetail(null);
+    void loadCommitDetail(selectedCommitOid);
     return () => {
       canceled = true;
     };
@@ -166,7 +167,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
       ? `commit: ${selectedBranch}`
       : `branch: ${selectedBranch}`
     : null;
-  const activeCommitOid = selectedCommitDetail?.commit.oid ?? selectedCommitOid ?? history?.commits[0]?.oid ?? null;
+  const activeCommitOid = selectedCommitOid;
 
   function updateSearch(next: { ref?: string | null; oid?: string | null }) {
     const nextParams = new URLSearchParams(searchParams);
@@ -237,8 +238,8 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
         />
       ) : null}
 
-      <section className="overflow-hidden rounded-md border bg-card shadow-sm">
-        <div className="flex flex-col gap-3 border-b bg-muted/60 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+      <section className="page-panel overflow-hidden">
+        <div className="panel-toolbar lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Select
               value={selectedRefInSelect}
@@ -249,7 +250,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                 updateSearch({ ref: value, oid: null });
               }}
             >
-              <SelectTrigger className="h-8 w-[220px] bg-background text-xs">
+              <SelectTrigger className="h-9 w-[220px] bg-surface-base text-label-sm">
                 <SelectValue placeholder="选择分支" />
               </SelectTrigger>
               <SelectContent>
@@ -265,7 +266,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-body-xs text-text-secondary">
               showing latest {history.commits.length} commits on {selectedBranchLabel ?? "default ref"}
             </span>
           </div>
@@ -274,124 +275,76 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
         {history.commits.length === 0 ? (
           <div className="p-6 text-sm text-muted-foreground">当前引用下没有提交记录。</div>
         ) : (
-          <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <section className="min-w-0 border-b xl:border-b-0 xl:border-r">
-              <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
-                <History className="h-4 w-4" />
-                Commits history
-              </header>
-              <ul className="divide-y">
-                {history.commits.map((commit) => {
-                  const isActive = activeCommitOid === commit.oid;
-                  return (
+          <section className="min-w-0">
+            <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
+              <History className="h-4 w-4" />
+              Commits history
+            </header>
+            <ul className="divide-y">
+              {history.commits.map((commit) => {
+                const isActive = activeCommitOid === commit.oid;
+                return (
                     <li
                       key={commit.oid}
-                      className={isActive ? "bg-muted/30" : undefined}
+                      className={isActive ? "bg-surface-focus" : undefined}
                     >
-                      <div className="flex items-start gap-3 p-4">
-                        <AuthorAvatar name={commit.author.name} className="h-8 w-8 text-[11px]" />
-                        <div className="min-w-0 flex-1 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => updateSearch({ oid: commit.oid })}
-                              className="gh-link max-w-full truncate text-left font-display text-heading-4 leading-5"
-                            >
-                              {commitTitle(commit.message)}
-                            </button>
-                            <Badge variant="outline" className="font-mono text-[11px]">
-                              {shortOid(commit.oid)}
+                    <div className="flex items-start gap-3 p-4">
+                      <AuthorAvatar name={commit.author.name} className="h-8 w-8 text-[11px]" />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => updateSearch({ oid: commit.oid })}
+                            className="gh-link max-w-full truncate text-left font-display text-heading-4 leading-5"
+                          >
+                            {commitTitle(commit.message)}
+                          </button>
+                          <Badge variant="outline" className="font-mono text-[11px]">
+                            {shortOid(commit.oid)}
+                          </Badge>
+                          {commit.parents.length > 1 ? (
+                            <Badge variant="outline" className="text-[11px]">
+                              merge
                             </Badge>
-                            {commit.parents.length > 1 ? (
-                              <Badge variant="outline" className="text-[11px]">
-                                merge
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                            <span>{commit.author.name}</span>
-                            <span>·</span>
-                            <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
-                            <span>·</span>
-                            <span>{formatDateTime(commit.author.timestamp * 1000)}</span>
-                          </div>
+                          ) : null}
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openCommitFiles(commit.oid)}
-                        >
-                          Browse snapshot
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                          <span>{commit.author.name}</span>
+                          <span>·</span>
+                          <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
+                          <span>·</span>
+                          <span>{formatDateTime(commit.author.timestamp * 1000)}</span>
+                        </div>
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-
-            <aside className="min-w-0">
-              {commitDetailLoading ? (
-                <div className="p-4">
-                  <InlineLoadingState
-                    title="Loading commit detail"
-                    description="Rendering file changes for the selected commit."
-                  />
-                </div>
-              ) : null}
-
-              {!commitDetailLoading && commitDetailError ? (
-                <div className="p-4 text-sm text-destructive">{commitDetailError}</div>
-              ) : null}
-
-              {!commitDetailLoading && !commitDetailError && selectedCommitDetail ? (
-                <section>
-                  <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium">Commit detail</p>
-                      <p className="text-xs text-muted-foreground">
-                        {shortOid(selectedCommitDetail.commit.oid)} ·{" "}
-                        {formatDateTime(selectedCommitDetail.commit.author.timestamp * 1000)}
-                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openCommitFiles(commit.oid)}
+                      >
+                        Browse snapshot
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openCommitFiles(selectedCommitDetail.commit.oid)}
-                    >
-                      Browse snapshot
-                    </Button>
-                  </header>
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-center gap-2">
-                      <AuthorAvatar
-                        name={selectedCommitDetail.commit.author.name}
-                        className="h-7 w-7 text-[11px]"
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {commitTitle(selectedCommitDetail.commit.message)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {selectedCommitDetail.commit.author.name}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <Badge variant="outline">{selectedCommitDetail.filesChanged} files</Badge>
-                      <Badge variant="outline">+{selectedCommitDetail.additions}</Badge>
-                      <Badge variant="outline">-{selectedCommitDetail.deletions}</Badge>
-                    </div>
-                    <RepositoryDiffView changes={selectedCommitDetail.changes} />
-                  </div>
-                </section>
-              ) : null}
-            </aside>
-          </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         )}
       </section>
+
+      <RepositoryCommitDetailSheet
+        open={Boolean(selectedCommitOid)}
+        detail={selectedCommitDetail}
+        loading={commitDetailLoading}
+        error={commitDetailError}
+        onOpenChange={(open) => {
+          if (!open) {
+            updateSearch({ oid: null });
+          }
+        }}
+        onBrowseSnapshot={openCommitFiles}
+      />
     </div>
   );
 }

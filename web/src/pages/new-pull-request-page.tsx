@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
@@ -189,8 +190,10 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       <Card>
         <CardHeader>
-          <CardTitle>New pull request · {owner}/{repo}</CardTitle>
-          <CardDescription>选择分支并创建 PR。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>New pull request · {owner}/{repo}</CardTitle>
+            <HelpTip content="在这里选择 base 和 head 分支，提交后会创建新的 Pull Request。" />
+          </div>
         </CardHeader>
         <CardContent>
           {error ? (
@@ -244,16 +247,16 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
               previewEmptyText="Nothing to preview."
             />
             <div className="space-y-2">
-              <Label htmlFor="pr-close-issues">合并后自动关闭的 issues</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="pr-close-issues">合并后自动关闭的 issues</Label>
+                <HelpTip content="支持 #12,#34 或 12,34。PR merged 时会自动关闭这些 issue。" />
+              </div>
               <Input
                 id="pr-close-issues"
                 value={closeIssuesInput}
                 onChange={(event) => setCloseIssuesInput(event.target.value)}
                 placeholder="#1, #2"
               />
-              <p className="text-xs text-muted-foreground">
-                支持多个，例如 <code>#12,#34</code>。PR merged 时会自动关闭这些 issue。
-              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <PendingButton
@@ -263,7 +266,7 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
               >
                 Create pull request
               </PendingButton>
-              <Button variant="ghost" asChild>
+              <Button variant="outline" asChild>
                 <Link to={`/repo/${owner}/${repo}/pulls`}>返回列表</Link>
               </Button>
             </div>
@@ -273,8 +276,10 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Metadata</CardTitle>
-          <CardDescription>提交前直接设置 draft、reviewers 和 assignees。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>Metadata</CardTitle>
+            <HelpTip content="创建时就可以指定 draft、reviewers 和 assignees，避免开 PR 后再补充。" />
+          </div>
         </CardHeader>
         <CardContent>
           <RepositoryMetadataFields

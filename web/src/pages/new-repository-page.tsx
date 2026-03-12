@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,8 +54,10 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
     <div className="mx-auto max-w-2xl">
       <Card>
         <CardHeader>
-          <CardTitle>新建仓库</CardTitle>
-          <CardDescription>仓库名不能以 .git 结尾，仅支持字母数字和 . _ -。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>新建仓库</CardTitle>
+            <HelpTip content="仓库名不能以 .git 结尾，只支持字母、数字和 . _ -。" />
+          </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleCreateRepository}>
@@ -97,7 +100,7 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
               <Button type="submit" disabled={createPending}>
                 {createPending ? "创建中..." : "创建仓库"}
               </Button>
-              <Button type="button" variant="ghost" asChild>
+              <Button type="button" variant="outline" asChild>
                 <Link to="/dashboard">返回仓库列表</Link>
               </Button>
             </div>

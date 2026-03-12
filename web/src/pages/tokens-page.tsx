@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { CopyButton } from "@/components/copy-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
@@ -116,12 +116,12 @@ export function TokensPage({ user }: TokensPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="app-page">
       {createdToken ? (
         <Alert>
           <AlertTitle>新 Token（仅本次可见）</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[20px] border border-border-subtle bg-surface-focus p-3">
               <code className="text-xs sm:text-sm">{createdToken}</code>
               <CopyButton value={createdToken} />
             </div>
@@ -138,8 +138,10 @@ export function TokensPage({ user }: TokensPageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>创建 Access Token</CardTitle>
-          <CardDescription>Token 只会显示一次，请立即保存。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>创建 Access Token</CardTitle>
+            <HelpTip content="Token 只会在创建成功后显示一次。建议立即复制并保存到你的 Git 或本地 agent 配置里。" />
+          </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleCreateToken}>
@@ -179,10 +181,13 @@ export function TokensPage({ user }: TokensPageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Token 列表</CardTitle>
-          <CardDescription>
-            {hasActiveToken ? "active token 可用于 Git 认证。" : "当前没有 active token。"}
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>Token 列表</CardTitle>
+            <HelpTip content="active token 可用于 HTTP Git 认证或平台 MCP 接入；已撤销或过期的 token 会继续保留在历史列表中。" />
+          </div>
+          <p className="text-body-sm text-text-secondary">
+            {hasActiveToken ? "当前存在可用 token。" : "当前没有 active token。"}
+          </p>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -191,7 +196,7 @@ export function TokensPage({ user }: TokensPageProps) {
               description="Fetching active and historical access tokens."
             />
           ) : tokens.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无 token。</p>
+            <p className="text-body-sm text-text-secondary">暂无 token。</p>
           ) : (
             <Table>
               <TableHeader>
@@ -220,7 +225,7 @@ export function TokensPage({ user }: TokensPageProps) {
                       </TableCell>
                       <TableCell className="text-right">
                         {status === "revoked" ? (
-                          <span className="text-xs text-muted-foreground">-</span>
+                          <span className="text-body-xs text-text-secondary">-</span>
                         ) : (
                           <Button
                             size="sm"

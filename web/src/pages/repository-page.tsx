@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   BookOpenText,
@@ -10,11 +10,10 @@ import {
 } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
-import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
+import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import {
@@ -38,7 +37,7 @@ import {
   type RepositoryDetailResponse,
   type RepositoryPathHistoryResponse
 } from "@/lib/api";
-import { formatDateTime, formatRelativeTime, shortOid } from "@/lib/format";
+import { formatRelativeTime, shortOid } from "@/lib/format";
 
 type RepositoryPageProps = {
   user: AuthUser | null;
@@ -417,8 +416,12 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
   const [contents, setContents] = useState<RepositoryContentsResponse | null>(null);
   const [pathHistory, setPathHistory] = useState<RepositoryPathHistoryResponse | null>(null);
   const [selectedCommitDetail, setSelectedCommitDetail] = useState<RepositoryCommitDetailResponse | null>(null);
+  const [commitDetailLoading, setCommitDetailLoading] = useState(false);
+  const [commitDetailError, setCommitDetailError] = useState<string | null>(null);
+  const [commitDetailSheetOpen, setCommitDetailSheetOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const commitDetailRequestId = useRef(0);
 
   useEffect(() => {
     if (params.kind && !isCodePath && owner && repo) {
@@ -453,6 +456,9 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
         setContents(nextContents);
         setPathHistory(nextPathHistory);
         setSelectedCommitDetail(null);
+        setCommitDetailLoading(false);
+        setCommitDetailError(null);
+        setCommitDetailSheetOpen(false);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -521,12 +527,36 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
     );
   }
 
+  function closeCommitDetailSheet() {
+    commitDetailRequestId.current += 1;
+    setCommitDetailSheetOpen(false);
+    setSelectedCommitDetail(null);
+    setCommitDetailLoading(false);
+    setCommitDetailError(null);
+  }
+
   async function openCommitDetail(commitOid: string) {
+    const requestId = commitDetailRequestId.current + 1;
+    commitDetailRequestId.current = requestId;
+    setCommitDetailSheetOpen(true);
+    setSelectedCommitDetail(null);
+    setCommitDetailLoading(true);
+    setCommitDetailError(null);
     try {
       const detailResponse = await getRepositoryCommitDetail(owner, repo, commitOid);
+      if (commitDetailRequestId.current !== requestId) {
+        return;
+      }
       setSelectedCommitDetail(detailResponse);
     } catch (loadError) {
-      setError(formatApiError(loadError));
+      if (commitDetailRequestId.current !== requestId) {
+        return;
+      }
+      setCommitDetailError(formatApiError(loadError));
+    } finally {
+      if (commitDetailRequestId.current === requestId) {
+        setCommitDetailLoading(false);
+      }
     }
   }
 
@@ -558,7 +588,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
   }
 
   const latestCommit = history.commits[0] ?? null;
-  const showSidePanel = Boolean((pathHistory && pathHistory.commits.length > 0) || selectedCommitDetail);
+  const showSidePanel = Boolean(pathHistory && pathHistory.commits.length > 0);
   const selectedBranchLabel = selectedBranch
     ? isCommitOid(selectedBranch)
       ? `commit: ${selectedBranch}`
@@ -699,53 +729,23 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                 </section>
               ) : null}
 
-              {selectedCommitDetail ? (
-                <section className="border-b">
-                  <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium">Commit detail</p>
-                      <p className="text-xs text-muted-foreground">
-                        {shortOid(selectedCommitDetail.commit.oid)} ·{" "}
-                        {formatDateTime(selectedCommitDetail.commit.author.timestamp * 1000)}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openCommitFiles(selectedCommitDetail.commit.oid)}
-                    >
-                      Browse snapshot
-                    </Button>
-                  </header>
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-center gap-2">
-                      <AuthorAvatar
-                        name={selectedCommitDetail.commit.author.name}
-                        className="h-7 w-7 text-[11px]"
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {commitTitle(selectedCommitDetail.commit.message)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {selectedCommitDetail.commit.author.name}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <Badge variant="outline">{selectedCommitDetail.filesChanged} files</Badge>
-                      <Badge variant="outline">+{selectedCommitDetail.additions}</Badge>
-                      <Badge variant="outline">-{selectedCommitDetail.deletions}</Badge>
-                    </div>
-                    <RepositoryDiffView changes={selectedCommitDetail.changes} />
-                  </div>
-                </section>
-              ) : null}
             </aside>
           ) : null}
         </div>
       </section>
+
+      <RepositoryCommitDetailSheet
+        open={commitDetailSheetOpen}
+        detail={selectedCommitDetail}
+        loading={commitDetailLoading}
+        error={commitDetailError}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCommitDetailSheet();
+          }
+        }}
+        onBrowseSnapshot={openCommitFiles}
+      />
     </div>
   );
 }

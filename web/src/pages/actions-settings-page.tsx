@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { CodeConfigPanel } from "@/components/repository/code-config-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
@@ -143,7 +144,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
     claudeCodeConfigFileContent !== config.claudeCodeConfigFileContent;
 
   return (
-    <div className="space-y-6">
+    <div className="app-page">
       {error ? (
         <Alert variant="destructive">
           <AlertTitle>保存失败</AlertTitle>
@@ -160,10 +161,10 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
 
       <Card>
         <CardHeader className="border-b border-border-subtle bg-surface-focus">
-          <CardTitle>Actions 全局默认配置</CardTitle>
-          <CardDescription>
-            这里编辑的是全局默认值。仓库 Actions 页面可以在此基础上保存自己的覆盖配置。
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>Actions 全局默认配置</CardTitle>
+            <HelpTip content="这里维护的是全局默认值。仓库级 Actions 页面可以继续在这些默认值之上保存覆盖配置。" />
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex flex-col gap-3 rounded-[24px] border border-border-subtle bg-surface-focus p-4 sm:flex-row sm:items-center sm:justify-between">

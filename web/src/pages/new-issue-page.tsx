@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
@@ -141,8 +142,10 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       <Card>
         <CardHeader>
-          <CardTitle>New issue · {owner}/{repo}</CardTitle>
-          <CardDescription>创建一个新 issue 记录问题或需求。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>New issue · {owner}/{repo}</CardTitle>
+            <HelpTip content="新 issue 会直接进入仓库问题列表，适合记录需求、缺陷和待办。" />
+          </div>
         </CardHeader>
         <CardContent>
           {error ? (
@@ -179,7 +182,7 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
               <PendingButton type="submit" pending={submitting} pendingText="Creating issue...">
                 Create issue
               </PendingButton>
-              <Button variant="ghost" asChild>
+              <Button variant="outline" asChild>
                 <Link to={`/repo/${owner}/${repo}/issues`}>返回列表</Link>
               </Button>
             </div>
@@ -189,8 +192,10 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Metadata</CardTitle>
-          <CardDescription>创建时直接补齐负责人。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>Metadata</CardTitle>
+            <HelpTip content="可以在创建时一次性指定 assignee，避免 issue 落地后再补字段。" />
+          </div>
         </CardHeader>
         <CardContent>
           <RepositoryMetadataFields

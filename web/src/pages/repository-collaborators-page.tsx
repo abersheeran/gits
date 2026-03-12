@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
+import { HelpTip } from "@/components/common/help-tip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
@@ -142,7 +142,7 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
   }
 
   return (
-    <div className="space-y-6">
+    <div className="app-page">
       {loading ? (
         <InlineLoadingState
           title="Refreshing collaborators"
@@ -150,12 +150,34 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
         />
       ) : null}
 
+      <section className="page-panel-muted p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-body-sm text-text-secondary">
+              <Link to={`/repo/${owner}/${repo}`} className="gh-link">
+                {owner}
+              </Link>
+              <span>/</span>
+              <span>{repo}</span>
+              <Badge variant="secondary">Collaborators</Badge>
+            </div>
+            <div className="flex items-start gap-2">
+              <h1 className="font-display text-card-title text-text-primary">协作者</h1>
+              <HelpTip content="权限分为 read、write 和 admin。owner 始终保留完整权限。" />
+            </div>
+          </div>
+          <Button variant="outline" asChild>
+            <Link to={`/repo/${owner}/${repo}/settings`}>返回设置</Link>
+          </Button>
+        </div>
+      </section>
+
       <Card>
         <CardHeader>
-          <CardTitle>
-            协作者: {owner}/{repo}
-          </CardTitle>
-          <CardDescription>权限分为 read / write / admin，owner 始终拥有全部权限。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>添加或更新协作者</CardTitle>
+            <HelpTip content="按用户名直接新增协作者，重复提交会更新现有协作者的权限级别。" />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {actionError ? (
@@ -193,9 +215,6 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
               <PendingButton type="submit" pending={saving} pendingText="Applying access...">
                 添加或更新
               </PendingButton>
-              <Button variant="ghost" asChild>
-                <Link to={`/repo/${owner}/${repo}/settings`}>返回设置</Link>
-              </Button>
             </div>
           </form>
         </CardContent>
@@ -203,12 +222,14 @@ export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPag
 
       <Card>
         <CardHeader>
-          <CardTitle>协作者列表</CardTitle>
-          <CardDescription>你可以按用户名移除协作者。</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>协作者列表</CardTitle>
+            <HelpTip content="列表中可以直接移除指定用户的仓库协作权限。" />
+          </div>
         </CardHeader>
         <CardContent>
           {collaborators.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无协作者。</p>
+            <p className="text-body-sm text-text-secondary">暂无协作者。</p>
           ) : (
             <Table>
               <TableHeader>

@@ -18,7 +18,7 @@ export function IssueTaskStatusBadge({ status }: IssueTaskStatusBadgeProps) {
     return (
       <Badge
         variant="secondary"
-        className="inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-800"
+        className="inline-flex items-center gap-1 border-transparent bg-fill-primary text-text-primary"
       >
         <Bot className="h-3.5 w-3.5" />
         {TASK_STATUS_LABELS[status]}
@@ -29,8 +29,8 @@ export function IssueTaskStatusBadge({ status }: IssueTaskStatusBadgeProps) {
   if (status === "waiting-human") {
     return (
       <Badge
-        variant="secondary"
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800"
+        variant="outline"
+        className="inline-flex items-center gap-1 border-border-strong bg-surface-base text-text-supporting-strong"
       >
         <UserRound className="h-3.5 w-3.5" />
         {TASK_STATUS_LABELS[status]}
@@ -40,10 +40,7 @@ export function IssueTaskStatusBadge({ status }: IssueTaskStatusBadgeProps) {
 
   if (status === "done") {
     return (
-      <Badge
-        variant="secondary"
-        className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800"
-      >
+      <Badge variant="default" className="inline-flex items-center gap-1 shadow-none">
         <CheckCircle2 className="h-3.5 w-3.5" />
         {TASK_STATUS_LABELS[status]}
       </Badge>
@@ -52,8 +49,8 @@ export function IssueTaskStatusBadge({ status }: IssueTaskStatusBadgeProps) {
 
   return (
     <Badge
-      variant="secondary"
-      className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700"
+      variant="outline"
+      className="inline-flex items-center gap-1 border-border-subtle bg-surface-base text-text-supporting-strong"
     >
       <CircleDot className="h-3.5 w-3.5" />
       {TASK_STATUS_LABELS[status]}
