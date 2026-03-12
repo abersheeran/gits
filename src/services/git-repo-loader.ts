@@ -37,6 +37,11 @@ type RepositorySnapshotMeta = {
   version: number;
 };
 
+type RepositoryMutationPaths = {
+  changedPaths: string[];
+  deletedPaths: string[];
+};
+
 function dirname(path: string): string {
   const idx = path.lastIndexOf("/");
   if (idx <= 0) {
@@ -47,6 +52,37 @@ function dirname(path: string): string {
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
+}
+
+function normalizeGitRelativePath(path: string): string | null {
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function resolveRepositoryMutationPaths(args: {
+  changedPaths?: string[];
+  deletedPaths?: string[];
+}): RepositoryMutationPaths {
+  const changedPathSet = new Set<string>();
+  for (const path of args.changedPaths ?? []) {
+    const normalized = normalizeGitRelativePath(path);
+    if (normalized) {
+      changedPathSet.add(normalized);
+    }
+  }
+
+  const deletedPathSet = new Set<string>();
+  for (const path of args.deletedPaths ?? []) {
+    const normalized = normalizeGitRelativePath(path);
+    if (normalized && !changedPathSet.has(normalized)) {
+      deletedPathSet.add(normalized);
+    }
+  }
+
+  return {
+    changedPaths: [...changedPathSet],
+    deletedPaths: [...deletedPathSet]
+  };
 }
 
 async function writeFileRecursive(
@@ -118,6 +154,24 @@ function toUint8Array(value: string | ArrayBuffer | ArrayBufferView): Uint8Array
 async function readFileBytes(fs: MutableGitFs, path: string): Promise<Uint8Array> {
   const content = await fs.promises.readFile(path);
   return toUint8Array(content);
+}
+
+async function persistRepositoryMutations(args: {
+  fs: MutableGitFs;
+  gitdir: string;
+  changedPaths: string[];
+  deletedPaths: string[];
+  putFile: (relativePath: string, content: Uint8Array) => Promise<void>;
+  deleteFile: (relativePath: string) => Promise<void>;
+}): Promise<void> {
+  for (const relativePath of args.changedPaths) {
+    const content = await readFileBytes(args.fs, `${args.gitdir}/${relativePath}`);
+    await args.putFile(relativePath, content);
+  }
+
+  for (const relativePath of args.deletedPaths) {
+    await args.deleteFile(relativePath);
+  }
 }
 
 function snapshotFileKey(relativePath: string): string {
@@ -306,7 +360,30 @@ export async function persistRepositorySnapshot(args: {
   snapshotStorage: RepositorySnapshotStorage;
   fs: MutableGitFs;
   gitdir: string;
+  changedPaths?: string[];
+  deletedPaths?: string[];
 }): Promise<void> {
+  if (args.changedPaths !== undefined || args.deletedPaths !== undefined) {
+    const mutationPaths = resolveRepositoryMutationPaths(args);
+    await persistRepositoryMutations({
+      fs: args.fs,
+      gitdir: args.gitdir,
+      changedPaths: mutationPaths.changedPaths,
+      deletedPaths: mutationPaths.deletedPaths,
+      putFile: async (relativePath, content) => {
+        await args.snapshotStorage.put(snapshotFileKey(relativePath), content);
+      },
+      deleteFile: async (relativePath) => {
+        await args.snapshotStorage.delete(snapshotFileKey(relativePath));
+      }
+    });
+
+    await args.snapshotStorage.put(SNAPSHOT_META_KEY, {
+      version: SNAPSHOT_VERSION
+    } satisfies RepositorySnapshotMeta);
+    return;
+  }
+
   const files = await listFilesRecursive(args.fs, args.gitdir);
   const desiredKeys = new Set<string>();
 
@@ -337,7 +414,37 @@ export async function persistRepositoryToStorage(args: {
   owner: string;
   repo: string;
   snapshotStorage?: RepositorySnapshotStorage;
+  changedPaths?: string[];
+  deletedPaths?: string[];
 }): Promise<void> {
+  if (args.changedPaths !== undefined || args.deletedPaths !== undefined) {
+    const mutationPaths = resolveRepositoryMutationPaths(args);
+    const prefix = `${args.storage.repoPrefix(args.owner, args.repo)}/`;
+    await persistRepositoryMutations({
+      fs: args.fs,
+      gitdir: args.gitdir,
+      changedPaths: mutationPaths.changedPaths,
+      deletedPaths: mutationPaths.deletedPaths,
+      putFile: async (relativePath, content) => {
+        await args.storage.put(`${prefix}${relativePath}`, content);
+      },
+      deleteFile: async (relativePath) => {
+        await args.storage.delete(`${prefix}${relativePath}`);
+      }
+    });
+
+    if (args.snapshotStorage) {
+      await persistRepositorySnapshot({
+        snapshotStorage: args.snapshotStorage,
+        fs: args.fs,
+        gitdir: args.gitdir,
+        changedPaths: mutationPaths.changedPaths,
+        deletedPaths: mutationPaths.deletedPaths
+      });
+    }
+    return;
+  }
+
   const files = await listFilesRecursive(args.fs, args.gitdir);
   const prefix = `${args.storage.repoPrefix(args.owner, args.repo)}/`;
   const desiredKeys = new Set<string>();

@@ -518,6 +518,7 @@ describe("Git smart-http integration", () => {
 
   it("supports authenticated push to private repository", async () => {
     const bucket = new MockR2Bucket();
+    const listSpy = vi.spyOn(bucket, "list");
     const storage = new StorageService(bucket as unknown as R2Bucket);
     await storage.initializeRepository("alice", "private-demo");
     const env = createEnv(
@@ -588,6 +589,11 @@ describe("Git smart-http integration", () => {
     expect(refs[0]?.name).toBe("refs/heads/main");
     expect(refs[0]?.oid).toBe(localCommit);
     expect((await storage.listObjectKeys("alice", "private-demo")).length).toBeGreaterThan(0);
+    expect(
+      listSpy.mock.calls.filter(
+        ([options]) => (options as R2ListOptions | undefined)?.prefix === "alice/private-demo/"
+      )
+    ).toHaveLength(1);
   });
 });
 

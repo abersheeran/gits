@@ -242,7 +242,7 @@ export class GitService {
   private async ensureHeadAfterReceivePack(args: {
     fs: MutableFs;
     gitdir: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const refsRoot = `${args.gitdir}/refs/heads`;
     const files = await this.listFilesRecursive(args.fs, refsRoot);
     const branchRefs = files
@@ -262,13 +262,14 @@ export class GitService {
     }
 
     if (currentHead && branchRefs.includes(currentHead)) {
-      return;
+      return false;
     }
 
     const nextHead =
       (branchRefs.includes("refs/heads/main") ? "refs/heads/main" : branchRefs[0]) ??
       "refs/heads/main";
     await args.fs.promises.writeFile(`${args.gitdir}/HEAD`, `ref: ${nextHead}\n`);
+    return true;
   }
 
   private buildInfoRefsResponse(args: {
@@ -435,6 +436,8 @@ export class GitService {
       const request = parseReceivePackRequest(args.body);
       capabilities = request.capabilities;
       const fs = args.loaded.fs as MutableFs;
+      const changedPaths = new Set<string>();
+      const deletedPaths = new Set<string>();
 
       const hasWriteCommand = request.commands.some((command) => !isZeroOid(command.newOid));
       if (hasWriteCommand) {
@@ -444,6 +447,8 @@ export class GitService {
         const packDir = `${args.loaded.gitdir}/objects/pack`;
         const packFilename = `pack-${crypto.randomUUID().replaceAll("-", "")}.pack`;
         const packPath = `${packDir}/${packFilename}`;
+        const packRelativePath = `objects/pack/${packFilename}`;
+        const packIndexRelativePath = packRelativePath.replace(/\.pack$/, ".idx");
         const relativeGitdir = args.loaded.gitdir.startsWith(`${args.loaded.dir}/`)
           ? args.loaded.gitdir.slice(args.loaded.dir.length + 1)
           : ".git";
@@ -459,6 +464,8 @@ export class GitService {
             gitdir: args.loaded.gitdir,
             filepath: packFilepath
           });
+          changedPaths.add(packRelativePath);
+          changedPaths.add(packIndexRelativePath);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "unpack failed";
           const payload = buildReceivePackReport({
@@ -572,6 +579,8 @@ export class GitService {
       for (const command of request.commands) {
         if (isZeroOid(command.newOid)) {
           await fs.promises.rm(`${args.loaded.gitdir}/${command.refName}`, { force: true });
+          changedPaths.delete(command.refName);
+          deletedPaths.add(command.refName);
           continue;
         }
         await git.writeRef({
@@ -582,18 +591,25 @@ export class GitService {
           value: command.newOid,
           force: true
         });
+        deletedPaths.delete(command.refName);
+        changedPaths.add(command.refName);
       }
 
-      await this.ensureHeadAfterReceivePack({
+      const headUpdated = await this.ensureHeadAfterReceivePack({
         fs,
         gitdir: args.loaded.gitdir
       });
+      if (headUpdated) {
+        changedPaths.add("HEAD");
+      }
       await persistRepositoryToStorage({
         storage: this.storage,
         fs,
         gitdir: args.loaded.gitdir,
         owner: args.owner,
         repo: args.repo,
+        changedPaths: [...changedPaths],
+        deletedPaths: [...deletedPaths],
         ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
       });
       await syncLoadedRepositoryHeadState(args.loaded);

@@ -62,7 +62,7 @@ Git 托管与存储层是整个平台的底座，职责是：
 - pack 接收与索引
 - ref 更新校验
 - `report-status` 响应
-- 写回 R2 后同步更新 HEAD/ref 视图
+- 仅把本次 push 变更的 `.git` 文件增量写回 R2 与 DO storage 快照，并同步更新 HEAD/ref 视图
 - push 成功后触发匹配的 `push` workflow
 
 ### 3.4 merge 能力
@@ -92,8 +92,8 @@ Git 托管与存储层是整个平台的底座，职责是：
 1. Worker 完成 Basic Auth 和仓库写权限校验。
 2. 请求按仓库路由到 `RepositoryObject`。
 3. DO 在内存仓库上执行 `receive-pack`。
-4. 更新后的 refs 和 objects 持久化回 R2。
-5. 同步把最新 `.git` 文件树写入 DO storage 快照。
+4. DO 收集本次 push 新增的 pack/idx、变更的 refs，以及必要时更新的 HEAD。
+5. 仅把这些变更文件增量持久化回 R2，并同步更新 DO storage 快照。
 6. Worker 根据更新后的 ref 触发 `push` workflows。
 
 ### 5.3 代码浏览/PR compare
@@ -146,6 +146,7 @@ Git 托管与存储层是整个平台的底座，职责是：
 
 - 当前已经从“仅实例内存缓存”提升为“实例内存缓存 + DO storage 快照”。
 - 这显著减少了同仓库重复 hydrate，也减少了实例回收后的 R2 重建成本。
+- 目前 push 写路径已经改为按变更文件增量更新 R2 与 DO storage 快照。
 - 仍然存在的边界是：首次冷启动或快照不存在时，仍需回退到 R2 hydrate。
 
 ### 8.4 Git 写入和 review 结果的链接仍不够强
