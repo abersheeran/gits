@@ -1,10 +1,10 @@
 import type {
   ActionAgentType,
-  ActionRunRecord,
-  ActionRunSourceType,
-  ActionWorkflowRecord,
+  AgentSessionExecutionSourceType,
   AgentSessionOrigin,
   AgentSessionRecord,
+  ActionRunRecord,
+  ActionWorkflowRecord,
   AppBindings,
   AuthUser,
   RepositoryRecord
@@ -61,6 +61,40 @@ function matchesPushWorkflow(workflow: ActionWorkflowRecord, ref: string | null)
   return false;
 }
 
+function resolveSessionSourceType(
+  sourceType: AgentSessionExecutionSourceType | null | undefined
+): AgentSessionRecord["source_type"] {
+  return sourceType ?? "manual";
+}
+
+export async function createLinkedAgentSessionForRun(input: {
+  db: D1Database;
+  repositoryId: string;
+  run: ActionRunRecord;
+  origin: AgentSessionOrigin;
+  createdBy?: string | null;
+  delegatedFromUserId?: string | null;
+}): Promise<AgentSessionRecord> {
+  const agentSessionService = new AgentSessionService(input.db);
+  return agentSessionService.createSessionExecution({
+    repositoryId: input.repositoryId,
+    sourceType: resolveSessionSourceType(input.run.trigger_source_type ?? null),
+    sourceNumber: input.run.trigger_source_number ?? null,
+    sourceCommentId: input.run.trigger_source_comment_id ?? null,
+    origin: input.origin,
+    agentType: input.run.agent_type,
+    instanceType: input.run.instance_type,
+    prompt: input.run.prompt,
+    triggerRef: input.run.trigger_ref ?? null,
+    triggerSha: input.run.trigger_sha ?? null,
+    workflowId: input.run.workflow_id ?? null,
+    parentSessionId: input.run.parent_session_id ?? null,
+    createdBy: input.createdBy ?? input.run.created_by ?? null,
+    delegatedFromUserId:
+      input.delegatedFromUserId ?? input.run.delegated_from_user_id ?? null
+  });
+}
+
 export function containsActionsMention(input: { title?: string; body?: string }): boolean {
   const title = input.title ?? "";
   const body = input.body ?? "";
@@ -107,24 +141,13 @@ export async function scheduleActionRunExecution(input: {
   >;
   executionCtx?: ExecutionContext;
   repository: RepositoryRecord;
-  run: {
-    id: string;
-    run_number: number;
-    repository_id: string;
-    agent_type: "codex" | "claude_code";
-    instance_type: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
-    prompt: string;
-    trigger_ref: string | null;
-    trigger_sha: string | null;
-    trigger_source_type: ActionRunSourceType | null;
-    trigger_source_number: number | null;
-  };
+  session: AgentSessionRecord;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
 }): Promise<void> {
   const enqueued = await enqueueActionRunExecution(input.env, {
     repositoryId: input.repository.id,
-    runId: input.run.id,
+    sessionId: input.session.id,
     requestOrigin: input.requestOrigin
   });
   if (enqueued) {
@@ -134,7 +157,7 @@ export async function scheduleActionRunExecution(input: {
   const execution = executeActionRun({
     env: input.env,
     repository: input.repository,
-    run: input.run,
+    session: input.session,
     ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
     requestOrigin: input.requestOrigin
   });
@@ -242,37 +265,6 @@ async function ensureInteractiveAgentWorkflow(
   });
 }
 
-export async function createLinkedAgentSessionForRun(input: {
-  db: D1Database;
-  repositoryId: string;
-  run: Pick<
-    ActionRunRecord,
-    | "id"
-    | "run_number"
-    | "workflow_id"
-    | "workflow_name"
-    | "trigger_source_type"
-    | "trigger_source_number"
-    | "trigger_source_comment_id"
-    | "agent_type"
-    | "prompt"
-    | "trigger_ref"
-    | "trigger_sha"
-  >;
-  origin: AgentSessionOrigin;
-  createdBy?: string | null;
-  delegatedFromUserId?: string | null;
-}): Promise<AgentSessionRecord> {
-  const agentSessionService = new AgentSessionService(input.db);
-  return agentSessionService.createSessionForRun({
-    repositoryId: input.repositoryId,
-    run: input.run,
-    origin: input.origin,
-    createdBy: input.createdBy ?? null,
-    delegatedFromUserId: input.delegatedFromUserId ?? input.createdBy ?? null
-  });
-}
-
 export async function triggerMentionActionRun(input: {
   env: Pick<
     AppBindings,
@@ -293,12 +285,12 @@ export async function triggerMentionActionRun(input: {
   prompt: string;
   triggerRef?: string | null;
   triggerSha?: string | null;
-  triggerSourceType?: ActionRunSourceType | null;
+  triggerSourceType?: AgentSessionExecutionSourceType | null;
   triggerSourceNumber?: number | null;
   triggerSourceCommentId?: string | null;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
-}): Promise<ActionRunRecord | null> {
+}): Promise<AgentSessionRecord | null> {
   const prompt = input.prompt.trim();
   if (!prompt || !canScheduleActionRun(input.env)) {
     return null;
@@ -307,25 +299,19 @@ export async function triggerMentionActionRun(input: {
   const actionsService = new ActionsService(input.env.DB);
   const workflow = await ensureMentionWorkflow(actionsService, input.repository);
   const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
-  const run = await actionsService.createRun({
+  const agentSessionService = new AgentSessionService(input.env.DB);
+  const session = await agentSessionService.createSessionExecution({
     repositoryId: input.repository.id,
-    workflowId: workflow.id,
-    triggerEvent: "mention_actions",
-    ...(input.triggerRef ? { triggerRef: input.triggerRef } : {}),
-    ...(input.triggerSha ? { triggerSha: input.triggerSha } : {}),
-    ...(input.triggerSourceType ? { triggerSourceType: input.triggerSourceType } : {}),
-    ...(input.triggerSourceNumber ? { triggerSourceNumber: input.triggerSourceNumber } : {}),
-    ...(input.triggerSourceCommentId ? { triggerSourceCommentId: input.triggerSourceCommentId } : {}),
-    ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
+    sourceType: resolveSessionSourceType(input.triggerSourceType),
+    sourceNumber: input.triggerSourceNumber ?? null,
+    sourceCommentId: input.triggerSourceCommentId ?? null,
+    origin: "mention",
     agentType: workflow.agent_type,
     instanceType: repositoryConfig.instanceType,
-    prompt
-  });
-  await createLinkedAgentSessionForRun({
-    db: input.env.DB,
-    repositoryId: input.repository.id,
-    run,
-    origin: "mention",
+    prompt,
+    triggerRef: input.triggerRef ?? null,
+    triggerSha: input.triggerSha ?? null,
+    workflowId: workflow.id,
     createdBy: input.triggeredByUser?.id ?? null,
     delegatedFromUserId: input.triggeredByUser?.id ?? null
   });
@@ -334,11 +320,11 @@ export async function triggerMentionActionRun(input: {
     env: input.env,
     ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
     repository: input.repository,
-    run,
+    session,
     ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
     requestOrigin: input.requestOrigin
   });
-  return run;
+  return session;
 }
 
 export async function triggerActionWorkflows(input: {
@@ -361,13 +347,13 @@ export async function triggerActionWorkflows(input: {
   triggerEvent: ActionWorkflowRecord["trigger_event"];
   triggerRef?: string | null;
   triggerSha?: string | null;
-  triggerSourceType?: ActionRunSourceType | null;
+  triggerSourceType?: AgentSessionExecutionSourceType | null;
   triggerSourceNumber?: number | null;
   triggerSourceCommentId?: string | null;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
   buildPrompt?: (workflow: ActionWorkflowRecord) => string;
-}): Promise<ActionRunRecord[]> {
+}): Promise<AgentSessionRecord[]> {
   if (!canScheduleActionRun(input.env)) {
     return [];
   }
@@ -386,46 +372,38 @@ export async function triggerActionWorkflows(input: {
       ? workflows.filter((workflow) => matchesPushWorkflow(workflow, input.triggerRef ?? null))
       : workflows;
   const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
+  const agentSessionService = new AgentSessionService(input.env.DB);
 
-  const runs: ActionRunRecord[] = [];
+  const sessions: AgentSessionRecord[] = [];
   for (const workflow of matchedWorkflows) {
     const prompt = input.buildPrompt ? input.buildPrompt(workflow) : workflow.prompt;
-    const run = await actionsService.createRun({
+    const session = await agentSessionService.createSessionExecution({
       repositoryId: input.repository.id,
-      workflowId: workflow.id,
-      triggerEvent: input.triggerEvent,
-      ...(input.triggerRef ? { triggerRef: input.triggerRef } : {}),
-      ...(input.triggerSha ? { triggerSha: input.triggerSha } : {}),
-      ...(input.triggerSourceType ? { triggerSourceType: input.triggerSourceType } : {}),
-      ...(input.triggerSourceNumber ? { triggerSourceNumber: input.triggerSourceNumber } : {}),
-      ...(input.triggerSourceCommentId
-        ? { triggerSourceCommentId: input.triggerSourceCommentId }
-        : {}),
-      ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
+      sourceType: resolveSessionSourceType(input.triggerSourceType),
+      sourceNumber: input.triggerSourceNumber ?? null,
+      sourceCommentId: input.triggerSourceCommentId ?? null,
+      origin: "workflow",
       agentType: workflow.agent_type,
       instanceType: repositoryConfig.instanceType,
-      prompt
-    });
-    runs.push(run);
-    await createLinkedAgentSessionForRun({
-      db: input.env.DB,
-      repositoryId: input.repository.id,
-      run,
-      origin: "workflow",
+      prompt,
+      triggerRef: input.triggerRef ?? null,
+      triggerSha: input.triggerSha ?? null,
+      workflowId: workflow.id,
       createdBy: input.triggeredByUser?.id ?? null,
       delegatedFromUserId: input.triggeredByUser?.id ?? null
     });
+    sessions.push(session);
     await scheduleActionRunExecution({
       env: input.env,
       ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
       repository: input.repository,
-      run,
+      session,
       ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
       requestOrigin: input.requestOrigin
     });
   }
 
-  return runs;
+  return sessions;
 }
 
 export async function triggerInteractiveAgentSession(input: {
@@ -453,12 +431,13 @@ export async function triggerInteractiveAgentSession(input: {
   prompt: string;
   triggerRef?: string | null;
   triggerSha?: string | null;
-  triggerSourceType?: ActionRunSourceType | null;
+  triggerSourceType?: AgentSessionExecutionSourceType | null;
   triggerSourceNumber?: number | null;
   triggerSourceCommentId?: string | null;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
-}): Promise<{ run: ActionRunRecord; session: AgentSessionRecord }> {
+  parentSessionId?: string | null;
+}): Promise<{ session: AgentSessionRecord }> {
   const actionsService = new ActionsService(input.env.DB);
   const workflow = await ensureInteractiveAgentWorkflow(
     actionsService,
@@ -466,27 +445,20 @@ export async function triggerInteractiveAgentSession(input: {
     input.agentType
   );
   const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
-  const run = await actionsService.createRun({
+  const agentSessionService = new AgentSessionService(input.env.DB);
+  const session = await agentSessionService.createSessionExecution({
     repositoryId: input.repository.id,
-    workflowId: workflow.id,
-    triggerEvent: "mention_actions",
-    ...(input.triggerRef ? { triggerRef: input.triggerRef } : {}),
-    ...(input.triggerSha ? { triggerSha: input.triggerSha } : {}),
-    ...(input.triggerSourceType ? { triggerSourceType: input.triggerSourceType } : {}),
-    ...(input.triggerSourceNumber ? { triggerSourceNumber: input.triggerSourceNumber } : {}),
-    ...(input.triggerSourceCommentId
-      ? { triggerSourceCommentId: input.triggerSourceCommentId }
-      : {}),
-    ...(input.triggeredByUser ? { triggeredBy: input.triggeredByUser.id } : {}),
+    sourceType: resolveSessionSourceType(input.triggerSourceType),
+    sourceNumber: input.triggerSourceNumber ?? null,
+    sourceCommentId: input.triggerSourceCommentId ?? null,
+    origin: input.origin,
     agentType: input.agentType,
     instanceType: repositoryConfig.instanceType,
-    prompt: input.prompt
-  });
-  const session = await createLinkedAgentSessionForRun({
-    db: input.env.DB,
-    repositoryId: input.repository.id,
-    run,
-    origin: input.origin,
+    prompt: input.prompt,
+    triggerRef: input.triggerRef ?? null,
+    triggerSha: input.triggerSha ?? null,
+    workflowId: workflow.id,
+    parentSessionId: input.parentSessionId ?? null,
     createdBy: input.triggeredByUser?.id ?? null,
     delegatedFromUserId: input.triggeredByUser?.id ?? null
   });
@@ -495,10 +467,10 @@ export async function triggerInteractiveAgentSession(input: {
     env: input.env,
     ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
     repository: input.repository,
-    run,
+    session,
     ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
     requestOrigin: input.requestOrigin
   });
 
-  return { run, session };
+  return { session };
 }

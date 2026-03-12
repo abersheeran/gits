@@ -1,5 +1,4 @@
 import type {
-  ActionRunRecord,
   AgentSessionRecord,
   IssueLinkedPullRequestRecord,
   IssueRecord,
@@ -9,7 +8,6 @@ import type {
   PullRequestTaskFlowRecord,
   RepositoryRecord
 } from "../types";
-import { ActionsService } from "./actions-service";
 import { AgentSessionService } from "./agent-session-service";
 import { IssueService } from "./issue-service";
 import { PullRequestService } from "./pull-request-service";
@@ -30,20 +28,8 @@ type PullRequestTaskFlowReason =
   | "waiting-human"
   | "inactive";
 
-function latestExecutionStatus(
-  latestRun: ActionRunRecord | null,
-  latestSession: AgentSessionRecord | null
-): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
-  if (latestRun && latestSession) {
-    return latestSession.updated_at > latestRun.updated_at
-      ? latestSession.status
-      : latestRun.status;
-  }
-  return latestRun?.status ?? latestSession?.status ?? null;
-}
-
 function classifyLatestExecutionState(
-  status: ActionRunRecord["status"] | AgentSessionRecord["status"] | null
+  status: AgentSessionRecord["status"] | null
 ): LatestSourceExecutionState {
   if (status === "queued" || status === "running") {
     return "active";
@@ -92,8 +78,6 @@ function selectPrimaryIssueNumber(
 }
 
 export class WorkflowTaskFlowService {
-  private readonly actionsService: ActionsService;
-
   private readonly agentSessionService: AgentSessionService;
 
   private readonly issueService: IssueService;
@@ -106,7 +90,6 @@ export class WorkflowTaskFlowService {
     private readonly db: D1Database,
     browserService: RepositoryComparisonReader
   ) {
-    this.actionsService = new ActionsService(db);
     this.agentSessionService = new AgentSessionService(db);
     this.issueService = new IssueService(db);
     this.pullRequestService = new PullRequestService(db);
@@ -118,20 +101,18 @@ export class WorkflowTaskFlowService {
     sourceType: "issue" | "pull_request",
     sourceNumber: number
   ): Promise<{
-    latestRun: ActionRunRecord | null;
     latestSession: AgentSessionRecord | null;
-    latestStatus: ActionRunRecord["status"] | AgentSessionRecord["status"] | null;
+    latestStatus: AgentSessionRecord["status"] | null;
     executionState: LatestSourceExecutionState;
   }> {
-    const [latestRuns, latestSessions] = await Promise.all([
-      this.actionsService.listLatestRunsBySource(repositoryId, sourceType, [sourceNumber]),
-      this.agentSessionService.listLatestSessionsBySource(repositoryId, sourceType, [sourceNumber])
-    ]);
-    const latestRun = latestRuns[0] ?? null;
+    const latestSessions = await this.agentSessionService.listLatestSessionsBySource(
+      repositoryId,
+      sourceType,
+      [sourceNumber]
+    );
     const latestSession = latestSessions[0] ?? null;
-    const latestStatus = latestExecutionStatus(latestRun, latestSession);
+    const latestStatus = latestSession?.status ?? null;
     return {
-      latestRun,
       latestSession,
       latestStatus,
       executionState: classifyLatestExecutionState(latestStatus)

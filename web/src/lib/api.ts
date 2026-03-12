@@ -461,9 +461,9 @@ export type ActionContainerInstanceType =
   | "standard-3"
   | "standard-4";
 
-export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
-export type ActionRunSourceType = "issue" | "pull_request";
-export type AgentSessionStatus = ActionRunStatus;
+export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
+export type ActionRunStatus = AgentSessionStatus;
+export type ActionRunSourceType = Exclude<AgentSessionSourceType, "manual">;
 
 export type ActionWorkflowRecord = {
   id: string;
@@ -477,36 +477,6 @@ export type ActionWorkflowRecord = {
   enabled: number;
   created_by: string;
   created_at: number;
-  updated_at: number;
-};
-
-export type ActionRunRecord = {
-  id: string;
-  repository_id: string;
-  run_number: number;
-  workflow_id: string;
-  workflow_name: string;
-  trigger_event: ActionWorkflowTrigger;
-  trigger_ref: string | null;
-  trigger_sha: string | null;
-  trigger_source_type: ActionRunSourceType | null;
-  trigger_source_number: number | null;
-  trigger_source_comment_id: string | null;
-  triggered_by: string | null;
-  triggered_by_username: string | null;
-  status: ActionRunStatus;
-  agent_type: ActionAgentType;
-  instance_type: ActionContainerInstanceType;
-  prompt: string;
-  logs: string;
-  has_full_logs?: boolean;
-  logs_url?: string | null;
-  exit_code: number | null;
-  container_instance: string | null;
-  created_at: number;
-  claimed_at: number | null;
-  started_at: number | null;
-  completed_at: number | null;
   updated_at: number;
 };
 
@@ -579,34 +549,51 @@ export type RepositoryActionsConfig = {
 export type AgentSessionRecord = {
   id: string;
   repository_id: string;
+  session_number: number;
+  run_number?: number;
   source_type: AgentSessionSourceType;
   source_number: number | null;
   source_comment_id: string | null;
+  trigger_source_type?: ActionRunSourceType | null;
+  trigger_source_number?: number | null;
+  trigger_source_comment_id?: string | null;
   origin: AgentSessionOrigin;
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
+  instance_type: ActionContainerInstanceType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
   trigger_sha: string | null;
   workflow_id: string | null;
   workflow_name: string | null;
-  linked_run_id: string | null;
+  parent_session_id: string | null;
+  linked_run_id?: string | null;
   created_by: string | null;
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
+  triggered_by?: string | null;
+  triggered_by_username?: string | null;
+  logs: string;
+  has_full_logs?: boolean;
+  logs_url?: string | null;
+  exit_code: number | null;
+  container_instance: string | null;
   created_at: number;
+  claimed_at: number | null;
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;
 };
 
+export type ActionRunRecord = AgentSessionRecord;
+
 export type AgentSessionArtifactRecord = {
   id: string;
   session_id: string;
   repository_id: string;
-  kind: "run_logs" | "stdout" | "stderr";
+  kind: "session_logs" | "stdout" | "stderr";
   title: string;
   media_type: string;
   size_bytes: number;
@@ -630,7 +617,7 @@ export type AgentSessionUsageRecord = {
   id: number;
   session_id: string;
   repository_id: string;
-  kind: "duration_ms" | "exit_code" | "run_log_chars" | "stdout_chars" | "stderr_chars";
+  kind: "duration_ms" | "exit_code" | "log_chars" | "stdout_chars" | "stderr_chars";
   value: number;
   unit: string;
   detail: string | null;
@@ -672,7 +659,7 @@ export type AgentSessionValidationCheckRecord = {
 };
 
 export type AgentSessionValidationSummary = {
-  status: ActionRunStatus | null;
+  status: AgentSessionStatus | null;
   headline: string;
   detail: string;
   duration_ms: number | null;
@@ -693,7 +680,7 @@ export type AgentSessionSourceContext = {
 
 export type AgentSessionDetail = {
   session: AgentSessionRecord;
-  linkedRun: ActionRunRecord | null;
+  linkedRun?: ActionRunRecord | null;
   sourceContext: AgentSessionSourceContext;
   artifacts: AgentSessionArtifactRecord[];
   usageRecords: AgentSessionUsageRecord[];
@@ -705,8 +692,8 @@ export type AgentSessionTimelineEvent = {
   id: string;
   type:
     | "session_created"
-    | "run_queued"
-    | "run_claimed"
+    | "session_queued"
+    | "session_claimed"
     | "session_started"
     | "log"
     | "session_completed"
@@ -731,14 +718,14 @@ export type TriggerRepositoryAgentInput = {
 };
 
 export type TriggerRepositoryAgentResponse = {
-  run: ActionRunRecord;
+  run?: ActionRunRecord;
   session: AgentSessionRecord;
   issue?: IssueRecord;
 };
 
 export type AgentSessionLifecycleResponse = {
   session: AgentSessionRecord;
-  run: ActionRunRecord | null;
+  run?: ActionRunRecord | null;
 };
 
 type ApiRequestInit = RequestInit & {
@@ -1394,20 +1381,48 @@ export async function updateActionWorkflow(
   return response.workflow;
 }
 
+function normalizeActionRunRecord(session: AgentSessionRecord): ActionRunRecord {
+  return {
+    ...session,
+    run_number: session.run_number ?? session.session_number,
+    trigger_source_type:
+      session.trigger_source_type ??
+      (session.source_type === "manual" ? null : session.source_type),
+    trigger_source_number: session.trigger_source_number ?? session.source_number,
+    trigger_source_comment_id:
+      session.trigger_source_comment_id ?? session.source_comment_id,
+    linked_run_id: session.linked_run_id ?? null,
+    triggered_by: session.triggered_by ?? session.created_by,
+    triggered_by_username:
+      session.triggered_by_username ?? session.created_by_username
+  };
+}
+
+function normalizeAgentSessionDetail(detail: AgentSessionDetail): AgentSessionDetail {
+  return {
+    ...detail,
+    session: normalizeActionRunRecord(detail.session),
+    linkedRun: detail.linkedRun ?? null
+  };
+}
+
+function normalizeTriggerRepositoryAgentResponse(
+  response: TriggerRepositoryAgentResponse
+): TriggerRepositoryAgentResponse {
+  return {
+    ...response,
+    run: response.run ?? normalizeActionRunRecord(response.session)
+  };
+}
+
 export async function listActionRuns(
   owner: string,
   repo: string,
   input?: { limit?: number }
 ): Promise<ActionRunRecord[]> {
-  const query = new URLSearchParams();
-  if (input?.limit) {
-    query.set("limit", String(input.limit));
-  }
-  const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  const response = await requestJson<{ runs: ActionRunRecord[] }>(
-    `/api/repos/${owner}/${repo}/actions/runs${suffix}`
+  return (await listRepositoryAgentSessions(owner, repo, { limit: input?.limit })).map(
+    (session) => normalizeActionRunRecord(session)
   );
-  return response.runs;
 }
 
 export async function listLatestActionRunsBySource(
@@ -1415,13 +1430,11 @@ export async function listLatestActionRunsBySource(
   repo: string,
   input: { sourceType: ActionRunSourceType; numbers: number[] }
 ): Promise<ActionRunLatestBySourceItem[]> {
-  const query = new URLSearchParams();
-  query.set("sourceType", input.sourceType);
-  query.set("numbers", input.numbers.join(","));
-  const response = await requestJson<{ items: ActionRunLatestBySourceItem[] }>(
-    `/api/repos/${owner}/${repo}/actions/runs/latest?${query.toString()}`
-  );
-  return response.items;
+  const items = await listLatestAgentSessionsBySource(owner, repo, input);
+  return items.map((item) => ({
+    sourceNumber: item.sourceNumber,
+    run: item.session ? normalizeActionRunRecord(item.session) : null
+  }));
 }
 
 export async function listLatestActionRunsByCommentIds(
@@ -1431,10 +1444,13 @@ export async function listLatestActionRunsByCommentIds(
 ): Promise<ActionRunLatestByCommentItem[]> {
   const query = new URLSearchParams();
   query.set("commentIds", commentIds.join(","));
-  const response = await requestJson<{ items: ActionRunLatestByCommentItem[] }>(
-    `/api/repos/${owner}/${repo}/actions/runs/latest-by-comments?${query.toString()}`
+  const response = await requestJson<{ items: AgentSessionLatestByCommentItem[] }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/latest-by-comments?${query.toString()}`
   );
-  return response.items;
+  return response.items.map((item) => ({
+    commentId: item.commentId,
+    run: item.session ? normalizeActionRunRecord(item.session) : null
+  }));
 }
 
 export async function getActionRun(
@@ -1442,14 +1458,12 @@ export async function getActionRun(
   repo: string,
   runId: string
 ): Promise<ActionRunRecord> {
-  const response = await requestJson<{ run: ActionRunRecord }>(
-    `/api/repos/${owner}/${repo}/actions/runs/${runId}`
-  );
-  return response.run;
+  const detail = await getRepositoryAgentSessionDetail(owner, repo, runId);
+  return normalizeActionRunRecord(detail.session);
 }
 
 export function getActionRunLogStreamPath(owner: string, repo: string, runId: string): string {
-  return `/api/repos/${owner}/${repo}/actions/runs/${runId}/logs/stream`;
+  return `/api/repos/${owner}/${repo}/agent-sessions/${runId}/logs/stream`;
 }
 
 export async function getActionRunLogs(
@@ -1457,9 +1471,7 @@ export async function getActionRunLogs(
   repo: string,
   runId: string
 ): Promise<ActionRunLogsResponse> {
-  return requestJson<ActionRunLogsResponse>(
-    `/api/repos/${owner}/${repo}/actions/runs/${runId}/logs`
-  );
+  return requestJson<ActionRunLogsResponse>(`/api/repos/${owner}/${repo}/agent-sessions/${runId}/logs`);
 }
 
 export async function rerunActionRun(
@@ -1467,13 +1479,13 @@ export async function rerunActionRun(
   repo: string,
   runId: string
 ): Promise<ActionRunRecord> {
-  const response = await requestJson<{ run: ActionRunRecord }>(
-    `/api/repos/${owner}/${repo}/actions/runs/${runId}/rerun`,
+  const response = await requestJson<{ session: AgentSessionRecord }>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${runId}/rerun`,
     {
       method: "POST"
     }
   );
-  return response.run;
+  return normalizeActionRunRecord(response.session);
 }
 
 export async function dispatchActionWorkflow(
@@ -1482,14 +1494,14 @@ export async function dispatchActionWorkflow(
   workflowId: string,
   input?: { ref?: string; sha?: string }
 ): Promise<ActionRunRecord> {
-  const response = await requestJson<{ run: ActionRunRecord }>(
+  const response = await requestJson<{ session: AgentSessionRecord }>(
     `/api/repos/${owner}/${repo}/actions/workflows/${workflowId}/dispatch`,
     {
       method: "POST",
       bodyJson: input ?? {}
     }
   );
-  return response.run;
+  return normalizeActionRunRecord(response.session);
 }
 
 export async function listRepositoryAgentSessions(
@@ -1528,14 +1540,17 @@ export async function listLatestAgentSessionsBySource(
   return response.items;
 }
 
+export type AgentSessionLatestByCommentItem = {
+  commentId: string;
+  session: AgentSessionRecord | null;
+};
+
 export async function getRepositoryAgentSession(
   owner: string,
   repo: string,
   sessionId: string
 ): Promise<AgentSessionRecord> {
-  const response = await requestJson<{ session: AgentSessionRecord }>(
-    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`
-  );
+  const response = await getRepositoryAgentSessionDetail(owner, repo, sessionId);
   return response.session;
 }
 
@@ -1544,8 +1559,8 @@ export async function getRepositoryAgentSessionDetail(
   repo: string,
   sessionId: string
 ): Promise<AgentSessionDetail> {
-  return requestJson<AgentSessionDetail>(
-    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`
+  return normalizeAgentSessionDetail(
+    await requestJson<AgentSessionDetail>(`/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`)
   );
 }
 
@@ -1601,12 +1616,14 @@ export async function assignIssueAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return requestJson<TriggerRepositoryAgentResponse>(
-    `/api/repos/${owner}/${repo}/issues/${number}/assign-agent`,
-    {
-      method: "POST",
-      bodyJson: input ?? {}
-    }
+  return normalizeTriggerRepositoryAgentResponse(
+    await requestJson<TriggerRepositoryAgentResponse>(
+      `/api/repos/${owner}/${repo}/issues/${number}/assign-agent`,
+      {
+        method: "POST",
+        bodyJson: input ?? {}
+      }
+    )
   );
 }
 
@@ -1616,12 +1633,14 @@ export async function resumeIssueAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return requestJson<TriggerRepositoryAgentResponse>(
-    `/api/repos/${owner}/${repo}/issues/${number}/resume-agent`,
-    {
-      method: "POST",
-      bodyJson: input ?? {}
-    }
+  return normalizeTriggerRepositoryAgentResponse(
+    await requestJson<TriggerRepositoryAgentResponse>(
+      `/api/repos/${owner}/${repo}/issues/${number}/resume-agent`,
+      {
+        method: "POST",
+        bodyJson: input ?? {}
+      }
+    )
   );
 }
 
@@ -1631,12 +1650,14 @@ export async function resumePullRequestAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return requestJson<TriggerRepositoryAgentResponse>(
-    `/api/repos/${owner}/${repo}/pulls/${number}/resume-agent`,
-    {
-      method: "POST",
-      bodyJson: input ?? {}
-    }
+  return normalizeTriggerRepositoryAgentResponse(
+    await requestJson<TriggerRepositoryAgentResponse>(
+      `/api/repos/${owner}/${repo}/pulls/${number}/resume-agent`,
+      {
+        method: "POST",
+        bodyJson: input ?? {}
+      }
+    )
   );
 }
 

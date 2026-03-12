@@ -17,7 +17,6 @@ import {
 } from "../../test-utils/mock-r2";
 
 import {
-  buildActionRunRow,
   buildAgentSessionRow,
   buildRepositoryRow,
   createApp,
@@ -293,40 +292,33 @@ describe("API actions and session routes", () => {
         first: () => buildRepositoryRow({ is_private: 0 })
       },
       {
-        when: "FROM action_runs r",
+        when: "FROM agent_sessions s",
         all: () => [
-          {
-            id: "run-1",
-            repository_id: "repo-1",
-            run_number: 1,
-            workflow_id: "workflow-1",
+          buildAgentSessionRow({
+            id: "session-1",
+            session_number: 1,
+            source_type: "pull_request",
+            source_number: 1,
             workflow_name: "CI",
-            trigger_event: "pull_request_created",
             trigger_ref: "refs/heads/feature",
             trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 1,
-            trigger_source_comment_id: null,
-            triggered_by: "owner-1",
-            triggered_by_username: "alice",
+            created_by: "owner-1",
+            created_by_username: "alice",
             status: "running",
-            agent_type: "codex",
             prompt: "run tests",
-            logs: "",
-            exit_code: null,
-            container_instance: "action-run-run-1",
+            container_instance: "agent-session-session-1",
             created_at: now - 60_000,
             claimed_at: now - 50_000,
             started_at: now - 45_000,
             completed_at: null,
             updated_at: now - 30_000
-          }
+          })
         ]
       }
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs"),
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions"),
       {
         ...createBaseEnv(db),
         ACTIONS_RUNNER: {
@@ -339,16 +331,16 @@ describe("API actions and session routes", () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      runs: Array<{
+      sessions: Array<{
         id: string;
         status: string;
         exit_code: number | null;
         logs: string;
       }>;
     };
-    expect(body.runs[0]?.id).toBe("run-1");
-    expect(body.runs[0]?.status).toBe("running");
-    expect(body.runs[0]?.exit_code).toBeNull();
+    expect(body.sessions[0]?.id).toBe("session-1");
+    expect(body.sessions[0]?.status).toBe("running");
+    expect(body.sessions[0]?.exit_code).toBeNull();
     expect(fetchContainerState).not.toHaveBeenCalled();
   });
 
@@ -363,67 +355,55 @@ describe("API actions and session routes", () => {
         first: () => buildRepositoryRow({ is_private: 0 })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () => {
           readCount += 1;
           if (readCount === 1) {
-            return {
-              id: "run-queued-starting",
-              repository_id: "repo-1",
-              run_number: 3,
-              workflow_id: "workflow-1",
+            return buildAgentSessionRow({
+              id: "session-queued-starting",
+              session_number: 3,
+              source_type: "pull_request",
+              source_number: 3,
               workflow_name: "CI",
-              trigger_event: "pull_request_created",
               trigger_ref: "refs/heads/feature",
               trigger_sha: "cccccccccccccccccccccccccccccccccccccccc",
-              trigger_source_type: "pull_request",
-              trigger_source_number: 3,
-              trigger_source_comment_id: null,
-              triggered_by: "owner-1",
-              triggered_by_username: "alice",
+              created_by: "owner-1",
+              created_by_username: "alice",
               status: "running",
-              agent_type: "codex",
               prompt: "run tests",
-              logs: "",
-              exit_code: null,
-              container_instance: "action-run-run-queued-starting",
+              container_instance: "agent-session-session-queued-starting",
               created_at: now - 2_000,
               started_at: now - 500,
               completed_at: null,
               updated_at: now - 500
-            };
+            });
           }
-          return {
-            id: "run-queued-starting",
-            repository_id: "repo-1",
-            run_number: 3,
-            workflow_id: "workflow-1",
+          return buildAgentSessionRow({
+            id: "session-queued-starting",
+            session_number: 3,
+            source_type: "pull_request",
+            source_number: 3,
             workflow_name: "CI",
-            trigger_event: "pull_request_created",
             trigger_ref: "refs/heads/feature",
             trigger_sha: "cccccccccccccccccccccccccccccccccccccccc",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 3,
-            trigger_source_comment_id: null,
-            triggered_by: "owner-1",
-            triggered_by_username: "alice",
+            created_by: "owner-1",
+            created_by_username: "alice",
             status: "success",
-            agent_type: "codex",
             prompt: "run tests",
             logs: "line 1",
             exit_code: 0,
-            container_instance: "action-run-run-queued-starting",
+            container_instance: "agent-session-session-queued-starting",
             created_at: now - 2_000,
             started_at: now - 500,
             completed_at: now + 600,
             updated_at: now + 600
-          };
+          });
         }
       }
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-queued-starting/logs/stream"),
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/session-queued-starting/logs/stream"),
       {
         ...createBaseEnv(db),
         ACTIONS_RUNNER: {
@@ -453,37 +433,33 @@ describe("API actions and session routes", () => {
         first: () => buildRepositoryRow({ is_private: 0 })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () => ({
-          id: "run-1",
-          repository_id: "repo-1",
-          run_number: 1,
-          workflow_id: "workflow-1",
-          workflow_name: "CI",
-          trigger_event: "pull_request_created",
-          trigger_ref: "refs/heads/feature",
-          trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          trigger_source_type: "pull_request",
-          trigger_source_number: 1,
-          trigger_source_comment_id: null,
-          triggered_by: "owner-1",
-          triggered_by_username: "alice",
-          status: "success",
-          agent_type: "codex",
-          prompt: "run tests",
-          logs: "line 1\nline 2",
-          exit_code: 0,
-          container_instance: "action-run-run-1",
-          created_at: now - 1_000,
-          started_at: now - 900,
-          completed_at: now - 100,
-          updated_at: now - 100
-        })
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "run-1",
+            session_number: 1,
+            source_type: "pull_request",
+            source_number: 1,
+            workflow_name: "CI",
+            trigger_ref: "refs/heads/feature",
+            trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            created_by: "owner-1",
+            created_by_username: "alice",
+            status: "success",
+            prompt: "run tests",
+            logs: "line 1\nline 2",
+            exit_code: 0,
+            container_instance: "agent-session-run-1",
+            created_at: now - 1_000,
+            started_at: now - 900,
+            completed_at: now - 100,
+            updated_at: now - 100
+          })
       }
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/logs/stream"),
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-1/logs/stream"),
       createBaseEnv(db)
     );
 
@@ -510,94 +486,74 @@ describe("API actions and session routes", () => {
         first: () => buildRepositoryRow({ is_private: 0 })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () => {
           readCount += 1;
           if (readCount === 1) {
-            return {
+            return buildAgentSessionRow({
               id: "run-2",
-              repository_id: "repo-1",
-              run_number: 2,
-              workflow_id: "workflow-1",
+              session_number: 2,
+              source_type: "pull_request",
+              source_number: 2,
               workflow_name: "CI",
-              trigger_event: "pull_request_created",
               trigger_ref: "refs/heads/feature",
               trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              trigger_source_type: "pull_request",
-              trigger_source_number: 2,
-              trigger_source_comment_id: null,
-              triggered_by: "owner-1",
-              triggered_by_username: "alice",
+              created_by: "owner-1",
+              created_by_username: "alice",
               status: "running",
-              agent_type: "codex",
               prompt: "run tests",
               logs: "",
-              exit_code: null,
-              container_instance: null,
               created_at: now - 2_000,
               started_at: now - 1_900,
               completed_at: null,
               updated_at: now - 1_900
-            };
+            });
           }
           if (readCount === 2) {
-            return {
+            return buildAgentSessionRow({
               id: "run-2",
-              repository_id: "repo-1",
-              run_number: 2,
-              workflow_id: "workflow-1",
+              session_number: 2,
+              source_type: "pull_request",
+              source_number: 2,
               workflow_name: "CI",
-              trigger_event: "pull_request_created",
               trigger_ref: "refs/heads/feature",
               trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              trigger_source_type: "pull_request",
-              trigger_source_number: 2,
-              trigger_source_comment_id: null,
-              triggered_by: "owner-1",
-              triggered_by_username: "alice",
+              created_by: "owner-1",
+              created_by_username: "alice",
               status: "running",
-              agent_type: "codex",
               prompt: "run tests",
               logs: "line 1",
-              exit_code: null,
-              container_instance: null,
               created_at: now - 2_000,
               started_at: now - 1_900,
               completed_at: null,
               updated_at: now - 900
-            };
+            });
           }
-          return {
+          return buildAgentSessionRow({
             id: "run-2",
-            repository_id: "repo-1",
-            run_number: 2,
-            workflow_id: "workflow-1",
+            session_number: 2,
+            source_type: "pull_request",
+            source_number: 2,
             workflow_name: "CI",
-            trigger_event: "pull_request_created",
             trigger_ref: "refs/heads/feature",
             trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 2,
-            trigger_source_comment_id: null,
-            triggered_by: "owner-1",
-            triggered_by_username: "alice",
+            created_by: "owner-1",
+            created_by_username: "alice",
             status: "success",
-            agent_type: "codex",
             prompt: "run tests",
             logs: "line 1",
             exit_code: 0,
-            container_instance: null,
             created_at: now - 2_000,
             started_at: now - 1_900,
             completed_at: now - 100,
             updated_at: now - 100
-          };
+          });
         }
       }
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-2/logs/stream"),
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-2/logs/stream"),
       createBaseEnv(db)
     );
 
@@ -622,10 +578,11 @@ describe("API actions and session routes", () => {
         first: () => buildRepositoryRow({ is_private: 0 })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () =>
-          buildActionRunRow({
+          buildAgentSessionRow({
             id: "run-full-logs",
+            session_number: 4,
             status: "success",
             logs: "excerpt"
           })
@@ -633,7 +590,7 @@ describe("API actions and session routes", () => {
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-full-logs/logs"),
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-full-logs/logs"),
       {
         ...createBaseEnv(db),
         GIT_BUCKET: bucket as unknown as R2Bucket
@@ -663,7 +620,7 @@ describe("API actions and session routes", () => {
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-1/rerun", {
         method: "POST",
         headers: {
           authorization: "Bearer session-ok"
@@ -680,34 +637,23 @@ describe("API actions and session routes", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue("run-2");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("session-2");
     const enqueueRun = vi.fn(async () => undefined);
     const now = Date.now();
-    const sourceRun = {
+    const sourceRun = buildAgentSessionRow({
       id: "run-1",
-      repository_id: "repo-1",
-      run_number: 1,
-      workflow_id: "workflow-1",
-      workflow_name: "CI",
-      trigger_event: "pull_request_created",
-      trigger_ref: "refs/heads/feature",
-      trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      trigger_source_type: "pull_request",
-      trigger_source_number: 1,
-      trigger_source_comment_id: null,
-      triggered_by: "user-2",
-      triggered_by_username: "bob",
+      session_number: 1,
+      source_type: "pull_request",
+      source_number: 1,
       status: "failed",
-      agent_type: "codex",
       prompt: "请执行测试并修复失败。",
       logs: "failed logs",
       exit_code: 1,
-      container_instance: null,
       created_at: now - 10_000,
       started_at: now - 9_000,
       completed_at: now - 8_000,
       updated_at: now - 8_000
-    };
+    });
 
     const db = createMockD1Database([
       {
@@ -719,7 +665,7 @@ describe("API actions and session routes", () => {
         first: () => ({ permission: "read" })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
         first: (params) => {
           const runId = String(params[1]);
           if (runId === "run-1") {
@@ -728,11 +674,13 @@ describe("API actions and session routes", () => {
           return {
             ...sourceRun,
             id: runId,
+            session_number: 2,
             run_number: 2,
             status: "queued",
             logs: "",
             exit_code: null,
             container_instance: null,
+            parent_session_id: "run-1",
             created_at: now,
             started_at: null,
             completed_at: null,
@@ -741,17 +689,28 @@ describe("API actions and session routes", () => {
         }
       },
       {
-        when: "RETURNING action_run_seq AS run_number",
-        first: () => ({ run_number: 2 })
+        when: "RETURNING session_number_seq AS session_number",
+        first: () => ({ session_number: 2 })
       },
       {
-        when: "INSERT INTO action_runs",
+        when: "INSERT INTO agent_sessions",
         run: () => ({ success: true })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-2",
+            session_number: 2,
+            source_type: "pull_request",
+            source_number: 1,
+            origin: "rerun"
+          })
       }
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-1/rerun", {
         method: "POST",
         headers: {
           authorization: "Bearer session-ok"
@@ -766,10 +725,10 @@ describe("API actions and session routes", () => {
     );
 
     expect(response.status).toBe(202);
-    const body = (await response.json()) as { run: { id: string; run_number: number; status: string } };
-    expect(body.run.id).toBe("run-2");
-    expect(body.run.run_number).toBe(2);
-    expect(body.run.status).toBe("queued");
+    const body = (await response.json()) as { session: { id: string; session_number: number; status: string } };
+    expect(body.session.id).toBe("session-2");
+    expect(body.session.session_number).toBe(2);
+    expect(body.session.status).toBe("queued");
     expect(enqueueRun).toHaveBeenCalledTimes(1);
   });
 
@@ -778,13 +737,12 @@ describe("API actions and session routes", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(crypto, "randomUUID")
-      .mockReturnValueOnce("run-2")
-      .mockReturnValueOnce("session-pending");
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("session-pending");
     const enqueueRun = vi.fn(async () => undefined);
     const now = Date.now();
-    const sourceRun = buildActionRunRow({
+    const sourceSession = buildAgentSessionRow({
       id: "run-1",
+      session_number: 1,
       status: "failed",
       logs: "failed logs",
       exit_code: 1,
@@ -804,31 +762,26 @@ describe("API actions and session routes", () => {
         first: () => ({ permission: "read" })
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
+        when: "WHERE s.repository_id = ? AND s.id = ?",
         first: (params) => {
-          const runId = String(params[1]);
-          if (runId === "run-1") {
-            return sourceRun;
+          const sessionId = String(params[1]);
+          if (sessionId === "run-1") {
+            return sourceSession;
           }
-          return buildActionRunRow({
-            id: runId,
-            run_number: 2,
+          return buildAgentSessionRow({
+            id: sessionId,
+            session_number: 2,
+            source_type: "pull_request",
+            source_number: 1,
+            parent_session_id: "run-1",
             created_at: now,
             updated_at: now
           });
         }
       },
       {
-        when: "RETURNING action_run_seq AS run_number",
-        first: () => ({ run_number: 2 })
-      },
-      {
-        when: "INSERT INTO action_runs",
-        run: () => ({ success: true })
-      },
-      {
-        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
-        first: () => null
+        when: "RETURNING session_number_seq AS session_number",
+        first: () => ({ session_number: 2 })
       },
       {
         when: "INSERT INTO agent_sessions",
@@ -839,7 +792,8 @@ describe("API actions and session routes", () => {
         first: () =>
           buildAgentSessionRow({
             id: "session-pending",
-            linked_run_id: "run-2",
+            session_number: 2,
+            parent_session_id: "run-1",
             created_at: now,
             updated_at: now
           })
@@ -847,7 +801,7 @@ describe("API actions and session routes", () => {
     ]);
 
     const response = await createApp().fetch(
-      new Request("http://localhost/api/repos/alice/demo/actions/runs/run-1/rerun", {
+      new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-1/rerun", {
         method: "POST",
         headers: {
           authorization: "Bearer session-ok"
@@ -863,13 +817,11 @@ describe("API actions and session routes", () => {
 
     expect(response.status).toBe(202);
     const body = (await response.json()) as {
-      run: { id: string; status: string };
-      session: { id: string; status: string };
+      session: { id: string; status: string; parent_session_id: string | null };
     };
-    expect(body.run.id).toBe("run-2");
-    expect(body.run.status).toBe("queued");
     expect(body.session.id).toBe("session-pending");
     expect(body.session.status).toBe("queued");
+    expect(body.session.parent_session_id).toBe("run-1");
     expect(enqueueRun).toHaveBeenCalledTimes(1);
   });
 
@@ -888,21 +840,8 @@ describe("API actions and session routes", () => {
             source_type: "issue",
             source_number: 42,
             origin: "issue_resume",
-            linked_run_id: "run-detail",
-            created_at: now - 20_000,
-            updated_at: now - 10_000
-          })
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-detail",
-            workflow_name: "Issue Bot",
-            trigger_event: "issue_created",
-            trigger_source_type: "issue",
-            trigger_source_number: 42,
             status: "running",
+            workflow_name: "Issue Bot",
             created_at: now - 20_000,
             updated_at: now - 10_000
           })
@@ -984,7 +923,6 @@ describe("API actions and session routes", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       session: { id: string; source_type: string; source_number: number };
-      linkedRun: { id: string; workflow_name: string; status: string } | null;
       sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
       artifacts: Array<{ kind: string; title: string }>;
       usageRecords: Array<{ kind: string; value: number }>;
@@ -993,9 +931,6 @@ describe("API actions and session routes", () => {
     expect(body.session.id).toBe("session-detail");
     expect(body.session.source_type).toBe("issue");
     expect(body.session.source_number).toBe(42);
-    expect(body.linkedRun?.id).toBe("run-detail");
-    expect(body.linkedRun?.workflow_name).toBe("Issue Bot");
-    expect(body.linkedRun?.status).toBe("running");
     expect(body.sourceContext.type).toBe("issue");
     expect(body.sourceContext.number).toBe(42);
     expect(body.sourceContext.title).toBe("Need login fix");
@@ -1075,45 +1010,9 @@ describe("API actions and session routes", () => {
             source_number: 7,
             origin: "issue_assign",
             status: "failed",
-            linked_run_id: "run-timeline",
-            created_at: now - 12_000,
-            started_at: now - 10_000,
-            completed_at: now - 1_000,
-            updated_at: now - 1_000
-          })
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-timeline",
-            run_number: 9,
-            workflow_name: "Issue Bot",
-            trigger_event: "issue_created",
-            trigger_source_type: "issue",
-            trigger_source_number: 7,
-            status: "failed",
-            logs: `run_id: run-timeline
-run_number: 9
-agent_type: codex
-prompt: debug
-
-claimed_at: ${new Date(now - 11_000).toISOString()}
-started_at: ${new Date(now - 10_000).toISOString()}
-
-[attempted]
-codex run
-
-[stdout]
-Analyzing repository
-Applying fix
-
-[stderr]
-Tests still failing
-
-[error]
-Tests still failing`,
+            logs: `run_id: run-timeline\nrun_number: 9\nagent_type: codex\nprompt: debug\n\nclaimed_at: ${new Date(now - 11_000).toISOString()}\nstarted_at: ${new Date(now - 10_000).toISOString()}\n\n[attempted]\ncodex run\n\n[stdout]\nAnalyzing repository\nApplying fix\n\n[stderr]\nTests still failing\n\n[error]\nTests still failing`,
             exit_code: 1,
+            container_instance: "agent-session-session-timeline",
             created_at: now - 12_000,
             claimed_at: now - 11_000,
             started_at: now - 10_000,
@@ -1142,8 +1041,8 @@ Tests still failing`,
       }>;
     };
     expect(body.events.some((event) => event.type === "session_created")).toBe(true);
-    expect(body.events.some((event) => event.type === "run_queued")).toBe(true);
-    expect(body.events.some((event) => event.type === "run_claimed")).toBe(true);
+    expect(body.events.some((event) => event.type === "session_queued")).toBe(true);
+    expect(body.events.some((event) => event.type === "session_claimed")).toBe(true);
     expect(body.events.some((event) => event.type === "session_started")).toBe(true);
     expect(
       body.events.some(
@@ -1178,28 +1077,7 @@ Tests still failing`,
             source_number: 5,
             origin: "issue_assign",
             status: "success",
-            linked_run_id: "run-structured",
             created_at: now - 12_000,
-            started_at: now - 10_000,
-            completed_at: now - 1_000,
-            updated_at: now - 1_000
-          })
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-structured",
-            run_number: 11,
-            workflow_name: "Issue Bot",
-            trigger_event: "issue_created",
-            trigger_source_type: "issue",
-            trigger_source_number: 5,
-            status: "success",
-            logs: "[stdout]\nAnalyzing repository",
-            exit_code: 0,
-            created_at: now - 12_000,
-            claimed_at: now - 11_000,
             started_at: now - 10_000,
             completed_at: now - 1_000,
             updated_at: now - 1_000
@@ -1303,7 +1181,6 @@ Tests still failing`,
       username: "bob"
     });
     let sessionReadCount = 0;
-    let runReadCount = 0;
 
     const db = createMockD1Database([
       {
@@ -1320,21 +1197,8 @@ Tests still failing`,
           sessionReadCount += 1;
           return buildAgentSessionRow({
             id: "session-cancel",
-            linked_run_id: "run-2",
             status: sessionReadCount >= 2 ? "cancelled" : "queued",
             completed_at: sessionReadCount >= 2 ? Date.now() : null
-          });
-        }
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () => {
-          runReadCount += 1;
-          return buildActionRunRow({
-            id: "run-2",
-            run_number: 2,
-            status: runReadCount >= 2 ? "cancelled" : "queued",
-            completed_at: runReadCount >= 2 ? Date.now() : null
           });
         }
       },
@@ -1364,12 +1228,8 @@ Tests still failing`,
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      session: { status: string };
-      run: { status: string } | null;
-    };
+    const body = (await response.json()) as { session: { status: string } };
     expect(body.session.status).toBe("cancelled");
-    expect(body.run?.status).toBe("cancelled");
   });
 
   it("allows collaborators to create actions workflows", async () => {

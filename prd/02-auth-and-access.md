@@ -66,8 +66,8 @@
 
 ### 5.3 Agent 代表执行
 
-1. 用户从 Issue / PR / workflow 触发 run 或 session。
-2. 系统创建 linked run 与 session，并记录 `created_by` 与 `delegated_from`。
+1. 用户从 Issue / PR / workflow 触发一轮 Agent session。
+2. 系统创建 session，并记录 `created_by` 与 `delegated_from`。
 3. runtime 注入内部 token 与必要配置文件。
 4. Agent 在当前权限范围内 clone、push、评论、创建 PR。
 5. session 结束后保留 provenance 与 observability 数据，内部 token 不再继续复用。

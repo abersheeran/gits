@@ -43,10 +43,10 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 ### 2.3 与交付链的连接
 
 - Issue 详情会展示关联 PR。
-- 每个关联 PR 会展示最近 run/session 进展。
+- 每个关联 PR 会展示最近 session 进展。
 - Issue 页会展示关联 PR 的 validation summary 与 highlighted artifacts 摘要。
 - Issue 页不再铺开全文日志，全文入口统一回到 Actions 页或 Session detail。
-- Issue 详情只在存在 pending issue run、session、comment run 或关联 PR validation 时继续轮询刷新，避免无意义的前端重复请求。
+- Issue 详情只在存在 pending issue session、comment session 或关联 PR validation 时继续轮询刷新，避免无意义的前端重复请求。
 
 ### 2.4 Agent 与自动化入口
 
@@ -65,7 +65,7 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - Issue 关闭后收敛到 `done`
 - 若关联 open PR 仍在执行、仍有 unresolved thread、change request、validation/mergeability 问题，则倾向 `agent-working`
 - 若关联 open PR 已进入可人工判断或 merge-ready 阶段，则倾向 `waiting-human`
-- 若没有 open PR，则回退到 Issue 自身最近 run/session 的状态解释
+- 若没有 open PR，则回退到 Issue 自身最近 session 的状态解释
 - Issue 列表与详情返回前会先重算并回写涉及的 task status，保证单次读请求内状态一致
 
 ## 4. 当前关键流程
@@ -73,7 +73,7 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 ### 4.1 从 Issue 发起任务
 
 1. 人类创建 Issue，并补充验收标准。
-2. 系统可按仓库 workflow 自动创建 run/session。
+2. 系统可按仓库 workflow 自动创建 session。
 3. 用户也可以手动 assign/resume agent。
 
 ### 4.2 从对话继续推进
@@ -99,8 +99,8 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `POST /api/repos/:owner/:repo/issues/:number/assign-agent`
 - `POST /api/repos/:owner/:repo/issues/:number/resume-agent`
 - `GET /api/repos/:owner/:repo/pulls/provenance/latest`
-- `GET /api/repos/:owner/:repo/actions/runs/latest-by-comments`
 - `GET /api/repos/:owner/:repo/agent-sessions/latest`
+- `GET /api/repos/:owner/:repo/agent-sessions/latest-by-comments`
 
 ## 6. 当前数据模型
 
@@ -131,13 +131,13 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 
 ### 8.1 task center 已可用，但摘要仍偏首版
 
-- 已经有 task status、taskFlow、关联 PR、最新 run/session 和 validation summary。
+- 已经有 task status、taskFlow、关联 PR、最新 session 和 validation summary。
 - 但“当前最该看哪条验证、哪份 artifact、哪段 handoff”还不够稳定。
 
 ### 8.2 任务状态不是硬 override
 
 - 手动编辑 `task_status` 仍然允许。
-- 但后续 assign/resume、review thread、merge、run 完成等事件会自动覆盖。
+- 但后续 assign/resume、review thread、merge、session 完成等事件会自动覆盖。
 
 ### 8.3 事件语义仍偏粗
 

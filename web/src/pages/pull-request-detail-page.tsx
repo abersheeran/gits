@@ -930,7 +930,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
       });
       const nextProvenance = await getPullRequestProvenance(owner, repo, number).catch(() => null);
       setLatestAgentSession(response.session);
-      setLatestActionRun(response.run);
+      setLatestActionRun(response.run ?? response.session);
       if (nextProvenance) {
         setProvenanceDetail(nextProvenance.latestSession);
       }
@@ -951,7 +951,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const latestValidationSession = provenanceDetail?.session ?? latestAgentSession;
   const latestValidationState = latestValidationStatus(
     provenanceDetail,
-    latestActionRun,
     latestAgentSession
   );
   const validationSummary = provenanceDetail?.validationSummary ?? null;

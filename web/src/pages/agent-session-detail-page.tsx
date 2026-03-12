@@ -79,9 +79,6 @@ function buildActionsLink(owner: string, repo: string, sessionDetail: AgentSessi
   if (!sessionDetail) {
     return `/repo/${owner}/${repo}/actions`;
   }
-  if (sessionDetail.linkedRun) {
-    return `/repo/${owner}/${repo}/actions?sessionId=${sessionDetail.session.id}&runId=${sessionDetail.linkedRun.id}`;
-  }
   return `/repo/${owner}/${repo}/actions?sessionId=${sessionDetail.session.id}`;
 }
 
@@ -101,8 +98,8 @@ function usageLabel(record: AgentSessionUsageRecord): string {
       return "Duration";
     case "exit_code":
       return "Exit code";
-    case "run_log_chars":
-      return "Run logs";
+    case "log_chars":
+      return "Session logs";
     case "stdout_chars":
       return "Stdout";
     case "stderr_chars":
@@ -274,7 +271,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
     );
   }
 
-  const { session, linkedRun, sourceContext } = sessionDetail;
+  const { session, sourceContext } = sessionDetail;
   const { artifacts, usageRecords, interventions } = sessionDetail;
 
   return (
@@ -295,11 +292,6 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
         {sourceContext.url ? (
           <Button variant="outline" size="sm" asChild>
             <Link to={sourceContext.url}>Open source</Link>
-          </Button>
-        ) : null}
-        {linkedRun ? (
-          <Button variant="outline" size="sm" asChild>
-            <Link to={actionsLink}>View linked run</Link>
           </Button>
         ) : null}
         {canManageActions && canCancelAgentSession(session) ? (
@@ -434,32 +426,26 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Linked run</CardTitle>
+              <CardTitle className="text-base">Execution</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
-              {linkedRun ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">#{linkedRun.run_number}</Badge>
-                    <ActionStatusBadge status={linkedRun.status} />
-                    <Badge variant="outline">{linkedRun.instance_type}</Badge>
-                  </div>
-                  <p>
-                    Workflow: <span className="text-foreground">{linkedRun.workflow_name}</span>
-                  </p>
-                  <p>
-                    Exit code:{" "}
-                    <span className="text-foreground">
-                      {linkedRun.exit_code === null ? "-" : String(linkedRun.exit_code)}
-                    </span>
-                  </p>
-                  <p>
-                    Container: <span className="text-foreground">{linkedRun.container_instance ?? "-"}</span>
-                  </p>
-                </>
-              ) : (
-                <p>No linked action run.</p>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">#{session.session_number}</Badge>
+                <ActionStatusBadge status={session.status} />
+                <Badge variant="outline">{session.instance_type}</Badge>
+              </div>
+              <p>
+                Workflow: <span className="text-foreground">{session.workflow_name ?? "-"}</span>
+              </p>
+              <p>
+                Exit code:{" "}
+                <span className="text-foreground">
+                  {session.exit_code === null ? "-" : String(session.exit_code)}
+                </span>
+              </p>
+              <p>
+                Container: <span className="text-foreground">{session.container_instance ?? "-"}</span>
+              </p>
             </CardContent>
           </Card>
 

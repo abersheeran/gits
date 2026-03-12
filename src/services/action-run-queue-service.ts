@@ -1,10 +1,10 @@
-import type { ActionRunQueueMessage, AppBindings } from "../types";
+import type { AgentSessionQueueMessage, AppBindings } from "../types";
 import { executeActionRun } from "./action-runner-service";
-import { ActionsService } from "./actions-service";
 import { AuthService } from "./auth-service";
+import { AgentSessionService } from "./agent-session-service";
 import { RepositoryService } from "./repository-service";
 
-function isActionRunQueueMessage(value: unknown): value is ActionRunQueueMessage {
+function isActionRunQueueMessage(value: unknown): value is AgentSessionQueueMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -12,8 +12,8 @@ function isActionRunQueueMessage(value: unknown): value is ActionRunQueueMessage
   return (
     typeof payload.repositoryId === "string" &&
     payload.repositoryId.length > 0 &&
-    typeof payload.runId === "string" &&
-    payload.runId.length > 0 &&
+    typeof payload.sessionId === "string" &&
+    payload.sessionId.length > 0 &&
     typeof payload.requestOrigin === "string" &&
     payload.requestOrigin.length > 0
   );
@@ -21,7 +21,7 @@ function isActionRunQueueMessage(value: unknown): value is ActionRunQueueMessage
 
 export async function enqueueActionRunExecution(
   env: Pick<AppBindings, "ACTIONS_QUEUE">,
-  message: ActionRunQueueMessage
+  message: AgentSessionQueueMessage
 ): Promise<boolean> {
   if (!env.ACTIONS_QUEUE) {
     return false;
@@ -44,7 +44,7 @@ export async function consumeActionRunQueueMessage(input: {
     | "ACTIONS_RUNNER_STANDARD_3"
     | "ACTIONS_RUNNER_STANDARD_4"
   >;
-  message: ActionRunQueueMessage;
+  message: AgentSessionQueueMessage;
 }): Promise<void> {
   const repositoryService = new RepositoryService(input.env.DB);
   const repository = await repositoryService.findRepositoryById(input.message.repositoryId);
@@ -52,31 +52,20 @@ export async function consumeActionRunQueueMessage(input: {
     return;
   }
 
-  const actionsService = new ActionsService(input.env.DB);
-  const run = await actionsService.findRunById(repository.id, input.message.runId);
-  if (!run || run.status !== "queued") {
+  const agentSessionService = new AgentSessionService(input.env.DB);
+  const session = await agentSessionService.findSessionById(repository.id, input.message.sessionId);
+  if (!session || session.status !== "queued") {
     return;
   }
 
   const authService = new AuthService(input.env.DB, input.env.JWT_SECRET);
   const triggeredByUser =
-    run.triggered_by !== null ? await authService.getUserById(run.triggered_by) : null;
+    session.created_by !== null ? await authService.getUserById(session.created_by) : null;
 
   await executeActionRun({
     env: input.env,
     repository,
-    run: {
-      id: run.id,
-      run_number: run.run_number,
-      repository_id: run.repository_id,
-      agent_type: run.agent_type,
-      instance_type: run.instance_type ?? "lite",
-      prompt: run.prompt,
-      trigger_ref: run.trigger_ref,
-      trigger_sha: run.trigger_sha,
-      trigger_source_type: run.trigger_source_type,
-      trigger_source_number: run.trigger_source_number
-    },
+    session,
     ...(triggeredByUser ? { triggeredByUser } : {}),
     requestOrigin: input.message.requestOrigin
   });
@@ -112,7 +101,7 @@ export async function consumeActionRunQueueBatch(input: {
       });
       queueMessage.ack();
     } catch (error) {
-      console.error("consume action run queue message failed", error);
+      console.error("consume agent session queue message failed", error);
       queueMessage.retry();
     }
   }

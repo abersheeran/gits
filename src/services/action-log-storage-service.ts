@@ -3,7 +3,7 @@ const LOG_EXCERPT_HEAD_CHARS = 2_400;
 const LOG_EXCERPT_TAIL_CHARS = 1_200;
 const LOG_EXCERPT_MARKER = "\n\n...[truncated, open full logs for complete output]...\n\n";
 
-export type AgentLogArtifactKind = "run_logs" | "stdout" | "stderr";
+export type AgentLogArtifactKind = "session_logs" | "stdout" | "stderr";
 
 export function buildLogExcerpt(value: string, maxChars = LOG_EXCERPT_MAX_CHARS): string {
   if (value.length <= maxChars) {
@@ -29,8 +29,8 @@ export class ActionLogStorageService {
     return typeof this.bucket?.put === "function";
   }
 
-  buildRunLogKey(repositoryId: string, runId: string): string {
-    return `repositories/${repositoryId}/runs/${runId}/full.log`;
+  buildSessionLogKey(repositoryId: string, sessionId: string): string {
+    return `repositories/${repositoryId}/sessions/${sessionId}/full.log`;
   }
 
   buildSessionArtifactLogKey(
@@ -41,19 +41,31 @@ export class ActionLogStorageService {
     return `repositories/${repositoryId}/sessions/${sessionId}/artifacts/${kind}.log`;
   }
 
-  async writeRunLogs(repositoryId: string, runId: string, content: string): Promise<void> {
+  buildRunLogKey(repositoryId: string, runId: string): string {
+    return this.buildSessionLogKey(repositoryId, runId);
+  }
+
+  async writeSessionLogs(repositoryId: string, sessionId: string, content: string): Promise<void> {
     if (!this.canWrite()) {
       return;
     }
-    await this.bucket.put(this.buildRunLogKey(repositoryId, runId), content);
+    await this.bucket.put(this.buildSessionLogKey(repositoryId, sessionId), content);
   }
 
-  async readRunLogs(repositoryId: string, runId: string): Promise<string | null> {
+  async readSessionLogs(repositoryId: string, sessionId: string): Promise<string | null> {
     if (!this.canRead()) {
       return null;
     }
-    const object = await this.bucket.get(this.buildRunLogKey(repositoryId, runId));
+    const object = await this.bucket.get(this.buildSessionLogKey(repositoryId, sessionId));
     return object ? object.text() : null;
+  }
+
+  async writeRunLogs(repositoryId: string, runId: string, content: string): Promise<void> {
+    await this.writeSessionLogs(repositoryId, runId, content);
+  }
+
+  async readRunLogs(repositoryId: string, runId: string): Promise<string | null> {
+    return this.readSessionLogs(repositoryId, runId);
   }
 
   async writeSessionArtifactLogs(

@@ -1,4 +1,9 @@
-import type { AuthUser, AgentSessionValidationReport, RepositoryRecord } from "../types";
+import type {
+  AgentSessionRecord,
+  AgentSessionValidationReport,
+  AuthUser,
+  RepositoryRecord
+} from "../types";
 import { AgentSessionService } from "./agent-session-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
@@ -547,21 +552,23 @@ export async function executeActionRun(input: {
     ACTIONS_RUNNER_STANDARD_4?: DurableObjectNamespace;
   };
   repository: RepositoryRecord;
-  run: {
-    id: string;
-    run_number: number;
-    repository_id: string;
-    agent_type: "codex" | "claude_code";
-    instance_type: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
-    prompt: string;
-    trigger_ref: string | null;
-    trigger_sha: string | null;
-    trigger_source_type: "issue" | "pull_request" | null;
-    trigger_source_number: number | null;
-  };
+  session: AgentSessionRecord;
   triggeredByUser?: AuthUser;
   requestOrigin: string;
 }): Promise<void> {
+  const run = {
+    id: input.session.id,
+    run_number: input.session.session_number,
+    repository_id: input.session.repository_id,
+    agent_type: input.session.agent_type,
+    instance_type: input.session.instance_type,
+    prompt: input.session.prompt,
+    trigger_ref: input.session.trigger_ref,
+    trigger_sha: input.session.trigger_sha,
+    trigger_source_type:
+      input.session.source_type === "manual" ? null : input.session.source_type,
+    trigger_source_number: input.session.source_number
+  } as const;
   const actionsService = new ActionsService(input.env.DB);
   const actionLogStorage = new ActionLogStorageService(input.env.ACTION_LOGS_BUCKET ?? input.env.GIT_BUCKET);
   const agentSessionService = new AgentSessionService(input.env.DB, actionLogStorage);
@@ -580,29 +587,28 @@ export async function executeActionRun(input: {
   };
   const reconcileSourceTaskStatus = async (): Promise<string | null> => {
     if (
-      (input.run.trigger_source_type !== "issue" &&
-        input.run.trigger_source_type !== "pull_request") ||
-      input.run.trigger_source_number === null
+      (run.trigger_source_type !== "issue" && run.trigger_source_type !== "pull_request") ||
+      run.trigger_source_number === null
     ) {
       return null;
     }
     try {
       await workflowTaskFlowService.reconcileSourceTaskStatus({
         repository: input.repository,
-        sourceType: input.run.trigger_source_type,
-        sourceNumber: input.run.trigger_source_number
+        sourceType: run.trigger_source_type,
+        sourceNumber: run.trigger_source_number
       });
       return null;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown reconciliation error";
       console.error("action run status reconciliation failed", {
         repositoryId: input.repository.id,
-        runId: input.run.id,
-        sourceType: input.run.trigger_source_type,
-        sourceNumber: input.run.trigger_source_number,
+        runId: run.id,
+        sourceType: run.trigger_source_type,
+        sourceNumber: run.trigger_source_number,
         error: message
       });
-      return `source=${input.run.trigger_source_type} #${input.run.trigger_source_number}: ${message}`;
+      return `source=${run.trigger_source_type} #${run.trigger_source_number}: ${message}`;
     }
   };
   const finalizeRun = async (args: {
@@ -613,12 +619,12 @@ export async function executeActionRun(input: {
   }): Promise<void> => {
     let finalLogs = args.logs;
     try {
-      await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, finalLogs);
+      await actionLogStorage.writeRunLogs(input.repository.id, run.id, finalLogs);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown log storage error";
       finalLogs = appendRunLogSection(finalLogs, "log_storage_warning", message);
     }
-    await actionsService.completeRun(input.repository.id, input.run.id, {
+    await actionsService.completeRun(input.repository.id, run.id, {
       status: args.status,
       logs: buildLogExcerpt(finalLogs),
       exitCode: args.exitCode ?? null
@@ -629,34 +635,30 @@ export async function executeActionRun(input: {
       : finalLogs;
     if (finalLogs !== args.logs) {
       try {
-        await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, finalLogs);
+        await actionLogStorage.writeRunLogs(input.repository.id, run.id, finalLogs);
       } catch {
         // Keep the run result even if the final warning line cannot be persisted to object storage.
       }
-      await actionsService.replaceRunLogs(
-        input.repository.id,
-        input.run.id,
-        buildLogExcerpt(finalLogs)
-      );
+      await actionsService.replaceRunLogs(input.repository.id, run.id, buildLogExcerpt(finalLogs));
     }
     await recordRunObservability({
       repositoryId: input.repository.id,
-      runId: input.run.id,
+      runId: run.id,
       logs: finalLogs,
       ...(args.result ? { result: args.result } : {})
     });
   };
-  const containerInstance = `action-run-${input.run.id}`;
-  const instanceType = input.run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
+  const containerInstance = `agent-session-${run.id}`;
+  const instanceType = run.instance_type ?? DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE;
   const actionsRunner = getActionRunnerNamespace(input.env, instanceType);
   let redactLogs = createSecretRedactor();
 
   if (!actionsRunner) {
     const logs = buildRunLogs({
-      runId: input.run.id,
-      runNumber: input.run.run_number,
-      agentType: input.run.agent_type,
-      prompt: input.run.prompt,
+      runId: run.id,
+      runNumber: run.run_number,
+      agentType: run.agent_type,
+      prompt: run.prompt,
       errorMessage: `Actions runner binding is not configured for instance type '${instanceType}'`,
       redactText: redactLogs
     });
@@ -667,7 +669,7 @@ export async function executeActionRun(input: {
     return;
   }
 
-  let claimedAt = await actionsService.claimQueuedRun(input.repository.id, input.run.id, containerInstance);
+  let claimedAt = await actionsService.claimQueuedRun(input.repository.id, run.id, containerInstance);
   if (claimedAt === null) {
     return;
   }
@@ -677,12 +679,7 @@ export async function executeActionRun(input: {
 
   try {
     const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
-    let agentSession = null;
-    try {
-      agentSession = await agentSessionService.findSessionByRunId(input.repository.id, input.run.id);
-    } catch {
-      // Session metadata enriches the runtime but should not block execution.
-    }
+    const agentSession = input.session;
     const repositoryOrigin = normalizeCloneOrigin({
       requestOrigin: input.requestOrigin
     });
@@ -692,22 +689,20 @@ export async function executeActionRun(input: {
     const needsIssueReplyToken =
       input.triggeredByUser !== undefined &&
       canIssueComment &&
-      (input.run.trigger_source_type === "issue" ||
-        input.run.prompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER));
+      (run.trigger_source_type === "issue" || run.prompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER));
     const needsPrCreateToken =
       input.triggeredByUser !== undefined &&
       canCreatePr &&
-      (input.run.trigger_source_type === "issue" ||
-        input.run.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER));
+      (run.trigger_source_type === "issue" || run.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER));
     const envVars: Record<string, string> = {
-      GITS_ACTION_RUN_ID: input.run.id,
-      GITS_ACTION_RUN_NUMBER: String(input.run.run_number),
+      GITS_ACTION_RUN_ID: run.id,
+      GITS_ACTION_RUN_NUMBER: String(run.run_number),
       GITS_REPOSITORY: `${input.repository.owner_username}/${input.repository.name}`,
       GITS_PLATFORM_API_BASE: repositoryOrigin,
       GITS_REPOSITORY_OWNER: input.repository.owner_username,
       GITS_REPOSITORY_NAME: input.repository.name,
-      ...(input.run.trigger_source_type === "issue" && input.run.trigger_source_number !== null
-        ? { GITS_TRIGGER_ISSUE_NUMBER: String(input.run.trigger_source_number) }
+      ...(run.trigger_source_type === "issue" && run.trigger_source_number !== null
+        ? { GITS_TRIGGER_ISSUE_NUMBER: String(run.trigger_source_number) }
         : {}),
       ...(agentSession
         ? {
@@ -734,18 +729,18 @@ export async function executeActionRun(input: {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        agentType: input.run.agent_type,
-        prompt: input.run.prompt,
+        agentType: run.agent_type,
+        prompt: run.prompt,
         repositoryId: input.repository.id,
-        runId: input.run.id,
+        runId: run.id,
         containerInstance,
         repositoryUrl: `${repositoryOrigin}/${input.repository.owner_username}/${input.repository.name}.git`,
-        ref: input.run.trigger_ref ?? undefined,
-        sha: input.run.trigger_sha ?? undefined,
-        runNumber: input.run.run_number,
+        ref: run.trigger_ref ?? undefined,
+        sha: run.trigger_sha ?? undefined,
+        runNumber: run.run_number,
         triggeredByUserId: input.triggeredByUser?.id,
         triggeredByUsername: input.triggeredByUser?.username,
-        triggerSourceType: input.run.trigger_source_type,
+        triggerSourceType: run.trigger_source_type,
         enableIssueReplyToken: needsIssueReplyToken,
         enablePrCreateToken: needsPrCreateToken,
         allowGitPush: canGitPush,
@@ -767,23 +762,23 @@ export async function executeActionRun(input: {
       throw new Error("Container lifecycle hooks did not report run start time");
     }
     let initialLogs = buildRunLogs({
-      runId: input.run.id,
-      runNumber: input.run.run_number,
-      agentType: input.run.agent_type,
-      prompt: input.run.prompt,
+      runId: run.id,
+      runNumber: run.run_number,
+      agentType: run.agent_type,
+      prompt: run.prompt,
       claimedAt,
       startedAt,
       redactText: redactLogs
     });
     try {
-      await actionLogStorage.writeRunLogs(input.repository.id, input.run.id, initialLogs);
+      await actionLogStorage.writeRunLogs(input.repository.id, run.id, initialLogs);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown log storage error";
       initialLogs = appendRunLogSection(initialLogs, "log_storage_warning", message);
     }
     await actionsService.updateRunningRunLogs(
       input.repository.id,
-      input.run.id,
+      run.id,
       buildLogExcerpt(initialLogs)
     );
 
@@ -792,10 +787,10 @@ export async function executeActionRun(input: {
           actionsService,
           logStorage: actionLogStorage,
           repositoryId: input.repository.id,
-          runId: input.run.id,
-        runNumber: input.run.run_number,
-        agentType: input.run.agent_type,
-        prompt: input.run.prompt,
+          runId: run.id,
+        runNumber: run.run_number,
+        agentType: run.agent_type,
+        prompt: run.prompt,
         claimedAt,
         startedAt,
         response: runnerResponse,
@@ -816,10 +811,10 @@ export async function executeActionRun(input: {
 
     if (!runnerResponse.ok) {
       const logs = buildRunLogs({
-        runId: input.run.id,
-        runNumber: input.run.run_number,
-        agentType: input.run.agent_type,
-        prompt: input.run.prompt,
+        runId: run.id,
+        runNumber: run.run_number,
+        agentType: run.agent_type,
+        prompt: run.prompt,
         claimedAt,
         startedAt,
         result: runnerResult,
@@ -837,10 +832,10 @@ export async function executeActionRun(input: {
 
     const exitCode = runnerResult.exitCode ?? -1;
     const logs = buildRunLogs({
-      runId: input.run.id,
-      runNumber: input.run.run_number,
-      agentType: input.run.agent_type,
-      prompt: input.run.prompt,
+      runId: run.id,
+      runNumber: run.run_number,
+      agentType: run.agent_type,
+      prompt: run.prompt,
       claimedAt,
       startedAt,
       result: runnerResult,
@@ -856,10 +851,10 @@ export async function executeActionRun(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown runner error";
     const logs = buildRunLogs({
-      runId: input.run.id,
-      runNumber: input.run.run_number,
-      agentType: input.run.agent_type,
-      prompt: input.run.prompt,
+      runId: run.id,
+      runNumber: run.run_number,
+      agentType: run.agent_type,
+      prompt: run.prompt,
       claimedAt,
       startedAt,
       ...(runnerResult ? { result: runnerResult } : {}),

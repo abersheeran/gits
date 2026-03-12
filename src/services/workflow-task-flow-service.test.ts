@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  ActionRunRecord,
   AgentSessionRecord,
   IssueLinkedPullRequestRecord,
   IssueRecord,
@@ -8,7 +7,6 @@ import type {
   RepositoryRecord
 } from "../types";
 import { createMockD1Database } from "../test-utils/mock-d1";
-import { ActionsService } from "./actions-service";
 import { AgentSessionService } from "./agent-session-service";
 import { StorageService } from "./storage-service";
 import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
@@ -68,58 +66,41 @@ function buildLinkedPullRequest(overrides?: Partial<IssueLinkedPullRequestRecord
   };
 }
 
-function buildRun(status: ActionRunRecord["status"], updatedAt = 1): ActionRunRecord {
-  return {
-    id: `run-${status}-${updatedAt}`,
-    repository_id: "repo-1",
-    run_number: 1,
-    workflow_id: "workflow-1",
-    workflow_name: "workflow",
-    trigger_event: "mention_actions",
-    trigger_ref: null,
-    trigger_sha: null,
-    trigger_source_type: "issue",
-    trigger_source_number: 1,
-    trigger_source_comment_id: null,
-    triggered_by: null,
-    triggered_by_username: null,
-    status,
-    agent_type: "codex",
-    instance_type: "lite",
-    prompt: "do the work",
-    logs: "",
-    exit_code: null,
-    container_instance: null,
-    created_at: updatedAt,
-    claimed_at: null,
-    started_at: null,
-    completed_at: null,
-    updated_at: updatedAt
-  };
-}
-
 function buildSession(status: AgentSessionRecord["status"], updatedAt = 1): AgentSessionRecord {
   return {
     id: `session-${status}-${updatedAt}`,
     repository_id: "repo-1",
+    session_number: updatedAt,
+    run_number: updatedAt,
     source_type: "issue",
     source_number: 1,
     source_comment_id: null,
+    trigger_source_type: "issue",
+    trigger_source_number: 1,
+    trigger_source_comment_id: null,
     origin: "issue_assign",
     status,
     agent_type: "codex",
+    instance_type: "lite",
     prompt: "do the work",
     branch_ref: null,
     trigger_ref: null,
     trigger_sha: null,
     workflow_id: null,
     workflow_name: null,
+    parent_session_id: null,
     linked_run_id: null,
     created_by: null,
     created_by_username: null,
     delegated_from_user_id: null,
     delegated_from_username: null,
+    triggered_by: null,
+    triggered_by_username: null,
+    logs: "",
+    exit_code: null,
+    container_instance: null,
     created_at: updatedAt,
+    claimed_at: null,
     started_at: null,
     completed_at: null,
     updated_at: updatedAt
@@ -166,7 +147,6 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("marks open issues without active work as open", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([]);
     vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildIssueTaskFlow({
@@ -180,10 +160,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("marks issues with a running direct execution as agent-working", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("running", 10)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("running", 10)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildIssueTaskFlow({
       repository: buildRepository(),
@@ -196,7 +175,6 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("marks issues with a finished direct execution as waiting-human", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([]);
     vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
       buildSession("success", 20)
     ]);
@@ -212,10 +190,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("keeps issues on the agent when the latest direct execution failed", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("failed", 20)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("failed", 20)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildIssueTaskFlow({
       repository: buildRepository(),
@@ -229,10 +206,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("keeps pull requests on the agent when review threads are still open", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("success", 10)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("success", 10)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildPullRequestTaskFlow({
       repository: buildRepository(),
@@ -252,10 +228,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("keeps pull requests on the agent when the latest validation failed", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("failed", 10)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("failed", 10)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildPullRequestTaskFlow({
       repository: buildRepository(),
@@ -272,10 +247,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("marks merge-ready pull requests as waiting-human", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("success", 10)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("success", 10)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildPullRequestTaskFlow({
       repository: buildRepository(),
@@ -292,7 +266,6 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("marks merged pull requests as having no active blocker", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([]);
     vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildPullRequestTaskFlow({
@@ -352,10 +325,9 @@ describe("WorkflowTaskFlowService", () => {
   });
 
   it("prefers the first open non-done closing issue as the primary issue", async () => {
-    vi.spyOn(ActionsService.prototype, "listLatestRunsBySource").mockResolvedValue([
-      buildRun("success", 10)
+    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([
+      buildSession("success", 10)
     ]);
-    vi.spyOn(AgentSessionService.prototype, "listLatestSessionsBySource").mockResolvedValue([]);
 
     const flow = await createService().buildPullRequestTaskFlow({
       repository: buildRepository(),

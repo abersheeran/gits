@@ -4,9 +4,9 @@
 
 Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可追踪执行”：
 
-- workflow 决定何时创建 run。
-- run 决定何时调用 runtime。
-- session 决定如何把一次执行沉淀为可回看的任务上下文。
+- workflow 决定何时创建 session。
+- session 决定何时调用 runtime。
+- session 也负责把一次执行沉淀为可回看的任务上下文。
 
 当前产品视角里，session 是核心对象，workflow 是触发机制。
 
@@ -38,14 +38,14 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 - `mention_actions`
 
-当前支持的 session / run 入口包括：
+当前支持的 session 入口包括：
 
 - workflow 自动触发
 - `@actions` mention
 - issue assign
 - issue resume
 - PR resume
-- run rerun
+- session rerun
 - workflow dispatch
 
 ### 2.3 执行层
@@ -53,8 +53,8 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - Queue 优先调度，无法入队时可直接执行
 - Cloudflare Containers 承担 agent runtime
 - actions container 的运行状态通过 Cloudflare Containers 生命周期钩子同步：
-  - `onStart` 将 run / session 推进到 `running`
-  - `onStop` / `onError` 会在 run 尚未完成时补写失败结果
+  - `onStart` 将 session 推进到 `running`
+  - `onStop` / `onError` 会在 session 尚未完成时补写失败结果
   - 不再依赖容器内状态服务对外暴露状态供平台轮询
 - 平台 Worker 直接暴露 HTTP MCP endpoint，供 actions runtime 与本地 agent 共用
 - 不同实例规格使用不同 DO 绑定
@@ -69,8 +69,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ### 2.4 记录层
 
-- `action_runs` 记录 run 状态、来源、配置和 excerpt
-- `agent_sessions` 记录 source、origin、branch、workflow、linked run
+- `agent_sessions` 记录 source、origin、branch、workflow、执行状态和日志 excerpt
 - `agent_session_steps`、`artifacts`、`usage_records`、`interventions` 用于沉淀执行过程
 - 全量日志和全文 artifact 存在 `ACTION_LOGS_BUCKET`，D1 只保留 excerpt
 
@@ -85,16 +84,17 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ## 3. 当前已实现能力
 
-### 3.1 Run 与 Session
+### 3.1 Session 执行模型
 
-- run 状态：
+- session 状态：
   - `queued`
   - `running`
   - `success`
   - `failed`
   - `cancelled`
-- run / session 的状态推进由平台与 Cloudflare container 生命周期协同完成，而不是由容器内 HTTP 状态接口回传
-- session 作为一等对象存在，并可与 run 关联
+- session 的状态推进由平台与 Cloudflare container 生命周期协同完成，而不是由容器内 HTTP 状态接口回传
+- `session = 一次面向某个 Issue / PR / manual 入口的 Agent 任务轮次`
+- assign / resume / rerun / dispatch 都会创建新的 session，而不是附着到旧 run
 - Session detail 已支持：
   - hero summary
   - source / handoff
@@ -111,7 +111,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ### 3.3 运行时输出
 
-- stdout / stderr / run logs excerpt
+- stdout / stderr / session logs excerpt
 - artifacts excerpt
 - usage records
 - interventions
@@ -131,7 +131,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ### 3.5 摘要回流
 
-- Issue 与 PR 页面会直接消费最近 run/session 的摘要
+- Issue 与 PR 页面会直接消费最近 session 的摘要
 - validation summary 优先消费 structured validation report
 - 若缺失 structured report，则回退到日志中对 tests/build/lint 的命令识别
 - 当前支持：
@@ -142,8 +142,8 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 ### 3.6 主流程状态协调
 
-- 若 run 来源是 `issue` 或 `pull_request`，完成后会自动触发 Issue task status 回流
-- 回流失败不会覆盖 run 原始结果，但会留下 warning 供排障
+- 若 session 来源是 `issue` 或 `pull_request`，完成后会自动触发 Issue task status 回流
+- 回流失败不会覆盖 session 原始结果，但会留下 warning 供排障
 
 ## 4. 当前关键流程
 
@@ -151,21 +151,21 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 1. issue 创建、PR 创建或 push 发生。
 2. 系统匹配启用的 workflow。
-3. 创建 run，并同步创建 linked session。
+3. 直接创建 session。
 4. runtime 执行并回写结果。
 
 ### 4.2 交互式继续
 
 1. 用户从 Issue、PR 或 review thread 点击继续 Agent。
-2. 系统创建内部 workflow 对应的 run/session。
+2. 系统创建内部 workflow 对应的 session。
 3. prompt 会带入 Issue/PR/Review 上下文、验收标准和必要 token。
 4. 执行结果以 handoff 摘要形式回流到 Issue / PR。
 
 ### 4.3 观测与回看
 
-1. Actions 页以 run 为主视图，支持筛选、查看日志、rerun。
-2. 未展开日志的 pending run 走后台轮询；已展开且仍在运行的 run 直接建立日志流，流关闭或报错后再回退后台 refresh。
-3. 当流式日志里的本地 run 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
+1. Actions 页以 session 为主视图，支持筛选、查看日志、rerun。
+2. 未展开日志的 pending session 走后台轮询；已展开且仍在运行的 session 直接建立日志流，流关闭或报错后再回退后台 refresh。
+3. 当流式日志里的本地 session 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
 4. Session detail 负责查看 timeline、artifact、usage、intervention 与 prompt。
 5. 全文日志与全文 artifact 按需读取对象存储。
 
@@ -179,28 +179,24 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `GET /api/repos/:owner/:repo/actions/workflows`
 - `POST /api/repos/:owner/:repo/actions/workflows`
 - `PATCH /api/repos/:owner/:repo/actions/workflows/:workflowId`
-- `GET /api/repos/:owner/:repo/actions/runs`
-- `GET /api/repos/:owner/:repo/actions/runs/latest`
-- `GET /api/repos/:owner/:repo/actions/runs/latest-by-comments`
-- `GET /api/repos/:owner/:repo/actions/runs/:runId`
-- `GET /api/repos/:owner/:repo/actions/runs/:runId/logs`
-- `GET /api/repos/:owner/:repo/actions/runs/:runId/logs/stream`
-- `POST /api/repos/:owner/:repo/actions/runs/:runId/rerun`
 - `POST /api/repos/:owner/:repo/actions/workflows/:workflowId/dispatch`
 - `GET /api/repos/:owner/:repo/agent-sessions`
 - `GET /api/repos/:owner/:repo/agent-sessions/latest`
+- `GET /api/repos/:owner/:repo/agent-sessions/latest-by-comments`
 - `GET /api/repos/:owner/:repo/agent-sessions/:sessionId`
+- `GET /api/repos/:owner/:repo/agent-sessions/:sessionId/logs`
+- `GET /api/repos/:owner/:repo/agent-sessions/:sessionId/logs/stream`
 - `GET /api/repos/:owner/:repo/agent-sessions/:sessionId/timeline`
 - `GET /api/repos/:owner/:repo/agent-sessions/:sessionId/artifacts`
 - `GET /api/repos/:owner/:repo/agent-sessions/:sessionId/artifacts/:artifactId/content`
 - `POST /api/repos/:owner/:repo/agent-sessions/:sessionId/cancel`
+- `POST /api/repos/:owner/:repo/agent-sessions/:sessionId/rerun`
 
 ## 6. 当前数据模型
 
 - `global_settings`
 - `repository_actions_configs`
 - `action_workflows`
-- `action_runs`
 - `agent_sessions`
 - `agent_session_steps`
 - `agent_session_artifacts`
@@ -222,7 +218,6 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `src/routes/api/platform-routes.ts`
 - `src/routes/api/actions-routes.ts`
 - `src/routes/api/actions-workflow-routes.ts`
-- `src/routes/api/actions-run-routes.ts`
 - `src/routes/api/actions-session-routes.ts`
 - `src/routes/api/shared.ts`
 - `src/routes/api/actions-routes.test.ts`

@@ -87,7 +87,14 @@ function runSourceLabel(run: ActionRunRecord): string {
   if (run.trigger_source_type && run.trigger_source_number) {
     return `${run.trigger_source_type} #${run.trigger_source_number}`;
   }
-  return run.trigger_event;
+  if (run.source_number !== null) {
+    return `${run.source_type} #${run.source_number}`;
+  }
+  return run.workflow_name ?? run.origin;
+}
+
+function runGroupLabel(run: ActionRunRecord): string {
+  return run.workflow_name ?? run.origin ?? "session";
 }
 
 function sessionSourceLabel(session: AgentSessionRecord): string {
@@ -114,7 +121,10 @@ function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
 function insertOrReplaceRun(currentRuns: ActionRunRecord[], nextRun: ActionRunRecord): ActionRunRecord[] {
   const existingIndex = currentRuns.findIndex((run) => run.id === nextRun.id);
   if (existingIndex === -1) {
-    return [...currentRuns, nextRun].sort((left, right) => right.run_number - left.run_number);
+    return [...currentRuns, nextRun].sort(
+      (left, right) =>
+        (right.run_number ?? right.session_number) - (left.run_number ?? left.session_number)
+    );
   }
 
   return currentRuns.map((run) => (run.id === nextRun.id ? nextRun : run));
@@ -156,7 +166,10 @@ function mergeRuns(currentRuns: ActionRunRecord[], nextRuns: ActionRunRecord[]):
     }
   }
 
-  return Array.from(mergedRuns.values()).sort((left, right) => right.run_number - left.run_number);
+  return Array.from(mergedRuns.values()).sort(
+    (left, right) =>
+      (right.run_number ?? right.session_number) - (left.run_number ?? left.session_number)
+  );
 }
 
 function isActionRunRecord(value: unknown): value is ActionRunRecord {
@@ -406,7 +419,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
               .filter(
                 (run, index, array) => array.findIndex((item) => item.id === run.id) === index
               )
-              .sort((left, right) => right.run_number - left.run_number);
+              .sort(
+                (left, right) =>
+                  (right.run_number ?? right.session_number) -
+                  (left.run_number ?? left.session_number)
+              );
           } catch {
             // Ignore missing run and keep default list.
           }
@@ -528,7 +545,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     [runs]
   );
   const eventOptions = useMemo(
-    () => ["all", ...Array.from(new Set(runs.map((run) => run.trigger_event))).sort()],
+    () => ["all", ...Array.from(new Set(runs.map((run) => runGroupLabel(run)))).sort()],
     [runs]
   );
   const refOptions = useMemo(
@@ -547,7 +564,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         if (statusFilter !== "all" && run.status !== statusFilter) {
           return false;
         }
-        if (eventFilter !== "all" && run.trigger_event !== eventFilter) {
+        if (eventFilter !== "all" && runGroupLabel(run) !== eventFilter) {
           return false;
         }
         if (refFilter !== "all" && run.trigger_ref !== refFilter) {
@@ -566,9 +583,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const groupedRuns = useMemo(() => {
     const groups = new Map<string, ActionRunRecord[]>();
     for (const run of filteredRuns) {
-      const current = groups.get(run.workflow_name) ?? [];
+      const groupLabel = runGroupLabel(run);
+      const current = groups.get(groupLabel) ?? [];
       current.push(run);
-      groups.set(run.workflow_name, current);
+      groups.set(groupLabel, current);
     }
     return Array.from(groups.entries()).sort((left, right) => {
       const latestLeft = left[1][0]?.run_number ?? 0;
@@ -1208,7 +1226,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                             <p>Branch: {selectedAgentSession.branch_ref ?? "-"}</p>
                             <p>Updated: {formatDateTime(selectedAgentSession.updated_at)}</p>
                             <p>Session: {selectedAgentSession.id}</p>
-                            <p>Linked run: {selectedAgentSession.linked_run_id ?? "-"}</p>
+                            <p>Parent session: {selectedAgentSession.parent_session_id ?? "-"}</p>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             This panel stays focused on source, status, and handoff. Prompt and full execution
@@ -1216,9 +1234,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {selectedAgentSession.linked_run_id ? (
+                          {selectedAgentSession.parent_session_id ? (
                             <Button size="sm" variant="outline" asChild>
-                              <Link to={`?runId=${selectedAgentSession.linked_run_id}`}>Open linked run</Link>
+                              <Link to={`?sessionId=${selectedAgentSession.parent_session_id}`}>
+                                Open parent session
+                              </Link>
                             </Button>
                           ) : null}
                           <Button size="sm" variant="outline" asChild>
@@ -1279,10 +1299,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                               View session
                             </Link>
                           </Button>
-                          {session.linked_run_id ? (
+                          {session.parent_session_id ? (
                             <Button size="sm" variant="outline" asChild>
-                              <Link to={`?runId=${session.linked_run_id}`}>
-                                View run
+                              <Link to={`?sessionId=${session.parent_session_id}`}>
+                                View parent
                               </Link>
                             </Button>
                           ) : null}
@@ -1460,7 +1480,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
                                     <p>Actor: {run.triggered_by_username ?? "-"}</p>
                                     <p>Ref: {run.trigger_ref ?? "-"}</p>
                                     <p>SHA: {run.trigger_sha ?? "-"}</p>
-                                    <p>Event: {run.trigger_event}</p>
+                                    <p>Workflow: {run.workflow_name ?? "-"}</p>
                                   </div>
                                 </div>
                                 <div className="rounded-md border bg-muted/20 p-3">

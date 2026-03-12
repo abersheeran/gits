@@ -83,25 +83,25 @@ export type ActionContainerInstanceType =
   | "standard-3"
   | "standard-4";
 
-export type ActionRunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
-export type ActionRunSourceType = "issue" | "pull_request";
-
-export type AgentSessionStatus = ActionRunStatus;
+export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
+export type AgentSessionExecutionSourceType = "issue" | "pull_request";
+export type ActionRunStatus = AgentSessionStatus;
+export type ActionRunSourceType = AgentSessionExecutionSourceType;
 
 export type AgentSessionStepKind =
   | "session_created"
-  | "run_queued"
-  | "run_claimed"
+  | "session_queued"
+  | "session_claimed"
   | "session_started"
   | "session_completed"
   | "session_cancelled";
 
-export type AgentSessionArtifactKind = "run_logs" | "stdout" | "stderr";
+export type AgentSessionArtifactKind = "session_logs" | "stdout" | "stderr";
 
 export type AgentSessionUsageKind =
   | "duration_ms"
   | "exit_code"
-  | "run_log_chars"
+  | "log_chars"
   | "stdout_chars"
   | "stderr_chars";
 
@@ -117,9 +117,9 @@ export type AgentSessionValidationCheckStatus =
   | "skipped"
   | "partial";
 
-export type ActionRunQueueMessage = {
+export type AgentSessionQueueMessage = {
   repositoryId: string;
-  runId: string;
+  sessionId: string;
   requestOrigin: string;
 };
 
@@ -318,36 +318,6 @@ export type ActionWorkflowRecord = {
   updated_at: number;
 };
 
-export type ActionRunRecord = {
-  id: string;
-  repository_id: string;
-  run_number: number;
-  workflow_id: string;
-  workflow_name: string;
-  trigger_event: ActionWorkflowTrigger;
-  trigger_ref: string | null;
-  trigger_sha: string | null;
-  trigger_source_type: ActionRunSourceType | null;
-  trigger_source_number: number | null;
-  trigger_source_comment_id: string | null;
-  triggered_by: string | null;
-  triggered_by_username: string | null;
-  status: ActionRunStatus;
-  agent_type: ActionAgentType;
-  instance_type: ActionContainerInstanceType;
-  prompt: string;
-  logs: string;
-  has_full_logs?: boolean;
-  logs_url?: string | null;
-  exit_code: number | null;
-  container_instance: string | null;
-  created_at: number;
-  claimed_at: number | null;
-  started_at: number | null;
-  completed_at: number | null;
-  updated_at: number;
-};
-
 export type ActionsGlobalConfig = {
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
@@ -366,28 +336,45 @@ export type RepositoryActionsConfig = {
 export type AgentSessionRecord = {
   id: string;
   repository_id: string;
+  session_number: number;
+  run_number?: number;
   source_type: AgentSessionSourceType;
   source_number: number | null;
   source_comment_id: string | null;
+  trigger_source_type?: ActionRunSourceType | null;
+  trigger_source_number?: number | null;
+  trigger_source_comment_id?: string | null;
   origin: AgentSessionOrigin;
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
+  instance_type: ActionContainerInstanceType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
   trigger_sha: string | null;
   workflow_id: string | null;
   workflow_name: string | null;
-  linked_run_id: string | null;
+  parent_session_id: string | null;
+  linked_run_id?: string | null;
   created_by: string | null;
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
+  triggered_by?: string | null;
+  triggered_by_username?: string | null;
+  logs: string;
+  has_full_logs?: boolean;
+  logs_url?: string | null;
+  exit_code: number | null;
+  container_instance: string | null;
   created_at: number;
+  claimed_at: number | null;
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;
 };
+
+export type ActionRunRecord = AgentSessionRecord;
 
 export type AgentSessionStepRecord = {
   id: number;
@@ -415,9 +402,11 @@ export type AgentSessionArtifactRecord = {
   updated_at: number;
 };
 
-export type ActionRunLogsResponse = {
+export type AgentSessionLogsResponse = {
   logs: string;
 };
+
+export type ActionRunLogsResponse = AgentSessionLogsResponse;
 
 export type AgentSessionArtifactContentResponse = {
   artifact: AgentSessionArtifactRecord;
@@ -466,7 +455,7 @@ export type AgentSessionValidationReport = {
 };
 
 export type AgentSessionValidationSummary = {
-  status: ActionRunStatus | null;
+  status: AgentSessionStatus | null;
   headline: string;
   detail: string;
   duration_ms: number | null;
@@ -488,7 +477,7 @@ export type AppBindings = {
   ACTIONS_RUNNER_STANDARD_2?: DurableObjectNamespace;
   ACTIONS_RUNNER_STANDARD_3?: DurableObjectNamespace;
   ACTIONS_RUNNER_STANDARD_4?: DurableObjectNamespace;
-  ACTIONS_QUEUE?: Queue<ActionRunQueueMessage>;
+  ACTIONS_QUEUE?: Queue<AgentSessionQueueMessage>;
   ASSETS?: Fetcher;
   JWT_SECRET: string;
   APP_ORIGIN: string;

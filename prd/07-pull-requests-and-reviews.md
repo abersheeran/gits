@@ -38,8 +38,8 @@ PR 是当前产品里的交付中心和评审中心。
 - merge summary
 - closing issues 完成度摘要
 - `taskFlow` / handoff 摘要
-- 最新 run/session provenance 摘要
-- PR 详情只在存在 pending run 或 session 时继续轮询 provenance 与详情，静止状态下不维持后台刷新
+- 最新 session provenance 摘要
+- PR 详情只在存在 pending session 时继续轮询 provenance 与详情，静止状态下不维持后台刷新
 
 ### 2.3 Review
 
@@ -93,7 +93,7 @@ PR detail 会返回 `taskFlow`，当前主要回答：
 
 ## 4. 当前验证摘要
 
-PR 页面已经直接消费 run/session 的验证信息：
+PR 页面已经直接消费 session 的验证信息：
 
 - 优先使用 runtime 输出的 structured validation report
 - 缺失时回退到日志规则识别
@@ -113,7 +113,7 @@ PR 页面已经直接消费 run/session 的验证信息：
 3. 人类在 PR diff 上创建 review、review thread 和 suggested changes。
 4. Agent 从 PR 级或 thread 级入口继续执行。
 5. 新 commit 后，thread 尝试映射到当前 patch set。
-6. review、thread、run、merge 结果持续回流到 PR handoff 和关联 Issue task status。
+6. review、thread、session、merge 结果持续回流到 PR handoff 和关联 Issue task status。
 7. 人类完成 squash merge。
 
 ## 6. 当前接口

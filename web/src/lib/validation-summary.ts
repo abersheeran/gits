@@ -1,5 +1,4 @@
 import type {
-  ActionRunRecord,
   AgentSessionArtifactRecord,
   AgentSessionDetail,
   AgentSessionRecord,
@@ -32,28 +31,11 @@ export function excerptText(value: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-function latestExecutionStatus(
-  latestRun: ActionRunRecord | null,
-  latestSession: AgentSessionRecord | null
-): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
-  if (latestRun && latestSession) {
-    return latestSession.updated_at > latestRun.updated_at
-      ? latestSession.status
-      : latestRun.status;
-  }
-  return latestRun?.status ?? latestSession?.status ?? null;
-}
-
 export function latestValidationStatus(
   detail: AgentSessionDetail | null,
-  latestRun?: ActionRunRecord | null,
   latestSession?: AgentSessionRecord | null
-): ActionRunRecord["status"] | AgentSessionRecord["status"] | null {
-  const detailStatus = latestExecutionStatus(detail?.linkedRun ?? null, detail?.session ?? null);
-  if (detailStatus !== null) {
-    return detailStatus;
-  }
-  return latestExecutionStatus(latestRun ?? null, latestSession ?? null);
+): AgentSessionRecord["status"] | null {
+  return detail?.session.status ?? latestSession?.status ?? null;
 }
 
 export function highlightedValidationArtifacts(

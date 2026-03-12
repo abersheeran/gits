@@ -430,6 +430,25 @@ export class ActionsService {
     return this.findWorkflowById(repositoryId, workflowId);
   }
 
+  private mapSessionAsRun(session: ActionRunRecord): ActionRunRecord {
+    const triggerSourceType =
+      session.source_type === "manual" ? null : (session.source_type as ActionRunSourceType);
+    return {
+      ...session,
+      run_number: session.run_number ?? session.session_number,
+      trigger_source_type: session.trigger_source_type ?? triggerSourceType,
+      trigger_source_number: session.trigger_source_number ?? session.source_number,
+      trigger_source_comment_id: session.trigger_source_comment_id ?? session.source_comment_id,
+      linked_run_id: session.linked_run_id ?? null,
+      triggered_by: session.triggered_by ?? session.created_by,
+      triggered_by_username: session.triggered_by_username ?? session.created_by_username
+    };
+  }
+
+  private mapSessionsAsRuns(sessions: ActionRunRecord[]): ActionRunRecord[] {
+    return sessions.map((session) => this.mapSessionAsRun(session));
+  }
+
   private async nextActionRunNumber(repositoryId: string): Promise<number> {
     const row = await this.db
       .prepare(
@@ -462,156 +481,33 @@ export class ActionsService {
     instanceType: ActionContainerInstanceType;
     prompt: string;
   }): Promise<ActionRunRecord> {
-    const runNumber = await this.nextActionRunNumber(input.repositoryId);
-    const id = crypto.randomUUID();
-    const now = Date.now();
-
-    await this.db
-      .prepare(
-        `INSERT INTO action_runs (
-          id,
-          repository_id,
-          run_number,
-          workflow_id,
-          trigger_event,
-          trigger_ref,
-          trigger_sha,
-          trigger_source_type,
-          trigger_source_number,
-          trigger_source_comment_id,
-          triggered_by,
-          status,
-          command,
-          agent_type,
-          instance_type,
-          prompt,
-          logs,
-          exit_code,
-          container_instance,
-          created_at,
-          claimed_at,
-          started_at,
-          completed_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        id,
-        input.repositoryId,
-        runNumber,
-        input.workflowId,
-        input.triggerEvent,
-        input.triggerRef ?? null,
-        input.triggerSha ?? null,
-        input.triggerSourceType ?? null,
-        input.triggerSourceNumber ?? null,
-        input.triggerSourceCommentId ?? null,
-        input.triggeredBy ?? null,
-        "queued",
-        input.prompt,
-        input.agentType,
-        input.instanceType,
-        input.prompt,
-        "",
-        null,
-        null,
-        now,
-        null,
-        null,
-        null,
-        now
-      )
-      .run();
-
-    const created = await this.findRunById(input.repositoryId, id);
-    if (!created) {
-      throw new Error("Created action run not found");
-    }
-    return created;
+    const session = await this.agentSessionService.createSessionExecution({
+      repositoryId: input.repositoryId,
+      sourceType: input.triggerSourceType ?? "manual",
+      sourceNumber: input.triggerSourceNumber ?? null,
+      sourceCommentId: input.triggerSourceCommentId ?? null,
+      origin: input.triggerEvent === "mention_actions" ? "mention" : "workflow",
+      agentType: input.agentType,
+      instanceType: input.instanceType,
+      prompt: input.prompt,
+      triggerRef: input.triggerRef ?? null,
+      triggerSha: input.triggerSha ?? null,
+      workflowId: input.workflowId,
+      createdBy: input.triggeredBy ?? null,
+      delegatedFromUserId: input.triggeredBy ?? null
+    });
+    return this.mapSessionAsRun(session);
   }
 
   async listRuns(repositoryId: string, limit = 30): Promise<ActionRunRecord[]> {
-    const normalizedLimit = Math.min(Math.max(limit, 1), 100);
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          r.id,
-          r.repository_id,
-          r.run_number,
-          r.workflow_id,
-          w.name AS workflow_name,
-          r.trigger_event,
-          r.trigger_ref,
-          r.trigger_sha,
-          r.trigger_source_type,
-          r.trigger_source_number,
-          r.trigger_source_comment_id,
-          r.triggered_by,
-          u.username AS triggered_by_username,
-          r.status,
-          r.agent_type,
-          COALESCE(r.instance_type, 'lite') AS instance_type,
-          r.prompt,
-          r.logs,
-          r.exit_code,
-          r.container_instance,
-          r.created_at,
-          r.claimed_at,
-          r.started_at,
-          r.completed_at,
-          r.updated_at
-         FROM action_runs r
-         JOIN action_workflows w ON w.id = r.workflow_id
-         LEFT JOIN users u ON u.id = r.triggered_by
-         WHERE r.repository_id = ?
-         ORDER BY r.run_number DESC
-         LIMIT ?`
-      )
-      .bind(repositoryId, normalizedLimit)
-      .all<ActionRunRecord>();
-
-    return rows.results;
+    return this.mapSessionsAsRuns(
+      await this.agentSessionService.listSessions({ repositoryId, limit })
+    );
   }
 
   async findRunById(repositoryId: string, runId: string): Promise<ActionRunRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT
-          r.id,
-          r.repository_id,
-          r.run_number,
-          r.workflow_id,
-          w.name AS workflow_name,
-          r.trigger_event,
-          r.trigger_ref,
-          r.trigger_sha,
-          r.trigger_source_type,
-          r.trigger_source_number,
-          r.trigger_source_comment_id,
-          r.triggered_by,
-          u.username AS triggered_by_username,
-          r.status,
-          r.agent_type,
-          COALESCE(r.instance_type, 'lite') AS instance_type,
-          r.prompt,
-          r.logs,
-          r.exit_code,
-          r.container_instance,
-          r.created_at,
-          r.claimed_at,
-          r.started_at,
-          r.completed_at,
-          r.updated_at
-         FROM action_runs r
-         JOIN action_workflows w ON w.id = r.workflow_id
-         LEFT JOIN users u ON u.id = r.triggered_by
-         WHERE r.repository_id = ? AND r.id = ?
-         LIMIT 1`
-      )
-      .bind(repositoryId, runId)
-      .first<ActionRunRecord>();
-
-    return row ?? null;
+    const session = await this.agentSessionService.findSessionById(repositoryId, runId);
+    return session ? this.mapSessionAsRun(session) : null;
   }
 
   async claimQueuedRun(
@@ -619,34 +515,7 @@ export class ActionsService {
     runId: string,
     containerInstance: string
   ): Promise<number | null> {
-    const now = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET container_instance = ?, claimed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance IS NULL`
-      )
-      .bind(containerInstance, now, now, repositoryId, runId)
-      .run();
-
-    const changes =
-      (result as unknown as {
-        meta?: {
-          changes?: number;
-        };
-      }).meta?.changes ?? 0;
-
-    if (changes > 0) {
-      await this.agentSessionService.recordRunClaimed({
-        repositoryId,
-        runId,
-        containerInstance,
-        claimedAt: now
-      });
-      return now;
-    }
-
-    return null;
+    return this.agentSessionService.claimQueuedSession(repositoryId, runId, containerInstance);
   }
 
   async updateRunToRunning(
@@ -654,35 +523,7 @@ export class ActionsService {
     runId: string,
     containerInstance: string
   ): Promise<number | null> {
-    const now = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET status = 'running', started_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance = ?`
-      )
-      .bind(now, now, repositoryId, runId, containerInstance)
-      .run();
-
-    const changes =
-      (result as unknown as {
-        meta?: {
-          changes?: number;
-        };
-      }).meta?.changes ?? 0;
-
-    if (changes > 0) {
-      await this.agentSessionService.syncSessionForRun({
-        repositoryId,
-        runId,
-        status: "running",
-        startedAt: now,
-        updatedAt: now
-      });
-      return now;
-    }
-
-    return null;
+    return this.agentSessionService.updateSessionToRunning(repositoryId, runId, containerInstance);
   }
 
   async completeRun(
@@ -694,54 +535,15 @@ export class ActionsService {
       exitCode?: number | null;
     }
   ): Promise<void> {
-    const now = Date.now();
-    await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET status = ?, logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(input.status, input.logs, input.exitCode ?? null, now, now, repositoryId, runId)
-      .run();
-    await this.agentSessionService.syncSessionForRun({
-      repositoryId,
-      runId,
-      status: input.status,
-      completedAt: now,
-      updatedAt: now
-    });
+    await this.agentSessionService.completeSession(repositoryId, runId, input);
   }
 
   async updateRunningRunLogs(repositoryId: string, runId: string, logs: string): Promise<boolean> {
-    const updatedAt = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET logs = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'running'`
-      )
-      .bind(logs, updatedAt, repositoryId, runId)
-      .run();
-
-    const changes =
-      (result as unknown as {
-        meta?: {
-          changes?: number;
-        };
-      }).meta?.changes ?? 0;
-
-    return changes > 0;
+    return this.agentSessionService.updateRunningSessionLogs(repositoryId, runId, logs);
   }
 
   async replaceRunLogs(repositoryId: string, runId: string, logs: string): Promise<void> {
-    await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET logs = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(logs, Date.now(), repositoryId, runId)
-      .run();
+    await this.agentSessionService.replaceSessionLogs(repositoryId, runId, logs);
   }
 
   async failPendingRunIfStillPending(
@@ -753,74 +555,17 @@ export class ActionsService {
       completedAt?: number;
     }
   ): Promise<{ updated: boolean; completedAt: number }> {
-    const completedAt = input.completedAt ?? Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET status = 'failed', logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status IN ('queued', 'running')`
-      )
-      .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, runId)
-      .run();
-
-    const changes =
-      (result as unknown as {
-        meta?: {
-          changes?: number;
-        };
-      }).meta?.changes ?? 0;
-
-    if (changes > 0) {
-      await this.agentSessionService.syncSessionForRun({
-        repositoryId,
-        runId,
-        status: "failed",
-        completedAt,
-        updatedAt: completedAt
-      });
-    }
-
-    return {
-      updated: changes > 0,
-      completedAt
-    };
+    return this.agentSessionService.failPendingSessionIfStillPending(repositoryId, runId, input);
   }
 
   async cancelQueuedRun(
     repositoryId: string,
     runId: string
   ): Promise<{ cancelled: boolean; completedAt: number }> {
-    const completedAt = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE action_runs
-         SET status = 'cancelled', completed_at = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'queued'`
-      )
-      .bind(completedAt, completedAt, repositoryId, runId)
-      .run();
-
-    const changes =
-      (result as unknown as {
-        meta?: {
-          changes?: number;
-        };
-      }).meta?.changes ?? 0;
-
-    if (changes > 0) {
-      await this.agentSessionService.syncSessionForRun({
-        repositoryId,
-        runId,
-        status: "cancelled",
-        completedAt,
-        updatedAt: completedAt
-      });
-    }
-
-    return {
-      cancelled: changes > 0,
-      completedAt
-    };
+    return this.agentSessionService.cancelQueuedSession({
+      repositoryId,
+      sessionId: runId
+    });
   }
 
   async listLatestRunsBySource(
@@ -828,125 +573,21 @@ export class ActionsService {
     sourceType: ActionRunSourceType,
     sourceNumbers: readonly number[]
   ): Promise<ActionRunRecord[]> {
-    if (sourceNumbers.length === 0) {
-      return [];
-    }
-    const uniqueSourceNumbers = Array.from(new Set(sourceNumbers)).sort((a, b) => a - b);
-    const placeholders = uniqueSourceNumbers.map(() => "?").join(", ");
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          r.id,
-          r.repository_id,
-          r.run_number,
-          r.workflow_id,
-          w.name AS workflow_name,
-          r.trigger_event,
-          r.trigger_ref,
-          r.trigger_sha,
-          r.trigger_source_type,
-          r.trigger_source_number,
-          r.trigger_source_comment_id,
-          r.triggered_by,
-          u.username AS triggered_by_username,
-          r.status,
-          r.agent_type,
-          COALESCE(r.instance_type, 'lite') AS instance_type,
-          r.prompt,
-          r.logs,
-          r.exit_code,
-          r.container_instance,
-          r.created_at,
-          r.claimed_at,
-          r.started_at,
-          r.completed_at,
-          r.updated_at
-         FROM action_runs r
-         JOIN action_workflows w ON w.id = r.workflow_id
-         LEFT JOIN users u ON u.id = r.triggered_by
-         JOIN (
-           SELECT trigger_source_number, MAX(run_number) AS max_run_number
-           FROM action_runs
-           WHERE repository_id = ?
-             AND trigger_source_type = ?
-             AND trigger_source_number IN (${placeholders})
-           GROUP BY trigger_source_number
-         ) latest
-           ON latest.trigger_source_number = r.trigger_source_number
-          AND latest.max_run_number = r.run_number
-         WHERE r.repository_id = ?
-           AND r.trigger_source_type = ?
-         ORDER BY r.trigger_source_number ASC`
-      )
-      .bind(
+    return this.mapSessionsAsRuns(
+      await this.agentSessionService.listLatestSessionsBySource(
         repositoryId,
         sourceType,
-        ...uniqueSourceNumbers,
-        repositoryId,
-        sourceType
+        sourceNumbers
       )
-      .all<ActionRunRecord>();
-
-    return rows.results;
+    );
   }
 
   async listLatestRunsByCommentIds(
     repositoryId: string,
     commentIds: readonly string[]
   ): Promise<ActionRunRecord[]> {
-    if (commentIds.length === 0) {
-      return [];
-    }
-    const uniqueCommentIds = Array.from(new Set(commentIds));
-    const placeholders = uniqueCommentIds.map(() => "?").join(", ");
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          r.id,
-          r.repository_id,
-          r.run_number,
-          r.workflow_id,
-          w.name AS workflow_name,
-          r.trigger_event,
-          r.trigger_ref,
-          r.trigger_sha,
-          r.trigger_source_type,
-          r.trigger_source_number,
-          r.trigger_source_comment_id,
-          r.triggered_by,
-          u.username AS triggered_by_username,
-          r.status,
-          r.agent_type,
-          COALESCE(r.instance_type, 'lite') AS instance_type,
-          r.prompt,
-          r.logs,
-          r.exit_code,
-          r.container_instance,
-          r.created_at,
-          r.claimed_at,
-          r.started_at,
-          r.completed_at,
-          r.updated_at
-         FROM action_runs r
-         JOIN action_workflows w ON w.id = r.workflow_id
-         LEFT JOIN users u ON u.id = r.triggered_by
-         JOIN (
-           SELECT trigger_source_comment_id, MAX(run_number) AS max_run_number
-           FROM action_runs
-           WHERE repository_id = ?
-             AND trigger_source_comment_id IS NOT NULL
-             AND trigger_source_comment_id IN (${placeholders})
-           GROUP BY trigger_source_comment_id
-         ) latest
-           ON latest.trigger_source_comment_id = r.trigger_source_comment_id
-          AND latest.max_run_number = r.run_number
-         WHERE r.repository_id = ?
-           AND r.trigger_source_comment_id IS NOT NULL
-         ORDER BY r.run_number DESC`
-      )
-      .bind(repositoryId, ...uniqueCommentIds, repositoryId)
-      .all<ActionRunRecord>();
-
-    return rows.results;
+    return this.mapSessionsAsRuns(
+      await this.agentSessionService.listLatestSessionsByCommentIds(repositoryId, commentIds)
+    );
   }
 }

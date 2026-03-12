@@ -9,7 +9,6 @@ import {
 } from "../../services/action-runner-prompt-tokens";
 import {
   containsActionsMention,
-  createLinkedAgentSessionForRun,
   scheduleActionRunExecution,
   triggerInteractiveAgentSession,
   triggerActionWorkflows,
@@ -19,7 +18,6 @@ import { ACTION_CONTAINER_INSTANCE_TYPES } from "../../services/action-container
 import { ActionLogStorageService } from "../../services/action-log-storage-service";
 import { AgentSessionService } from "../../services/agent-session-service";
 import { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
-import { ActionsService } from "../../services/actions-service";
 import { AuthService } from "../../services/auth-service";
 import { RepositoryMetadataService } from "../../services/repository-metadata-service";
 import {
@@ -50,8 +48,6 @@ import { WorkflowTaskFlowService } from "../../services/workflow-task-flow-servi
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
-  ActionRunRecord,
-  ActionRunSourceType,
   ActionWorkflowTrigger,
   AgentSessionRecord,
   AgentSessionSourceType,
@@ -184,7 +180,6 @@ export async function buildAgentSessionDetailPayload(args: {
   viewerId?: string;
 }): Promise<{
   session: AgentSessionRecord;
-  linkedRun: ActionRunRecord | null;
   sourceContext: Awaited<ReturnType<typeof buildAgentSessionSourceContext>>;
   artifacts: Awaited<ReturnType<AgentSessionService["listArtifacts"]>>;
   usageRecords: Awaited<ReturnType<AgentSessionService["listUsageRecords"]>>;
@@ -192,11 +187,7 @@ export async function buildAgentSessionDetailPayload(args: {
   validationSummary: ReturnType<typeof buildAgentSessionValidationSummary>;
 }> {
   const agentSessionService = new AgentSessionService(args.db);
-  const actionsService = new ActionsService(args.db);
-  const [linkedRun, sourceContext, artifacts, usageRecords, interventions] = await Promise.all([
-    args.session.linked_run_id
-      ? actionsService.findRunById(args.repository.id, args.session.linked_run_id)
-      : null,
+  const [sourceContext, artifacts, usageRecords, interventions] = await Promise.all([
     buildAgentSessionSourceContext({
       db: args.db,
       repository: args.repository,
@@ -211,14 +202,11 @@ export async function buildAgentSessionDetailPayload(args: {
   ]);
 
   return {
-    session: args.session,
-    linkedRun: linkedRun
-      ? {
-          ...linkedRun,
-          has_full_logs: true,
-          logs_url: `/api/repos/${args.owner}/${args.repo}/actions/runs/${linkedRun.id}/logs`
-        }
-      : null,
+    session: {
+      ...args.session,
+      has_full_logs: true,
+      logs_url: `/api/repos/${args.owner}/${args.repo}/agent-sessions/${args.session.id}/logs`
+    },
     sourceContext,
     artifacts: artifacts.map((artifact) => ({
       ...artifact,
@@ -228,7 +216,7 @@ export async function buildAgentSessionDetailPayload(args: {
     usageRecords,
     interventions,
     validationSummary: buildAgentSessionValidationSummary({
-      status: linkedRun?.status ?? args.session.status,
+      status: args.session.status,
       artifacts,
       usageRecords,
       interventions
@@ -245,12 +233,24 @@ export function createActionLogStorageService(
 export function withActionRunApiMetadata(
   owner: string,
   repo: string,
-  run: ActionRunRecord
-): ActionRunRecord {
+  run: AgentSessionRecord
+): AgentSessionRecord {
   return {
     ...run,
     has_full_logs: true,
-    logs_url: `/api/repos/${owner}/${repo}/actions/runs/${run.id}/logs`
+    logs_url: `/api/repos/${owner}/${repo}/agent-sessions/${run.id}/logs`
+  };
+}
+
+export function withAgentSessionApiMetadata(
+  owner: string,
+  repo: string,
+  session: AgentSessionRecord
+): AgentSessionRecord {
+  return {
+    ...session,
+    has_full_logs: true,
+    logs_url: `/api/repos/${owner}/${repo}/agent-sessions/${session.id}/logs`
   };
 }
 
@@ -391,8 +391,8 @@ export function createSseEventChunk(payload: SseEventPayload): string {
 }
 
 export function buildRunLogStreamEvents(
-  previousRun: ActionRunRecord | null,
-  currentRun: ActionRunRecord
+  previousRun: AgentSessionRecord | null,
+  currentRun: AgentSessionRecord
 ): SseEventPayload[] {
   if (!previousRun) {
     return [
@@ -459,9 +459,9 @@ export function buildRunLogStreamEvents(
 export async function hydrateRunWithFullLogs(args: {
   logStorage: ActionLogStorageService;
   repositoryId: string;
-  run: ActionRunRecord;
-}): Promise<ActionRunRecord> {
-  const logs = await args.logStorage.readRunLogs(args.repositoryId, args.run.id);
+  run: AgentSessionRecord;
+}): Promise<AgentSessionRecord> {
+  const logs = await args.logStorage.readSessionLogs(args.repositoryId, args.run.id);
   if (logs === null) {
     return args.run;
   }
@@ -470,6 +470,9 @@ export async function hydrateRunWithFullLogs(args: {
     logs
   };
 }
+
+export const buildSessionLogStreamEvents = buildRunLogStreamEvents;
+export const hydrateSessionWithFullLogs = hydrateRunWithFullLogs;
 
 export async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise((resolve) => {

@@ -1,8 +1,8 @@
 import {
   ActionsService,
+  AgentSessionService,
   HTTPException,
   RepositoryService,
-  createLinkedAgentSessionForRun,
   mustSessionUser,
   optionalSession,
   requireSession,
@@ -217,23 +217,17 @@ export function registerActionsWorkflowRoutes(router: ApiRouter): void {
         throw new HTTPException(409, { message: "Workflow is disabled" });
       }
       const repositoryConfig = await actionsService.getRepositoryConfig(repository.id);
-
-      const run = await actionsService.createRun({
+      const agentSessionService = new AgentSessionService(c.env.DB);
+      const session = await agentSessionService.createSessionExecution({
         repositoryId: repository.id,
-        workflowId: workflow.id,
-        triggerEvent: workflow.trigger_event,
-        ...(input.ref ? { triggerRef: input.ref } : {}),
-        ...(input.sha ? { triggerSha: input.sha } : {}),
-        triggeredBy: sessionUser.id,
+        sourceType: "manual",
+        origin: "dispatch",
         agentType: workflow.agent_type,
         instanceType: repositoryConfig.instanceType,
-        prompt: workflow.prompt
-      });
-      const session = await createLinkedAgentSessionForRun({
-        db: c.env.DB,
-        repositoryId: repository.id,
-        run,
-        origin: "dispatch",
+        prompt: workflow.prompt,
+        ...(input.ref ? { triggerRef: input.ref } : {}),
+        ...(input.sha ? { triggerSha: input.sha } : {}),
+        workflowId: workflow.id,
         createdBy: sessionUser.id,
         delegatedFromUserId: sessionUser.id
       });
@@ -242,11 +236,11 @@ export function registerActionsWorkflowRoutes(router: ApiRouter): void {
         env: c.env,
         ...executionCtxArg(c),
         repository,
-        run,
+        session,
         triggeredByUser: sessionUser,
         requestOrigin: new URL(c.req.url).origin
       });
 
-      return c.json({ run, session }, 202);
+      return c.json({ session }, 202);
     });
 }

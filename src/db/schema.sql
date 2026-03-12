@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS repository_counters (
   repository_id TEXT PRIMARY KEY,
   issue_number_seq INTEGER NOT NULL DEFAULT 0,
   pull_number_seq INTEGER NOT NULL DEFAULT 0,
-  action_run_seq INTEGER NOT NULL DEFAULT 0,
+  session_number_seq INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 );
 
@@ -259,40 +259,10 @@ CREATE TABLE IF NOT EXISTS action_workflows (
   UNIQUE(repository_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS action_runs (
-  id TEXT PRIMARY KEY,
-  repository_id TEXT NOT NULL,
-  run_number INTEGER NOT NULL,
-  workflow_id TEXT NOT NULL,
-  trigger_event TEXT NOT NULL CHECK (trigger_event IN ('issue_created', 'pull_request_created', 'mention_actions', 'push')),
-  trigger_ref TEXT,
-  trigger_sha TEXT,
-  trigger_source_type TEXT CHECK (trigger_source_type IN ('issue', 'pull_request')),
-  trigger_source_number INTEGER,
-  trigger_source_comment_id TEXT,
-  triggered_by TEXT,
-  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'success', 'failed', 'cancelled')),
-  command TEXT NOT NULL,
-  agent_type TEXT NOT NULL DEFAULT 'codex' CHECK (agent_type IN ('codex', 'claude_code')),
-  instance_type TEXT NOT NULL DEFAULT 'lite' CHECK (instance_type IN ('lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4')),
-  prompt TEXT NOT NULL,
-  logs TEXT NOT NULL DEFAULT '',
-  exit_code INTEGER,
-  container_instance TEXT,
-  created_at INTEGER NOT NULL,
-  claimed_at INTEGER,
-  started_at INTEGER,
-  completed_at INTEGER,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
-  FOREIGN KEY (workflow_id) REFERENCES action_workflows(id) ON DELETE CASCADE,
-  FOREIGN KEY (triggered_by) REFERENCES users(id) ON DELETE SET NULL,
-  UNIQUE(repository_id, run_number)
-);
-
 CREATE TABLE IF NOT EXISTS agent_sessions (
   id TEXT PRIMARY KEY,
   repository_id TEXT NOT NULL,
+  session_number INTEGER NOT NULL,
   source_type TEXT NOT NULL CHECK (source_type IN ('issue', 'pull_request', 'manual')),
   source_number INTEGER,
   source_comment_id TEXT,
@@ -310,23 +280,29 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   ),
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'success', 'failed', 'cancelled')),
   agent_type TEXT NOT NULL CHECK (agent_type IN ('codex', 'claude_code')),
+  instance_type TEXT NOT NULL DEFAULT 'lite' CHECK (instance_type IN ('lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4')),
   prompt TEXT NOT NULL,
   branch_ref TEXT,
   trigger_ref TEXT,
   trigger_sha TEXT,
   workflow_id TEXT,
-  linked_run_id TEXT UNIQUE,
+  parent_session_id TEXT,
   created_by TEXT,
   delegated_from_user_id TEXT,
+  logs TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  container_instance TEXT,
   created_at INTEGER NOT NULL,
+  claimed_at INTEGER,
   started_at INTEGER,
   completed_at INTEGER,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
   FOREIGN KEY (workflow_id) REFERENCES action_workflows(id) ON DELETE SET NULL,
-  FOREIGN KEY (linked_run_id) REFERENCES action_runs(id) ON DELETE SET NULL,
+  FOREIGN KEY (parent_session_id) REFERENCES agent_sessions(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY (delegated_from_user_id) REFERENCES users(id) ON DELETE SET NULL
+  FOREIGN KEY (delegated_from_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(repository_id, session_number)
 );
 
 CREATE TABLE IF NOT EXISTS agent_session_steps (
@@ -336,8 +312,8 @@ CREATE TABLE IF NOT EXISTS agent_session_steps (
   kind TEXT NOT NULL CHECK (
     kind IN (
       'session_created',
-      'run_queued',
-      'run_claimed',
+      'session_queued',
+      'session_claimed',
       'session_started',
       'session_completed',
       'session_cancelled'
@@ -357,7 +333,7 @@ CREATE TABLE IF NOT EXISTS agent_session_artifacts (
   repository_id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (
     kind IN (
-      'run_logs',
+      'session_logs',
       'stdout',
       'stderr'
     )
@@ -381,7 +357,7 @@ CREATE TABLE IF NOT EXISTS agent_session_usage_records (
     kind IN (
       'duration_ms',
       'exit_code',
-      'run_log_chars',
+      'log_chars',
       'stdout_chars',
       'stderr_chars'
     )
@@ -451,20 +427,16 @@ CREATE INDEX IF NOT EXISTS idx_pull_request_closing_issues_lookup
   ON pull_request_closing_issues(repository_id, pull_request_number, issue_number ASC);
 CREATE INDEX IF NOT EXISTS idx_action_workflows_lookup
   ON action_workflows(repository_id, enabled, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_lookup
-  ON action_runs(repository_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_workflow
-  ON action_runs(workflow_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_source_lookup
-  ON action_runs(repository_id, trigger_source_type, trigger_source_number, run_number DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_source_comment_lookup
-  ON action_runs(repository_id, trigger_source_comment_id, run_number DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_lookup
   ON agent_sessions(repository_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_number_lookup
+  ON agent_sessions(repository_id, session_number DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_source_lookup
   ON agent_sessions(repository_id, source_type, source_number, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_sessions_linked_run_lookup
-  ON agent_sessions(repository_id, linked_run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_source_comment_lookup
+  ON agent_sessions(repository_id, source_comment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_parent_lookup
+  ON agent_sessions(repository_id, parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_agent_session_steps_lookup
   ON agent_session_steps(repository_id, session_id, created_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS idx_agent_session_artifacts_lookup

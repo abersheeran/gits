@@ -777,43 +777,38 @@ describe("API issue routes", () => {
         ]
       },
       {
-        when: "RETURNING action_run_seq AS run_number",
-        first: () => ({ run_number: 1 })
+        when: "RETURNING session_number_seq AS session_number",
+        first: () => ({ session_number: 1 })
       },
       {
-        when: "INSERT INTO action_runs",
+        when: "INSERT INTO agent_sessions",
         run: (params) => {
-          createdRunPrompt = String(params[15] ?? "");
+          createdRunPrompt = String(params[10] ?? "");
           return { success: true };
         }
       },
       {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () => ({
-          id: "run-1",
-          repository_id: "repo-1",
-          run_number: 1,
-          workflow_id: "workflow-1",
-          workflow_name: "Issue Bot",
-          trigger_event: "issue_created",
-          trigger_ref: "refs/heads/main",
-          trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          trigger_source_type: "issue",
-          trigger_source_number: 1,
-          trigger_source_comment_id: "comment-2",
-          triggered_by: "user-2",
-          triggered_by_username: "bob",
-          status: "queued",
-          agent_type: "codex",
-          prompt: createdRunPrompt,
-          logs: "",
-          exit_code: null,
-          container_instance: null,
-          created_at: now,
-          started_at: null,
-          completed_at: null,
-          updated_at: now
-        })
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildAgentSessionRow({
+            id: "session-comment-trigger",
+            session_number: 1,
+            source_type: "issue",
+            source_number: 1,
+            source_comment_id: "comment-2",
+            origin: "workflow",
+            workflow_id: "workflow-1",
+            workflow_name: "Issue Bot",
+            prompt: createdRunPrompt,
+            trigger_ref: "refs/heads/main",
+            trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            created_by: "user-2",
+            created_by_username: "bob",
+            delegated_from_user_id: null,
+            delegated_from_username: null,
+            created_at: now,
+            updated_at: now
+          })
       }
     ]);
 
@@ -879,7 +874,6 @@ describe("API issue routes", () => {
     });
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("workflow-interactive")
-      .mockReturnValueOnce("run-issue-assign")
       .mockReturnValueOnce("session-issue-assign");
     const enqueueRun = vi.fn(async () => undefined);
     const now = Date.now();
@@ -949,54 +943,28 @@ describe("API issue routes", () => {
         run: () => ({ success: true })
       },
       {
-        when: "RETURNING action_run_seq AS run_number",
-        first: () => ({ run_number: 7 })
-      },
-      {
-        when: "INSERT INTO action_runs",
-        run: (params) => {
-          insertedPrompt = String(params[15] ?? "");
-          return { success: true };
-        }
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-issue-assign",
-            run_number: 7,
-            workflow_id: "workflow-interactive",
-            workflow_name: "__agent_session_internal__codex",
-            trigger_event: "mention_actions",
-            trigger_ref: "refs/heads/main",
-            trigger_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            trigger_source_type: "issue",
-            trigger_source_number: 1,
-            triggered_by: "user-2",
-            triggered_by_username: "bob",
-            prompt: insertedPrompt || "placeholder",
-            created_at: now,
-            updated_at: now
-          })
-      },
-      {
-        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
-        first: () => null
+        when: "RETURNING session_number_seq AS session_number",
+        first: () => ({ session_number: 7 })
       },
       {
         when: "INSERT INTO agent_sessions",
-        run: () => ({ success: true })
+        run: (params) => {
+          insertedPrompt = String(params[10] ?? "");
+          return { success: true };
+        }
       },
       {
         when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () =>
           buildAgentSessionRow({
             id: "session-issue-assign",
+            session_number: 7,
             source_type: "issue",
             source_number: 1,
             origin: "issue_assign",
-            linked_run_id: "run-issue-assign",
             prompt: insertedPrompt || "placeholder",
+            workflow_id: "workflow-interactive",
+            workflow_name: "__agent_session_internal__codex",
             created_at: now,
             updated_at: now
           })
@@ -1026,14 +994,12 @@ describe("API issue routes", () => {
     expect(response.status).toBe(202);
     const body = (await response.json()) as {
       issue: { task_status: string };
-      run: { id: string; status: string };
-      session: { id: string; status: string };
+      session: { id: string; status: string; session_number: number };
     };
     expect(body.issue.task_status).toBe("agent-working");
-    expect(body.run.id).toBe("run-issue-assign");
-    expect(body.run.status).toBe("queued");
     expect(body.session.id).toBe("session-issue-assign");
     expect(body.session.status).toBe("queued");
+    expect(body.session.session_number).toBe(7);
     expect(reconcileIssueTaskStatus).toHaveBeenCalledWith({
       repository: expect.objectContaining({ id: "repo-1" }),
       issueNumber: 1,

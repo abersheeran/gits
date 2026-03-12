@@ -589,7 +589,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
             });
       setLatestAgentSession(response.session);
-      setLatestActionRun(response.run);
+      setLatestActionRun(response.run ?? response.session);
       if (response.issue) {
         setIssue(response.issue);
       }

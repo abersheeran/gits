@@ -1,16 +1,16 @@
 import type {
   ActionAgentType,
-  ActionRunRecord,
+  ActionContainerInstanceType,
   AgentSessionArtifactKind,
   AgentSessionArtifactRecord,
   AgentSessionInterventionKind,
   AgentSessionInterventionRecord,
   AgentSessionOrigin,
   AgentSessionRecord,
-  AgentSessionStepKind,
-  AgentSessionStepRecord,
   AgentSessionSourceType,
   AgentSessionStatus,
+  AgentSessionStepKind,
+  AgentSessionStepRecord,
   AgentSessionUsageKind,
   AgentSessionUsageRecord,
   AgentSessionValidationReport
@@ -25,8 +25,8 @@ export type AgentSessionTimelineEvent = {
   id: string;
   type:
     | "session_created"
-    | "run_queued"
-    | "run_claimed"
+    | "session_queued"
+    | "session_claimed"
     | "session_started"
     | "log"
     | "session_completed"
@@ -51,24 +51,30 @@ const TIMELINE_ERROR_LOG_SECTIONS = new Set(["error", "runner_error", "runner_sp
 type AgentSessionRow = {
   id: string;
   repository_id: string;
+  session_number: number;
   source_type: AgentSessionSourceType;
   source_number: number | null;
   source_comment_id: string | null;
   origin: AgentSessionOrigin;
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
+  instance_type: ActionContainerInstanceType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
   trigger_sha: string | null;
   workflow_id: string | null;
   workflow_name: string | null;
-  linked_run_id: string | null;
+  parent_session_id: string | null;
   created_by: string | null;
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
+  logs: string;
+  exit_code: number | null;
+  container_instance: string | null;
   created_at: number;
+  claimed_at: number | null;
   started_at: number | null;
   completed_at: number | null;
   updated_at: number;
@@ -132,32 +138,12 @@ export type CreateAgentSessionInput = {
   origin: AgentSessionOrigin;
   status?: AgentSessionStatus;
   agentType: ActionAgentType;
+  instanceType: ActionContainerInstanceType;
   prompt: string;
   triggerRef?: string | null;
   triggerSha?: string | null;
   workflowId?: string | null;
-  linkedRunId?: string | null;
-  createdBy?: string | null;
-  delegatedFromUserId?: string | null;
-};
-
-export type CreateAgentSessionForRunInput = {
-  repositoryId: string;
-  run: Pick<
-    ActionRunRecord,
-    | "id"
-    | "run_number"
-    | "workflow_id"
-    | "workflow_name"
-    | "trigger_source_type"
-    | "trigger_source_number"
-    | "trigger_source_comment_id"
-    | "agent_type"
-    | "prompt"
-    | "trigger_ref"
-    | "trigger_sha"
-  >;
-  origin: AgentSessionOrigin;
+  parentSessionId?: string | null;
   createdBy?: string | null;
   delegatedFromUserId?: string | null;
 };
@@ -178,7 +164,33 @@ function parsePayloadJson(value: string | null): Record<string, unknown> | null 
 }
 
 function isLogArtifactKind(kind: AgentSessionArtifactKind): kind is AgentLogArtifactKind {
-  return kind === "run_logs" || kind === "stdout" || kind === "stderr";
+  return kind === "session_logs" || kind === "stdout" || kind === "stderr";
+}
+
+function mapCompletionStep(status: AgentSessionStatus): {
+  kind: AgentSessionStepKind;
+  title: string;
+  level: AgentSessionTimelineEvent["level"];
+} {
+  if (status === "cancelled") {
+    return {
+      kind: "session_cancelled",
+      title: "Session cancelled",
+      level: "warning"
+    };
+  }
+  if (status === "failed") {
+    return {
+      kind: "session_completed",
+      title: "Session failed",
+      level: "error"
+    };
+  }
+  return {
+    kind: "session_completed",
+    title: "Session completed",
+    level: "success"
+  };
 }
 
 export class AgentSessionService {
@@ -187,28 +199,102 @@ export class AgentSessionService {
     private readonly logStorage: ActionLogStorageService | null = null
   ) {}
 
+  private sessionSelectSql = `SELECT
+      s.id,
+      s.repository_id,
+      s.session_number,
+      s.source_type,
+      s.source_number,
+      s.source_comment_id,
+      s.origin,
+      s.status,
+      s.agent_type,
+      s.instance_type,
+      s.prompt,
+      s.branch_ref,
+      s.trigger_ref,
+      s.trigger_sha,
+      s.workflow_id,
+      w.name AS workflow_name,
+      s.parent_session_id,
+      s.created_by,
+      created_by_user.username AS created_by_username,
+      s.delegated_from_user_id,
+      delegated_user.username AS delegated_from_username,
+      s.logs,
+      s.exit_code,
+      s.container_instance,
+      s.created_at,
+      s.claimed_at,
+      s.started_at,
+      s.completed_at,
+      s.updated_at
+     FROM agent_sessions s
+     LEFT JOIN action_workflows w ON w.id = s.workflow_id
+     LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
+     LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id`;
+
+  private async nextSessionNumber(repositoryId: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `INSERT INTO repository_counters (
+          repository_id,
+          issue_number_seq,
+          pull_number_seq,
+          session_number_seq
+        )
+         VALUES (?, 0, 0, 1)
+         ON CONFLICT(repository_id)
+         DO UPDATE SET session_number_seq = session_number_seq + 1
+         RETURNING session_number_seq AS session_number`
+      )
+      .bind(repositoryId)
+      .first<{ session_number: number }>();
+
+    if (!row) {
+      throw new Error("Unable to allocate agent session number");
+    }
+    return row.session_number;
+  }
+
   private mapRow(row: AgentSessionRow): AgentSessionRecord {
+    const triggerSourceType = row.source_type === "manual" ? null : row.source_type;
     return {
       id: row.id,
       repository_id: row.repository_id,
+      session_number: row.session_number,
+      run_number: row.session_number,
       source_type: row.source_type,
       source_number: row.source_number,
       source_comment_id: row.source_comment_id,
+      trigger_source_type: triggerSourceType,
+      trigger_source_number: row.source_number,
+      trigger_source_comment_id: row.source_comment_id,
       origin: row.origin,
       status: row.status,
       agent_type: row.agent_type,
+      instance_type: row.instance_type,
       prompt: row.prompt,
       branch_ref: row.branch_ref,
       trigger_ref: row.trigger_ref,
       trigger_sha: row.trigger_sha,
       workflow_id: row.workflow_id,
       workflow_name: row.workflow_name,
-      linked_run_id: row.linked_run_id,
+      parent_session_id: row.parent_session_id,
+      linked_run_id: null,
       created_by: row.created_by,
       created_by_username: row.created_by_username,
       delegated_from_user_id: row.delegated_from_user_id,
       delegated_from_username: row.delegated_from_username,
+      triggered_by: row.created_by,
+      triggered_by_username: row.created_by_username,
+      logs: row.logs,
+      has_full_logs: true,
+      logs_url: null,
+      exit_code: row.exit_code,
+      container_instance: row.container_instance,
       created_at: row.created_at,
+      claimed_at: row.claimed_at,
       started_at: row.started_at,
       completed_at: row.completed_at,
       updated_at: row.updated_at
@@ -260,9 +346,7 @@ export class AgentSessionService {
     };
   }
 
-  private mapInterventionRow(
-    row: AgentSessionInterventionRow
-  ): AgentSessionInterventionRecord {
+  private mapInterventionRow(row: AgentSessionInterventionRow): AgentSessionInterventionRecord {
     return {
       id: row.id,
       session_id: row.session_id,
@@ -412,137 +496,6 @@ export class AgentSessionService {
       .run();
   }
 
-  private buildDerivedLifecycleEvents(input: {
-    session: AgentSessionRecord;
-    run: ActionRunRecord | null;
-  }): AgentSessionTimelineEvent[] {
-    const { session, run } = input;
-    const actorLabel = session.created_by_username ?? "system";
-    const sourceLabel =
-      session.source_number !== null
-        ? `${session.source_type} #${session.source_number}`
-        : session.source_type;
-
-    const events: AgentSessionTimelineEvent[] = [
-      {
-        id: `${session.id}-created`,
-        type: "session_created",
-        title: "Session created",
-        detail: `${sourceLabel} · ${session.origin} · ${actorLabel}`,
-        timestamp: session.created_at,
-        level: "info",
-        stream: "system"
-      }
-    ];
-
-    if (run) {
-      events.push({
-        id: `${session.id}-run-queued`,
-        type: "run_queued",
-        title: `Linked run #${run.run_number} queued`,
-        detail: `${run.workflow_name} · ${run.status}`,
-        timestamp: run.created_at,
-        level: "info",
-        stream: "system"
-      });
-    }
-
-    if (run?.claimed_at) {
-      events.push({
-        id: `${session.id}-run-claimed`,
-        type: "run_claimed",
-        title: "Runner claimed queued run",
-        detail: run.container_instance ? `container: ${run.container_instance}` : null,
-        timestamp: run.claimed_at,
-        level: "info",
-        stream: "system"
-      });
-    }
-
-    const startedAt = session.started_at ?? run?.started_at ?? null;
-    if (startedAt) {
-      events.push({
-        id: `${session.id}-started`,
-        type: "session_started",
-        title: "Session started",
-        detail: session.branch_ref ?? run?.trigger_ref ?? null,
-        timestamp: startedAt,
-        level: "info",
-        stream: "system"
-      });
-    }
-
-    const completedAt = session.completed_at ?? run?.completed_at ?? null;
-    if (completedAt) {
-      const cancelled = session.status === "cancelled";
-      const failed = session.status === "failed";
-      events.push({
-        id: `${session.id}-completed`,
-        type: cancelled ? "session_cancelled" : "session_completed",
-        title: cancelled
-          ? "Session cancelled"
-          : failed
-            ? "Session failed"
-            : "Session completed",
-        detail:
-          run?.exit_code !== null && run?.exit_code !== undefined
-            ? `exit code: ${run.exit_code}`
-            : session.status,
-        timestamp: completedAt,
-        level: cancelled ? "warning" : failed ? "error" : "success",
-        stream: "system"
-      });
-    }
-
-    return events;
-  }
-
-  private parseRunLogEvents(
-    session: AgentSessionRecord,
-    run: ActionRunRecord
-  ): AgentSessionTimelineEvent[] {
-    if (!run.logs.trim()) {
-      return [];
-    }
-
-    const lines = run.logs.split(/\r?\n/);
-    const logEvents: AgentSessionTimelineEvent[] = [];
-    let section: string | null = null;
-    const baseTimestamp = run.started_at ?? session.started_at ?? run.created_at ?? session.created_at;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-      const sectionMatch = trimmed.match(/^\[([a-z_]+)\]$/i);
-      if (sectionMatch) {
-        section = sectionMatch[1]?.toLowerCase() ?? null;
-        continue;
-      }
-      if (section === null) {
-        continue;
-      }
-      if (!TIMELINE_SYSTEM_LOG_SECTIONS.has(section) && !TIMELINE_ERROR_LOG_SECTIONS.has(section)) {
-        continue;
-      }
-
-      const timestamp = baseTimestamp !== null ? baseTimestamp + logEvents.length : null;
-      const isErrorSection = TIMELINE_ERROR_LOG_SECTIONS.has(section);
-      logEvents.push({
-        id: `${session.id}-log-${logEvents.length}`,
-        type: "log",
-        title: section.replaceAll("_", " "),
-        detail: line,
-        timestamp,
-        level: isErrorSection ? "error" : section === "mcp_setup" ? "warning" : "info",
-        stream: isErrorSection ? "error" : "system"
-      });
-    }
-
-    return logEvents;
-  }
-
   private async findRows(input: {
     repositoryId: string;
     limit?: number;
@@ -564,34 +517,7 @@ export class AgentSessionService {
 
     const rows = await this.db
       .prepare(
-        `SELECT
-          s.id,
-          s.repository_id,
-          s.source_type,
-          s.source_number,
-          s.source_comment_id,
-          s.origin,
-          s.status,
-          s.agent_type,
-          s.prompt,
-          s.branch_ref,
-          s.trigger_ref,
-          s.trigger_sha,
-          s.workflow_id,
-          w.name AS workflow_name,
-          s.linked_run_id,
-          s.created_by,
-          created_by_user.username AS created_by_username,
-          s.delegated_from_user_id,
-          delegated_user.username AS delegated_from_username,
-          s.created_at,
-          s.started_at,
-          s.completed_at,
-          s.updated_at
-         FROM agent_sessions s
-         LEFT JOIN action_workflows w ON w.id = s.workflow_id
-         LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
-         LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id
+        `${this.sessionSelectSql}
          WHERE ${whereClauses.join(" AND ")}
          ORDER BY s.created_at DESC
          LIMIT ?`
@@ -600,6 +526,48 @@ export class AgentSessionService {
       .all<AgentSessionRow>();
 
     return rows.results;
+  }
+
+  private parseLogEvents(session: AgentSessionRecord): AgentSessionTimelineEvent[] {
+    const logs = session.logs ?? "";
+    if (!logs.trim()) {
+      return [];
+    }
+
+    const lines = logs.split(/\r?\n/);
+    const logEvents: AgentSessionTimelineEvent[] = [];
+    let section: string | null = null;
+    const baseTimestamp = session.started_at ?? session.created_at;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const sectionMatch = trimmed.match(/^\[([a-z_]+)\]$/i);
+      if (sectionMatch) {
+        section = sectionMatch[1]?.toLowerCase() ?? null;
+        continue;
+      }
+      if (!section) {
+        continue;
+      }
+      if (!TIMELINE_SYSTEM_LOG_SECTIONS.has(section) && !TIMELINE_ERROR_LOG_SECTIONS.has(section)) {
+        continue;
+      }
+      const isErrorSection = TIMELINE_ERROR_LOG_SECTIONS.has(section);
+      logEvents.push({
+        id: `${session.id}-log-${logEvents.length}`,
+        type: "log",
+        title: section.replaceAll("_", " "),
+        detail: line,
+        timestamp: baseTimestamp + logEvents.length,
+        level: isErrorSection ? "error" : section === "mcp_setup" ? "warning" : "info",
+        stream: isErrorSection ? "error" : "system"
+      });
+    }
+
+    return logEvents;
   }
 
   async listSessions(input: {
@@ -621,43 +589,17 @@ export class AgentSessionService {
       return [];
     }
 
-    const placeholders = Array.from(new Set(sourceNumbers)).map(() => "?").join(", ");
+    const uniqueSourceNumbers = Array.from(new Set(sourceNumbers));
+    const placeholders = uniqueSourceNumbers.map(() => "?").join(", ");
     const rows = await this.db
       .prepare(
-        `SELECT
-          s.id,
-          s.repository_id,
-          s.source_type,
-          s.source_number,
-          s.source_comment_id,
-          s.origin,
-          s.status,
-          s.agent_type,
-          s.prompt,
-          s.branch_ref,
-          s.trigger_ref,
-          s.trigger_sha,
-          s.workflow_id,
-          w.name AS workflow_name,
-          s.linked_run_id,
-          s.created_by,
-          created_by_user.username AS created_by_username,
-          s.delegated_from_user_id,
-          delegated_user.username AS delegated_from_username,
-          s.created_at,
-          s.started_at,
-          s.completed_at,
-          s.updated_at
-         FROM agent_sessions s
-         LEFT JOIN action_workflows w ON w.id = s.workflow_id
-         LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
-         LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id
+        `${this.sessionSelectSql}
          WHERE s.repository_id = ?
            AND s.source_type = ?
            AND s.source_number IN (${placeholders})
          ORDER BY s.created_at DESC`
       )
-      .bind(repositoryId, sourceType, ...Array.from(new Set(sourceNumbers)))
+      .bind(repositoryId, sourceType, ...uniqueSourceNumbers)
       .all<AgentSessionRow>();
 
     const latestBySourceNumber = new Map<number, AgentSessionRecord>();
@@ -671,87 +613,48 @@ export class AgentSessionService {
     return Array.from(latestBySourceNumber.values());
   }
 
+  async listLatestSessionsByCommentIds(
+    repositoryId: string,
+    commentIds: readonly string[]
+  ): Promise<AgentSessionRecord[]> {
+    if (commentIds.length === 0) {
+      return [];
+    }
+
+    const uniqueCommentIds = Array.from(new Set(commentIds));
+    const placeholders = uniqueCommentIds.map(() => "?").join(", ");
+    const rows = await this.db
+      .prepare(
+        `${this.sessionSelectSql}
+         WHERE s.repository_id = ?
+           AND s.source_comment_id IN (${placeholders})
+         ORDER BY s.created_at DESC`
+      )
+      .bind(repositoryId, ...uniqueCommentIds)
+      .all<AgentSessionRow>();
+
+    const latestByCommentId = new Map<string, AgentSessionRecord>();
+    for (const row of rows.results) {
+      if (!row.source_comment_id || latestByCommentId.has(row.source_comment_id)) {
+        continue;
+      }
+      latestByCommentId.set(row.source_comment_id, this.mapRow(row));
+    }
+
+    return Array.from(latestByCommentId.values());
+  }
+
   async findSessionById(
     repositoryId: string,
     sessionId: string
   ): Promise<AgentSessionRecord | null> {
     const row = await this.db
       .prepare(
-        `SELECT
-          s.id,
-          s.repository_id,
-          s.source_type,
-          s.source_number,
-          s.source_comment_id,
-          s.origin,
-          s.status,
-          s.agent_type,
-          s.prompt,
-          s.branch_ref,
-          s.trigger_ref,
-          s.trigger_sha,
-          s.workflow_id,
-          w.name AS workflow_name,
-          s.linked_run_id,
-          s.created_by,
-          created_by_user.username AS created_by_username,
-          s.delegated_from_user_id,
-          delegated_user.username AS delegated_from_username,
-          s.created_at,
-          s.started_at,
-          s.completed_at,
-          s.updated_at
-         FROM agent_sessions s
-         LEFT JOIN action_workflows w ON w.id = s.workflow_id
-         LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
-         LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id
+        `${this.sessionSelectSql}
          WHERE s.repository_id = ? AND s.id = ?
          LIMIT 1`
       )
       .bind(repositoryId, sessionId)
-      .first<AgentSessionRow>();
-
-    return row ? this.mapRow(row) : null;
-  }
-
-  async findSessionByRunId(
-    repositoryId: string,
-    runId: string
-  ): Promise<AgentSessionRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT
-          s.id,
-          s.repository_id,
-          s.source_type,
-          s.source_number,
-          s.source_comment_id,
-          s.origin,
-          s.status,
-          s.agent_type,
-          s.prompt,
-          s.branch_ref,
-          s.trigger_ref,
-          s.trigger_sha,
-          s.workflow_id,
-          w.name AS workflow_name,
-          s.linked_run_id,
-          s.created_by,
-          created_by_user.username AS created_by_username,
-          s.delegated_from_user_id,
-          delegated_user.username AS delegated_from_username,
-          s.created_at,
-          s.started_at,
-          s.completed_at,
-          s.updated_at
-         FROM agent_sessions s
-         LEFT JOIN action_workflows w ON w.id = s.workflow_id
-         LEFT JOIN users created_by_user ON created_by_user.id = s.created_by
-         LEFT JOIN users delegated_user ON delegated_user.id = s.delegated_from_user_id
-         WHERE s.repository_id = ? AND s.linked_run_id = ?
-         LIMIT 1`
-      )
-      .bind(repositoryId, runId)
       .first<AgentSessionRow>();
 
     return row ? this.mapRow(row) : null;
@@ -834,6 +737,20 @@ export class AgentSessionService {
     return row ? this.mapArtifactRow(row) : null;
   }
 
+  async readSessionLogs(repositoryId: string, sessionId: string): Promise<string | null> {
+    const session = await this.findSessionById(repositoryId, sessionId);
+    if (!session) {
+      return null;
+    }
+    if (this.logStorage) {
+      const fullLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
+      if (fullLogs !== null) {
+        return fullLogs;
+      }
+    }
+    return session.logs;
+  }
+
   async readArtifactContent(
     repositoryId: string,
     sessionId: string,
@@ -843,16 +760,17 @@ export class AgentSessionService {
     if (!artifact) {
       return null;
     }
+
     if (this.logStorage && isLogArtifactKind(artifact.kind)) {
-      const content = await this.logStorage.readSessionArtifactLogs(
-        repositoryId,
-        sessionId,
-        artifact.kind
-      );
+      const content =
+        artifact.kind === "session_logs"
+          ? await this.logStorage.readSessionLogs(repositoryId, sessionId)
+          : await this.logStorage.readSessionArtifactLogs(repositoryId, sessionId, artifact.kind);
       if (content !== null) {
         return { artifact, content };
       }
     }
+
     return { artifact, content: artifact.content_text };
   }
 
@@ -947,103 +865,355 @@ export class AgentSessionService {
       .run();
   }
 
-  async recordRunClaimed(input: {
-    repositoryId: string;
-    runId: string;
-    containerInstance?: string | null;
-    claimedAt?: number;
-  }): Promise<void> {
-    const session = await this.findSessionByRunId(input.repositoryId, input.runId);
+  async createSessionExecution(input: CreateAgentSessionInput): Promise<AgentSessionRecord> {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const sessionNumber = await this.nextSessionNumber(input.repositoryId);
+    const branchRef = this.buildBranchRef(id);
+
+    await this.db
+      .prepare(
+        `INSERT INTO agent_sessions (
+          id,
+          repository_id,
+          session_number,
+          source_type,
+          source_number,
+          source_comment_id,
+          origin,
+          status,
+          agent_type,
+          instance_type,
+          prompt,
+          branch_ref,
+          trigger_ref,
+          trigger_sha,
+          workflow_id,
+          parent_session_id,
+          created_by,
+          delegated_from_user_id,
+          logs,
+          exit_code,
+          container_instance,
+          created_at,
+          claimed_at,
+          started_at,
+          completed_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        id,
+        input.repositoryId,
+        sessionNumber,
+        input.sourceType,
+        input.sourceNumber ?? null,
+        input.sourceCommentId ?? null,
+        input.origin,
+        input.status ?? "queued",
+        input.agentType,
+        input.instanceType,
+        input.prompt,
+        branchRef,
+        input.triggerRef ?? null,
+        input.triggerSha ?? null,
+        input.workflowId ?? null,
+        input.parentSessionId ?? null,
+        input.createdBy ?? null,
+        input.delegatedFromUserId ?? null,
+        "",
+        null,
+        null,
+        now,
+        null,
+        null,
+        null,
+        now
+      )
+      .run();
+
+    const session = await this.findSessionById(input.repositoryId, id);
     if (!session) {
-      return;
+      throw new Error("Created agent session not found");
     }
 
+    const sourceLabel =
+      session.source_number !== null ? `${session.source_type} #${session.source_number}` : session.source_type;
     await this.insertStep({
       sessionId: session.id,
       repositoryId: input.repositoryId,
-      kind: "run_claimed",
-      title: "Runner claimed queued run",
-      detail: input.containerInstance ? `container: ${input.containerInstance}` : null,
+      kind: "session_created",
+      title: "Session created",
+      detail: `${sourceLabel} · ${session.origin} · ${session.created_by_username ?? "system"}`,
       payload: {
-        runId: input.runId,
-        ...(input.containerInstance ? { containerInstance: input.containerInstance } : {})
+        sourceType: session.source_type,
+        sourceNumber: session.source_number,
+        origin: session.origin,
+        createdBy: session.created_by,
+        parentSessionId: session.parent_session_id
       },
-      ...(input.claimedAt !== undefined ? { createdAt: input.claimedAt } : {})
+      createdAt: now
     });
-  }
 
-  buildTimeline(input: {
-    session: AgentSessionRecord;
-    run: ActionRunRecord | null;
-    steps?: AgentSessionStepRecord[];
-    interventions?: AgentSessionInterventionRecord[];
-  }): AgentSessionTimelineEvent[] {
-    const { session, run, steps = [], interventions = [] } = input;
-    const lifecycleEvents =
-      steps.length > 0
-        ? steps.map<AgentSessionTimelineEvent>((step) => ({
-            id: `step-${step.id}`,
-            type:
-              step.kind === "session_cancelled"
-                ? "session_cancelled"
-                : step.kind === "session_completed"
-                  ? "session_completed"
-                  : step.kind,
-            title: step.title,
-            detail: step.detail,
-            timestamp: step.created_at,
-            level:
-              step.kind === "session_cancelled"
-                ? "warning"
-                : step.kind === "session_completed" &&
-                    step.payload &&
-                    step.payload.status === "failed"
-                  ? "error"
-                  : step.kind === "session_completed"
-                    ? "success"
-                    : "info",
-            stream: "system"
-          }))
-        : this.buildDerivedLifecycleEvents({ session, run });
-
-    const events = [...lifecycleEvents];
-
-    events.push(
-      ...interventions.map<AgentSessionTimelineEvent>((intervention) => ({
-        id: `intervention-${intervention.id}`,
-        type: "intervention",
-        title: intervention.title,
-        detail: intervention.detail,
-        timestamp: intervention.created_at,
-        level: intervention.kind === "cancel_requested" ? "warning" : "info",
-        stream: "system"
-      }))
-    );
-
-    if (run) {
-      events.push(...this.parseRunLogEvents(session, run));
+    if (session.status === "queued") {
+      await this.insertStep({
+        sessionId: session.id,
+        repositoryId: input.repositoryId,
+        kind: "session_queued",
+        title: `Session #${session.session_number} queued`,
+        detail: session.workflow_name?.trim() ? `${session.workflow_name} · queued` : "queued",
+        payload: {
+          sessionId: session.id,
+          sessionNumber: session.session_number,
+          workflowId: session.workflow_id,
+          workflowName: session.workflow_name
+        },
+        createdAt: now
+      });
     }
 
-    return events.sort((left, right) => {
-      if (left.timestamp === null && right.timestamp === null) {
-        return left.id.localeCompare(right.id);
-      }
-      if (left.timestamp === null) {
-        return 1;
-      }
-      if (right.timestamp === null) {
-        return -1;
-      }
-      if (left.timestamp === right.timestamp) {
-        return left.id.localeCompare(right.id);
-      }
-      return left.timestamp - right.timestamp;
+    return session;
+  }
+
+  async claimQueuedSession(
+    repositoryId: string,
+    sessionId: string,
+    containerInstance: string
+  ): Promise<number | null> {
+    const now = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET container_instance = ?, claimed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance IS NULL`
+      )
+      .bind(containerInstance, now, now, repositoryId, sessionId)
+      .run();
+
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes === 0) {
+      return null;
+    }
+
+    await this.insertStep({
+      sessionId,
+      repositoryId,
+      kind: "session_claimed",
+      title: "Runner claimed queued session",
+      detail: `container: ${containerInstance}`,
+      payload: {
+        sessionId,
+        containerInstance
+      },
+      createdAt: now
+    });
+    return now;
+  }
+
+  async updateSessionToRunning(
+    repositoryId: string,
+    sessionId: string,
+    containerInstance: string
+  ): Promise<number | null> {
+    const now = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = 'running', started_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued' AND container_instance = ?`
+      )
+      .bind(now, now, repositoryId, sessionId, containerInstance)
+      .run();
+
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes === 0) {
+      return null;
+    }
+
+    const session = await this.findSessionById(repositoryId, sessionId);
+    await this.insertStep({
+      sessionId,
+      repositoryId,
+      kind: "session_started",
+      title: "Session started",
+      detail: session?.branch_ref ?? null,
+      payload: {
+        sessionId,
+        branchRef: session?.branch_ref ?? null,
+        containerInstance
+      },
+      createdAt: now
+    });
+    return now;
+  }
+
+  async updateRunningSessionLogs(
+    repositoryId: string,
+    sessionId: string,
+    logs: string
+  ): Promise<boolean> {
+    const updatedAt = Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET logs = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'running'`
+      )
+      .bind(logs, updatedAt, repositoryId, sessionId)
+      .run();
+
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    return changes > 0;
+  }
+
+  async replaceSessionLogs(repositoryId: string, sessionId: string, logs: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET logs = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(logs, Date.now(), repositoryId, sessionId)
+      .run();
+  }
+
+  async completeSession(
+    repositoryId: string,
+    sessionId: string,
+    input: {
+      status: Extract<AgentSessionStatus, "success" | "failed" | "cancelled">;
+      logs: string;
+      exitCode?: number | null;
+    }
+  ): Promise<void> {
+    const now = Date.now();
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = ?, logs = ?, exit_code = ?, completed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(input.status, input.logs, input.exitCode ?? null, now, now, repositoryId, sessionId)
+      .run();
+
+    const completion = mapCompletionStep(input.status);
+    await this.insertStep({
+      sessionId,
+      repositoryId,
+      kind: completion.kind,
+      title: completion.title,
+      detail: input.status,
+      payload: {
+        sessionId,
+        status: input.status,
+        exitCode: input.exitCode ?? null
+      },
+      createdAt: now
     });
   }
 
-  async recordRunObservability(input: {
+  async failPendingSessionIfStillPending(
+    repositoryId: string,
+    sessionId: string,
+    input: {
+      logs: string;
+      exitCode?: number | null;
+      completedAt?: number;
+    }
+  ): Promise<{ updated: boolean; completedAt: number }> {
+    const completedAt = input.completedAt ?? Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = 'failed',
+             logs = ?,
+             exit_code = ?,
+             completed_at = ?,
+             updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status IN ('queued', 'running')`
+      )
+      .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, sessionId)
+      .run();
+
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes > 0) {
+      await this.insertStep({
+        sessionId,
+        repositoryId,
+        kind: "session_completed",
+        title: "Session failed",
+        detail: "failed",
+        payload: {
+          sessionId,
+          status: "failed",
+          exitCode: input.exitCode ?? null
+        },
+        createdAt: completedAt
+      });
+    }
+
+    return {
+      updated: changes > 0,
+      completedAt
+    };
+  }
+
+  async cancelQueuedSession(input: {
     repositoryId: string;
-    runId: string;
+    sessionId: string;
+    cancelledBy?: string | null;
+    completedAt?: number;
+  }): Promise<{ cancelled: boolean; completedAt: number }> {
+    const completedAt = input.completedAt ?? Date.now();
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET status = 'cancelled', completed_at = ?, updated_at = ?
+         WHERE repository_id = ? AND id = ? AND status = 'queued'`
+      )
+      .bind(completedAt, completedAt, input.repositoryId, input.sessionId)
+      .run();
+
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes > 0) {
+      await this.insertStep({
+        sessionId: input.sessionId,
+        repositoryId: input.repositoryId,
+        kind: "session_cancelled",
+        title: "Session cancelled",
+        detail: "cancelled",
+        payload: {
+          sessionId: input.sessionId,
+          status: "cancelled"
+        },
+        createdAt: completedAt
+      });
+      if (input.cancelledBy) {
+        await this.recordIntervention({
+          repositoryId: input.repositoryId,
+          sessionId: input.sessionId,
+          kind: "cancel_requested",
+          title: "Cancellation requested",
+          detail: "A user cancelled the queued session before it started.",
+          createdBy: input.cancelledBy,
+          payload: {
+            sessionId: input.sessionId,
+            status: "cancelled"
+          },
+          createdAt: completedAt
+        });
+      }
+    }
+
+    return {
+      cancelled: changes > 0,
+      completedAt
+    };
+  }
+
+  async recordSessionObservability(input: {
+    repositoryId: string;
+    sessionId: string;
     logs: string;
     result?: {
       exitCode?: number;
@@ -1057,32 +1227,26 @@ export class AgentSessionService {
     };
     recordedAt?: number;
   }): Promise<void> {
-    const session = await this.findSessionByRunId(input.repositoryId, input.runId);
+    const session = await this.findSessionById(input.repositoryId, input.sessionId);
     if (!session) {
       return;
     }
 
     const recordedAt = input.recordedAt ?? Date.now();
     const payloadBase = {
-      runId: input.runId,
+      sessionId: input.sessionId,
       ...(input.result?.validationReport ? { validationReport: input.result.validationReport } : {})
     };
-    const runLogs = input.logs.trim();
-    if (runLogs) {
+
+    if (input.logs.trim()) {
       if (this.logStorage) {
-        await this.logStorage.writeRunLogs(input.repositoryId, input.runId, input.logs);
-        await this.logStorage.writeSessionArtifactLogs(
-          input.repositoryId,
-          session.id,
-          "run_logs",
-          input.logs
-        );
+        await this.logStorage.writeSessionLogs(input.repositoryId, input.sessionId, input.logs);
       }
       await this.upsertArtifact({
         sessionId: session.id,
         repositoryId: input.repositoryId,
-        kind: "run_logs",
-        title: "Run logs",
+        kind: "session_logs",
+        title: "Session logs",
         mediaType: "text/plain",
         contentText: buildLogExcerpt(input.logs),
         sizeBytes: input.logs.length,
@@ -1092,10 +1256,10 @@ export class AgentSessionService {
       await this.upsertUsageRecord({
         sessionId: session.id,
         repositoryId: input.repositoryId,
-        kind: "run_log_chars",
+        kind: "log_chars",
         value: input.logs.length,
         unit: "chars",
-        detail: "Persisted action run log length",
+        detail: "Persisted session log length",
         payload: payloadBase,
         createdAt: recordedAt,
         updatedAt: recordedAt
@@ -1192,9 +1356,7 @@ export class AgentSessionService {
         detail: "Runner exit code",
         payload: {
           ...payloadBase,
-          ...(input.result.attemptedCommand
-            ? { attemptedCommand: input.result.attemptedCommand }
-            : {})
+          ...(input.result.attemptedCommand ? { attemptedCommand: input.result.attemptedCommand } : {})
         },
         createdAt: recordedAt,
         updatedAt: recordedAt
@@ -1210,9 +1372,7 @@ export class AgentSessionService {
         detail: input.result.mcpSetupWarning.trim(),
         payload: {
           ...payloadBase,
-          ...(input.result.attemptedCommand
-            ? { attemptedCommand: input.result.attemptedCommand }
-            : {}),
+          ...(input.result.attemptedCommand ? { attemptedCommand: input.result.attemptedCommand } : {}),
           ...(input.result.error ? { runnerError: input.result.error } : {})
         },
         createdAt: recordedAt
@@ -1220,296 +1380,236 @@ export class AgentSessionService {
     }
   }
 
-  async createSession(input: CreateAgentSessionInput): Promise<AgentSessionRecord> {
-    const id = crypto.randomUUID();
-    const now = Date.now();
-    const branchRef = this.buildBranchRef(id);
-
-    await this.db
-      .prepare(
-        `INSERT INTO agent_sessions (
-          id,
-          repository_id,
-          source_type,
-          source_number,
-          source_comment_id,
-          origin,
-          status,
-          agent_type,
-          prompt,
-          branch_ref,
-          trigger_ref,
-          trigger_sha,
-          workflow_id,
-          linked_run_id,
-          created_by,
-          delegated_from_user_id,
-          created_at,
-          started_at,
-          completed_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        id,
-        input.repositoryId,
-        input.sourceType,
-        input.sourceNumber ?? null,
-        input.sourceCommentId ?? null,
-        input.origin,
-        input.status ?? "queued",
-        input.agentType,
-        input.prompt,
-        branchRef,
-        input.triggerRef ?? null,
-        input.triggerSha ?? null,
-        input.workflowId ?? null,
-        input.linkedRunId ?? null,
-        input.createdBy ?? null,
-        input.delegatedFromUserId ?? null,
-        now,
-        null,
-        null,
-        now
-      )
-      .run();
-
-    const created = await this.findSessionById(input.repositoryId, id);
-    if (created) {
-      const sourceLabel =
-        created.source_number !== null
-          ? `${created.source_type} #${created.source_number}`
-          : created.source_type;
-      await this.insertStep({
-        sessionId: created.id,
-        repositoryId: input.repositoryId,
-        kind: "session_created",
-        title: "Session created",
-        detail: `${sourceLabel} · ${created.origin} · ${created.created_by_username ?? "system"}`,
-        payload: {
-          sourceType: created.source_type,
-          sourceNumber: created.source_number,
-          origin: created.origin,
-          createdBy: created.created_by
-        },
-        createdAt: now
-      });
-      return created;
-    }
-
-    const sourceLabel =
-      input.sourceNumber !== undefined && input.sourceNumber !== null
-        ? `${input.sourceType} #${input.sourceNumber}`
-        : input.sourceType;
-    await this.insertStep({
-      sessionId: id,
-      repositoryId: input.repositoryId,
-      kind: "session_created",
-      title: "Session created",
-      detail: `${sourceLabel} · ${input.origin} · ${input.createdBy ?? "system"}`,
-      payload: {
-        sourceType: input.sourceType,
-        sourceNumber: input.sourceNumber ?? null,
-        origin: input.origin,
-        createdBy: input.createdBy ?? null
-      },
-      createdAt: now
-    });
-
-    return {
-      id,
-      repository_id: input.repositoryId,
-      source_type: input.sourceType,
-      source_number: input.sourceNumber ?? null,
-      source_comment_id: input.sourceCommentId ?? null,
-      origin: input.origin,
-      status: input.status ?? "queued",
-      agent_type: input.agentType,
-      prompt: input.prompt,
-      branch_ref: branchRef,
-      trigger_ref: input.triggerRef ?? null,
-      trigger_sha: input.triggerSha ?? null,
-      workflow_id: input.workflowId ?? null,
-      workflow_name: null,
-      linked_run_id: input.linkedRunId ?? null,
-      created_by: input.createdBy ?? null,
-      created_by_username: null,
-      delegated_from_user_id: input.delegatedFromUserId ?? null,
-      delegated_from_username: null,
-      created_at: now,
-      started_at: null,
-      completed_at: null,
-      updated_at: now
-    };
+  async findSessionByRunId(
+    repositoryId: string,
+    runId: string
+  ): Promise<AgentSessionRecord | null> {
+    return this.findSessionById(repositoryId, runId);
   }
 
-  async createSessionForRun(input: CreateAgentSessionForRunInput): Promise<AgentSessionRecord> {
-    const existing = await this.findSessionByRunId(input.repositoryId, input.run.id);
-    if (existing) {
-      return existing;
-    }
-
-    const created = await this.createSession({
-      repositoryId: input.repositoryId,
-      sourceType: input.run.trigger_source_type ?? "manual",
-      sourceNumber: input.run.trigger_source_number ?? null,
-      sourceCommentId: input.run.trigger_source_comment_id ?? null,
-      origin: input.origin,
-      status: "queued",
-      agentType: input.run.agent_type,
-      prompt: input.run.prompt,
-      triggerRef: input.run.trigger_ref,
-      triggerSha: input.run.trigger_sha,
-      workflowId: input.run.workflow_id,
-      linkedRunId: input.run.id,
-      createdBy: input.createdBy ?? null,
-      delegatedFromUserId: input.delegatedFromUserId ?? input.createdBy ?? null
-    });
-
-    await this.insertStep({
-      sessionId: created.id,
-      repositoryId: input.repositoryId,
-      kind: "run_queued",
-      title: `Linked run #${input.run.run_number} queued`,
-      detail:
-        input.run.workflow_name && input.run.workflow_name.trim()
-          ? `${input.run.workflow_name} · queued`
-          : "queued",
-      payload: {
-        runId: input.run.id,
-        runNumber: input.run.run_number,
-        workflowId: input.run.workflow_id,
-        workflowName: input.run.workflow_name
-      },
-      createdAt: created.created_at
-    });
-
-    return created;
+  async recordRunClaimed(input: {
+    repositoryId: string;
+    runId: string;
+    containerInstance: string;
+    claimedAt?: number;
+  }): Promise<void> {
+    const claimedAt = input.claimedAt ?? Date.now();
+    await this.db
+      .prepare(
+        `UPDATE agent_sessions
+         SET container_instance = COALESCE(container_instance, ?),
+             claimed_at = COALESCE(claimed_at, ?),
+             updated_at = ?
+         WHERE repository_id = ? AND id = ?`
+      )
+      .bind(
+        input.containerInstance,
+        claimedAt,
+        claimedAt,
+        input.repositoryId,
+        input.runId
+      )
+      .run();
   }
 
   async syncSessionForRun(input: {
     repositoryId: string;
     runId: string;
-    status: AgentSessionStatus;
+    status?: AgentSessionStatus;
     startedAt?: number | null;
     completedAt?: number | null;
     updatedAt?: number;
   }): Promise<void> {
-    const updates: string[] = ["status = ?"];
-    const params: unknown[] = [input.status];
-
+    const updates: string[] = [];
+    const bindings: unknown[] = [];
+    if (input.status !== undefined) {
+      updates.push("status = ?");
+      bindings.push(input.status);
+    }
     if (input.startedAt !== undefined) {
       updates.push("started_at = ?");
-      params.push(input.startedAt);
+      bindings.push(input.startedAt);
     }
     if (input.completedAt !== undefined) {
       updates.push("completed_at = ?");
-      params.push(input.completedAt);
+      bindings.push(input.completedAt);
     }
     updates.push("updated_at = ?");
-    params.push(input.updatedAt ?? Date.now());
-
+    bindings.push(input.updatedAt ?? Date.now());
+    if (updates.length === 0) {
+      return;
+    }
     await this.db
       .prepare(
         `UPDATE agent_sessions
          SET ${updates.join(", ")}
-         WHERE repository_id = ? AND linked_run_id = ?`
-      )
-      .bind(...params, input.repositoryId, input.runId)
-      .run();
-
-    const session = await this.findSessionByRunId(input.repositoryId, input.runId);
-    if (!session) {
-      return;
-    }
-
-    if (input.startedAt !== undefined && input.startedAt !== null) {
-      await this.insertStep({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: "session_started",
-        title: "Session started",
-        detail: session.branch_ref ?? session.trigger_ref ?? null,
-        payload: {
-          runId: input.runId,
-          branchRef: session.branch_ref,
-          triggerRef: session.trigger_ref
-        },
-        createdAt: input.startedAt
-      });
-    }
-
-    if (input.completedAt !== undefined && input.completedAt !== null) {
-      const completedStepKind: AgentSessionStepKind =
-        input.status === "cancelled" ? "session_cancelled" : "session_completed";
-      const completedTitle =
-        input.status === "cancelled"
-          ? "Session cancelled"
-          : input.status === "failed"
-            ? "Session failed"
-            : "Session completed";
-      await this.insertStep({
-        sessionId: session.id,
-        repositoryId: input.repositoryId,
-        kind: completedStepKind,
-        title: completedTitle,
-        detail: input.status,
-        payload: {
-          runId: input.runId,
-          status: input.status
-        },
-        createdAt: input.completedAt
-      });
-    }
-  }
-
-  async cancelSession(input: {
-    repositoryId: string;
-    sessionId: string;
-    completedAt?: number;
-    updatedAt?: number;
-    cancelledBy?: string | null;
-  }): Promise<AgentSessionRecord | null> {
-    const completedAt = input.completedAt ?? Date.now();
-    const updatedAt = input.updatedAt ?? completedAt;
-    await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET status = 'cancelled',
-             completed_at = ?,
-             updated_at = ?
          WHERE repository_id = ? AND id = ?`
       )
-      .bind(completedAt, updatedAt, input.repositoryId, input.sessionId)
+      .bind(...bindings, input.repositoryId, input.runId)
       .run();
+  }
 
-    await this.insertStep({
-      sessionId: input.sessionId,
+  async recordRunObservability(input: {
+    repositoryId: string;
+    runId: string;
+    logs: string;
+    result?: {
+      exitCode?: number;
+      stdout?: string;
+      stderr?: string;
+      durationMs?: number;
+      error?: string;
+      attemptedCommand?: string;
+      mcpSetupWarning?: string;
+      validationReport?: AgentSessionValidationReport;
+    };
+    recordedAt?: number;
+  }): Promise<void> {
+    await this.recordSessionObservability({
       repositoryId: input.repositoryId,
-      kind: "session_cancelled",
-      title: "Session cancelled",
-      detail: "cancelled",
-      payload: {
-        status: "cancelled"
-      },
-      createdAt: completedAt
+      sessionId: input.runId,
+      logs: input.logs,
+      ...(input.result ? { result: input.result } : {}),
+      ...(input.recordedAt ? { recordedAt: input.recordedAt } : {})
     });
+  }
 
-    if (input.cancelledBy) {
-      await this.recordIntervention({
-        repositoryId: input.repositoryId,
-        sessionId: input.sessionId,
-        kind: "cancel_requested",
-        title: "Cancellation requested",
-        detail: "A user cancelled the queued session before it started.",
-        createdBy: input.cancelledBy,
-        payload: {
-          status: "cancelled"
-        },
-        createdAt: completedAt
-      });
-    }
+  buildTimeline(input: {
+    session: AgentSessionRecord;
+    steps?: AgentSessionStepRecord[];
+    interventions?: AgentSessionInterventionRecord[];
+  }): AgentSessionTimelineEvent[] {
+    const { session, steps = [], interventions = [] } = input;
+    const sourceLabel =
+      session.source_number !== null ? `${session.source_type} #${session.source_number}` : session.source_type;
+    const actorLabel = session.created_by_username ?? "system";
 
-    return this.findSessionById(input.repositoryId, input.sessionId);
+    const fallbackLifecycleEvents: AgentSessionTimelineEvent[] = [
+      {
+        id: `${session.id}-created`,
+        type: "session_created",
+        title: "Session created",
+        detail: `${sourceLabel} · ${session.origin} · ${actorLabel}`,
+        timestamp: session.created_at,
+        level: "info",
+        stream: "system"
+      },
+      {
+        id: `${session.id}-queued`,
+        type: "session_queued",
+        title: `Session #${session.session_number} queued`,
+        detail: session.workflow_name?.trim() ? `${session.workflow_name} · queued` : "queued",
+        timestamp: session.created_at,
+        level: "info",
+        stream: "system"
+      },
+      ...(session.claimed_at
+        ? [
+            {
+              id: `${session.id}-claimed`,
+              type: "session_claimed" as const,
+              title: "Runner claimed queued session",
+              detail: session.container_instance ? `container: ${session.container_instance}` : null,
+              timestamp: session.claimed_at,
+              level: "info" as const,
+              stream: "system" as const
+            }
+          ]
+        : []),
+      ...(session.started_at
+        ? [
+            {
+              id: `${session.id}-started`,
+              type: "session_started" as const,
+              title: "Session started",
+              detail: session.branch_ref ?? null,
+              timestamp: session.started_at,
+              level: "info" as const,
+              stream: "system" as const
+            }
+          ]
+        : []),
+      ...(session.completed_at
+        ? [
+            {
+              id: `${session.id}-completed`,
+              type: session.status === "cancelled" ? ("session_cancelled" as const) : ("session_completed" as const),
+              title:
+                session.status === "cancelled"
+                  ? "Session cancelled"
+                  : session.status === "failed"
+                    ? "Session failed"
+                    : "Session completed",
+              detail:
+                session.exit_code !== null && session.exit_code !== undefined
+                  ? `exit code: ${session.exit_code}`
+                  : session.status,
+              timestamp: session.completed_at,
+              level:
+                session.status === "cancelled"
+                  ? ("warning" as const)
+                  : session.status === "failed"
+                    ? ("error" as const)
+                    : ("success" as const),
+              stream: "system" as const
+            }
+          ]
+        : [])
+    ];
+
+    const lifecycleEvents: AgentSessionTimelineEvent[] =
+      steps.length > 0
+        ? steps.map<AgentSessionTimelineEvent>((step) => {
+            const level =
+              step.kind === "session_cancelled"
+                ? "warning"
+                : step.kind === "session_completed" &&
+                    step.payload &&
+                    step.payload.status === "failed"
+                  ? "error"
+                  : step.kind === "session_completed"
+                    ? "success"
+                    : "info";
+            return {
+              id: `step-${step.id}`,
+              type: step.kind,
+              title: step.title,
+              detail: step.detail,
+              timestamp: step.created_at,
+              level,
+              stream: "system"
+            };
+          })
+        : fallbackLifecycleEvents;
+
+    const events = [
+      ...lifecycleEvents,
+      ...interventions.map<AgentSessionTimelineEvent>((intervention) => ({
+        id: `intervention-${intervention.id}`,
+        type: "intervention",
+        title: intervention.title,
+        detail: intervention.detail,
+        timestamp: intervention.created_at,
+        level: intervention.kind === "cancel_requested" ? "warning" : "info",
+        stream: "system"
+      })),
+      ...this.parseLogEvents(session)
+    ];
+
+    return events.sort((left, right) => {
+      if (left.timestamp === null && right.timestamp === null) {
+        return left.id.localeCompare(right.id);
+      }
+      if (left.timestamp === null) {
+        return 1;
+      }
+      if (right.timestamp === null) {
+        return -1;
+      }
+      if (left.timestamp === right.timestamp) {
+        return left.id.localeCompare(right.id);
+      }
+      return left.timestamp - right.timestamp;
+    });
   }
 }

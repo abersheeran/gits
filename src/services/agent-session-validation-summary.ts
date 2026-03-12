@@ -1,7 +1,7 @@
 import type {
-  ActionRunStatus,
   AgentSessionArtifactRecord,
   AgentSessionInterventionRecord,
+  AgentSessionStatus,
   AgentSessionUsageKind,
   AgentSessionUsageRecord,
   AgentSessionValidationCheckKind,
@@ -71,7 +71,7 @@ function usageRecordValue(
 }
 
 function mapRunStatusToCheckStatus(
-  status: ActionRunStatus | null
+  status: AgentSessionStatus | null
 ): AgentSessionValidationCheckStatus {
   if (status === "success") {
     return "passed";
@@ -120,7 +120,7 @@ function commandEvidenceScore(line: string): number {
 
 function collectLogLines(artifacts: AgentSessionArtifactRecord[]): string[] {
   const artifactPriority = new Map<string, number>([
-    ["run_logs", 0],
+    ["session_logs", 0],
     ["stdout", 1],
     ["stderr", 2]
   ]);
@@ -138,7 +138,7 @@ function collectLogLines(artifacts: AgentSessionArtifactRecord[]): string[] {
 function detectValidationCheck(
   definition: ValidationCheckDefinition,
   lines: string[],
-  overallStatus: ActionRunStatus | null
+  overallStatus: AgentSessionStatus | null
 ): AgentSessionValidationCheckRecord | null {
   let bestMatch: { line: string; score: number } | null = null;
   for (const line of lines) {
@@ -180,7 +180,7 @@ function detectValidationCheck(
 
 function prioritizeArtifacts(
   artifacts: AgentSessionArtifactRecord[],
-  overallStatus: ActionRunStatus | null,
+  overallStatus: AgentSessionStatus | null,
   checks: AgentSessionValidationCheckRecord[]
 ): string[] {
   const checkKeywordScores = checks
@@ -200,12 +200,12 @@ function prioritizeArtifacts(
     overallStatus === "failed" || overallStatus === "cancelled"
       ? new Map<string, number>([
           ["stderr", 0],
-          ["run_logs", 1],
+          ["session_logs", 1],
           ["stdout", 2]
         ])
       : new Map<string, number>([
           ["stdout", 0],
-          ["run_logs", 1],
+          ["session_logs", 1],
           ["stderr", 2]
         ]);
 
@@ -239,7 +239,7 @@ function prioritizeArtifacts(
 }
 
 function buildHeadline(args: {
-  status: ActionRunStatus | null;
+  status: AgentSessionStatus | null;
   checks: AgentSessionValidationCheckRecord[];
   exitCode: number | null;
 }): string {
@@ -269,7 +269,7 @@ function buildHeadline(args: {
 }
 
 function buildDetail(args: {
-  status: ActionRunStatus | null;
+  status: AgentSessionStatus | null;
   checks: AgentSessionValidationCheckRecord[];
   exitCode: number | null;
   interventions: AgentSessionInterventionRecord[];
@@ -296,7 +296,7 @@ function buildDetail(args: {
 }
 
 export function buildAgentSessionValidationSummary(input: {
-  status: ActionRunStatus | null;
+  status: AgentSessionStatus | null;
   artifacts: AgentSessionArtifactRecord[];
   usageRecords: AgentSessionUsageRecord[];
   interventions: AgentSessionInterventionRecord[];

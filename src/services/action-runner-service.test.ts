@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentSessionRecord } from "../types";
 import { executeActionRun } from "./action-runner-service";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
@@ -20,6 +21,48 @@ function createStartedRunnerResponse(payload: unknown, startedAt = 2): Response 
       "x-gits-run-started-at": String(startedAt)
     }
   });
+}
+
+function buildSession(overrides?: Partial<AgentSessionRecord>): AgentSessionRecord {
+  return {
+    id: "session-1",
+    repository_id: "repo-1",
+    session_number: 1,
+    run_number: 1,
+    source_type: "manual",
+    source_number: null,
+    source_comment_id: null,
+    trigger_source_type: null,
+    trigger_source_number: null,
+    trigger_source_comment_id: null,
+    origin: "manual",
+    status: "queued",
+    agent_type: "codex",
+    instance_type: "lite",
+    prompt: "请执行测试并修复失败。",
+    branch_ref: null,
+    trigger_ref: "refs/heads/main",
+    trigger_sha: "abc123",
+    workflow_id: null,
+    workflow_name: null,
+    parent_session_id: null,
+    linked_run_id: null,
+    created_by: null,
+    created_by_username: null,
+    delegated_from_user_id: null,
+    delegated_from_username: null,
+    triggered_by: null,
+    triggered_by_username: null,
+    logs: "",
+    exit_code: null,
+    container_instance: null,
+    created_at: 1,
+    claimed_at: null,
+    started_at: null,
+    completed_at: null,
+    updated_at: 1,
+    ...overrides
+  };
 }
 
 describe("executeActionRun", () => {
@@ -53,7 +96,7 @@ describe("executeActionRun", () => {
 
       expect(payload.repositoryId).toBe("repo-1");
       expect(payload.runId).toBe("run-1");
-      expect(payload.containerInstance).toBe("action-run-run-1");
+      expect(payload.containerInstance).toBe("agent-session-run-1");
 
       expect(payload.configFiles).toEqual({
         "/home/rootless/.codex/config.toml": "model = \"gpt-5-codex\"",
@@ -92,18 +135,14 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-1",
+        session_number: 1,
         run_number: 1,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
         prompt: "请执行测试并修复失败。",
         trigger_ref: "refs/heads/main",
-        trigger_sha: "abc123",
-        trigger_source_type: null,
-        trigger_source_number: null
-      },
+        trigger_sha: "abc123"
+      }),
       requestOrigin: "http://localhost:8787"
     });
 
@@ -162,18 +201,15 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-2",
+        session_number: 2,
         run_number: 2,
-        repository_id: "repo-1",
-        agent_type: "codex",
         instance_type: "standard-3",
         prompt: "请执行测试并修复失败。",
         trigger_ref: "refs/heads/main",
-        trigger_sha: "abc123",
-        trigger_source_type: null,
-        trigger_source_number: null
-      },
+        trigger_sha: "abc123"
+      }),
       requestOrigin: "http://localhost:8787"
     });
 
@@ -260,18 +296,16 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-3",
+        session_number: 3,
         run_number: 3,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
+        source_type: "issue",
+        source_number: 42,
         prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
         trigger_ref: "refs/heads/main",
-        trigger_sha: "abc123",
-        trigger_source_type: "issue",
-        trigger_source_number: 42
-      },
+        trigger_sha: "abc123"
+      }),
       triggeredByUser: {
         id: "user-1",
         username: "alice"
@@ -297,32 +331,6 @@ describe("executeActionRun", () => {
       inheritsGlobalClaudeCodeConfig: true,
       updated_at: 1
     });
-    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue({
-      id: "session-1",
-      repository_id: "repo-1",
-      source_type: "issue",
-      source_number: 42,
-      source_comment_id: null,
-      origin: "issue_assign",
-      status: "queued",
-      agent_type: "codex",
-      prompt: "do the work",
-      branch_ref: "refs/heads/agent/session-1",
-      trigger_ref: "refs/heads/main",
-      trigger_sha: "abc123",
-      workflow_id: "workflow-1",
-      workflow_name: "__agent_session_internal__codex",
-      linked_run_id: "run-4",
-      created_by: "user-1",
-      created_by_username: "alice",
-      delegated_from_user_id: "user-1",
-      delegated_from_username: "alice",
-      created_at: 1,
-      started_at: null,
-      completed_at: null,
-      updated_at: 1
-    });
-
     const runnerFetch = vi.fn(async (_url: string, init?: RequestInit) =>
       createStartedRunnerResponse({ exitCode: 0, durationMs: 25 })
     );
@@ -355,18 +363,24 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
-        id: "run-4",
+      session: buildSession({
+        id: "session-1",
+        session_number: 4,
         run_number: 4,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
+        source_type: "issue",
+        source_number: 42,
+        origin: "issue_assign",
         prompt: `reply with ${ISSUE_REPLY_TOKEN_PLACEHOLDER} and open pr with ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}`,
+        branch_ref: "refs/heads/agent/session-1",
         trigger_ref: "refs/heads/main",
         trigger_sha: "abc123",
-        trigger_source_type: "issue",
-        trigger_source_number: 42
-      },
+        workflow_id: "workflow-1",
+        workflow_name: "__agent_session_internal__codex",
+        created_by: "user-1",
+        created_by_username: "alice",
+        delegated_from_user_id: "user-1",
+        delegated_from_username: "alice"
+      }),
       triggeredByUser: {
         id: "user-1",
         username: "alice"
@@ -401,7 +415,6 @@ describe("executeActionRun", () => {
       inheritsGlobalClaudeCodeConfig: true,
       updated_at: 1
     });
-    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
     const reconcileSourceTaskStatus = vi
       .spyOn(WorkflowTaskFlowService.prototype, "reconcileSourceTaskStatus")
       .mockResolvedValue([]);
@@ -438,18 +451,16 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-5",
+        session_number: 5,
         run_number: 5,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
+        source_type: "pull_request",
+        source_number: 7,
         prompt: "ship it",
         trigger_ref: "refs/heads/feature",
-        trigger_sha: "abc123",
-        trigger_source_type: "pull_request",
-        trigger_source_number: 7
-      },
+        trigger_sha: "abc123"
+      }),
       requestOrigin: "http://localhost:8787"
     });
 
@@ -476,7 +487,6 @@ describe("executeActionRun", () => {
       inheritsGlobalClaudeCodeConfig: true,
       updated_at: 1
     });
-    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
     const recordRunObservability = vi
       .spyOn(AgentSessionService.prototype, "recordRunObservability")
       .mockResolvedValue();
@@ -517,18 +527,16 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-6",
+        session_number: 6,
         run_number: 6,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
+        source_type: "issue",
+        source_number: 42,
         prompt: "ship it",
         trigger_ref: "refs/heads/feature",
-        trigger_sha: "abc123",
-        trigger_source_type: "issue",
-        trigger_source_number: 42
-      },
+        trigger_sha: "abc123"
+      }),
       requestOrigin: "http://localhost:8787"
     });
 
@@ -566,7 +574,6 @@ describe("executeActionRun", () => {
       inheritsGlobalClaudeCodeConfig: true,
       updated_at: 1
     });
-    vi.spyOn(AgentSessionService.prototype, "findSessionByRunId").mockResolvedValue(null);
     const recordRunObservability = vi
       .spyOn(AgentSessionService.prototype, "recordRunObservability")
       .mockResolvedValue();
@@ -613,18 +620,16 @@ describe("executeActionRun", () => {
         is_private: 1,
         created_at: 1
       },
-      run: {
+      session: buildSession({
         id: "run-5",
+        session_number: 5,
         run_number: 5,
-        repository_id: "repo-1",
-        agent_type: "codex",
-        instance_type: "lite",
+        source_type: "issue",
+        source_number: 42,
         prompt: "ship it",
         trigger_ref: "refs/heads/main",
-        trigger_sha: "abc123",
-        trigger_source_type: "issue",
-        trigger_source_number: 42
-      },
+        trigger_sha: "abc123"
+      }),
       triggeredByUser: {
         id: "user-1",
         username: "alice"

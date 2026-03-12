@@ -441,14 +441,7 @@ curl -sS -X POST "$BASE_URL/api/repos/alice/demo/actions/workflows" \
 - `pull_request_created`
 - `push`
 
-### 8.10 查看 run 与 session
-
-列出仓库 run：
-
-```bash
-curl -sS "$BASE_URL/api/repos/alice/demo/actions/runs" \
-  -H "authorization: Bearer $SESSION_TOKEN"
-```
+### 8.10 查看 Agent session
 
 列出仓库 session：
 

@@ -1683,7 +1683,6 @@ describe("API pull request routes", () => {
       .mockResolvedValue([]);
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("workflow-interactive")
-      .mockReturnValueOnce("run-thread-resume")
       .mockReturnValueOnce("session-thread-resume");
     const enqueueRun = vi.fn(async () => undefined);
     const now = Date.now();
@@ -1774,53 +1773,27 @@ describe("API pull request routes", () => {
         run: () => ({ success: true })
       },
       {
-        when: "RETURNING action_run_seq AS run_number",
-        first: () => ({ run_number: 7 })
-      },
-      {
-        when: "INSERT INTO action_runs",
-        run: (params) => {
-          insertedPrompt = String(params[15] ?? "");
-          return { success: true };
-        }
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-thread-resume",
-            run_number: 7,
-            workflow_id: "workflow-interactive",
-            workflow_name: "__agent_session_internal__codex",
-            trigger_event: "mention_actions",
-            trigger_ref: "refs/heads/feature",
-            trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 1,
-            triggered_by: "user-2",
-            triggered_by_username: "bob",
-            prompt: insertedPrompt || "placeholder",
-            created_at: now,
-            updated_at: now
-          })
-      },
-      {
-        when: "WHERE s.repository_id = ? AND s.linked_run_id = ?",
-        first: () => null
+        when: "RETURNING session_number_seq AS session_number",
+        first: () => ({ session_number: 7 })
       },
       {
         when: "INSERT INTO agent_sessions",
-        run: () => ({ success: true })
+        run: (params) => {
+          insertedPrompt = String(params[10] ?? "");
+          return { success: true };
+        }
       },
       {
         when: "WHERE s.repository_id = ? AND s.id = ?",
         first: () =>
           buildAgentSessionRow({
             id: "session-thread-resume",
+            session_number: 7,
             source_number: 1,
             origin: "pull_request_resume",
-            linked_run_id: "run-thread-resume",
             prompt: insertedPrompt || "placeholder",
+            workflow_id: "workflow-interactive",
+            workflow_name: "__agent_session_internal__codex",
             created_at: now,
             updated_at: now
           })
@@ -1850,13 +1823,10 @@ describe("API pull request routes", () => {
 
     expect(response.status).toBe(202);
     const body = (await response.json()) as {
-      run: { id: string; run_number: number; status: string };
-      session: { id: string; status: string; origin: string };
+      session: { id: string; session_number: number; status: string; origin: string };
     };
-    expect(body.run.id).toBe("run-thread-resume");
-    expect(body.run.run_number).toBe(7);
-    expect(body.run.status).toBe("queued");
     expect(body.session.id).toBe("session-thread-resume");
+    expect(body.session.session_number).toBe(7);
     expect(body.session.status).toBe("queued");
     expect(body.session.origin).toBe("pull_request_resume");
     expect(reconcileIssuesForPullRequest).toHaveBeenCalledWith({
@@ -1909,26 +1879,11 @@ describe("API pull request routes", () => {
             id: "session-pr-provenance",
             source_number: 1,
             origin: "pull_request_resume",
-            linked_run_id: "run-pr-provenance",
-            created_at: now - 10_000,
-            updated_at: now - 5_000
-          })
-        ]
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-pr-provenance",
-            run_number: 9,
-            workflow_name: "__agent_session_internal__codex",
-            trigger_event: "mention_actions",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 1,
             status: "running",
             created_at: now - 10_000,
             updated_at: now - 5_000
           })
+        ]
       },
       {
         when: "FROM agent_session_artifacts",
@@ -1992,7 +1947,6 @@ describe("API pull request routes", () => {
     const body = (await response.json()) as {
       latestSession: {
         session: { id: string; origin: string };
-        linkedRun: { id: string; status: string } | null;
         sourceContext: { type: string; number: number | null; title: string | null; url: string | null };
         artifacts: Array<{ kind: string; title: string }>;
         usageRecords: Array<{ kind: string; value: number }>;
@@ -2002,8 +1956,6 @@ describe("API pull request routes", () => {
     };
     expect(body.latestSession?.session.id).toBe("session-pr-provenance");
     expect(body.latestSession?.session.origin).toBe("pull_request_resume");
-    expect(body.latestSession?.linkedRun?.id).toBe("run-pr-provenance");
-    expect(body.latestSession?.linkedRun?.status).toBe("running");
     expect(body.latestSession?.sourceContext.type).toBe("pull_request");
     expect(body.latestSession?.sourceContext.number).toBe(1);
     expect(body.latestSession?.sourceContext.title).toBe("Improve README");
@@ -2029,26 +1981,11 @@ describe("API pull request routes", () => {
             id: "session-pr-batch",
             source_number: 1,
             origin: "pull_request_resume",
-            linked_run_id: "run-pr-batch",
-            created_at: now - 8_000,
-            updated_at: now - 4_000
-          })
-        ]
-      },
-      {
-        when: "WHERE r.repository_id = ? AND r.id = ?",
-        first: () =>
-          buildActionRunRow({
-            id: "run-pr-batch",
-            run_number: 11,
-            workflow_name: "__agent_session_internal__codex",
-            trigger_event: "mention_actions",
-            trigger_source_type: "pull_request",
-            trigger_source_number: 1,
             status: "success",
             created_at: now - 8_000,
             updated_at: now - 4_000
           })
+        ]
       },
       {
         when: "WHERE pr.repository_id = ? AND pr.number = ?",
@@ -2129,7 +2066,6 @@ describe("API pull request routes", () => {
         sourceNumber: number;
         latestSession: {
           session: { id: string };
-          linkedRun: { id: string; status: string } | null;
           sourceContext: { type: string; number: number | null; title: string | null };
           artifacts: Array<{ title: string }>;
           usageRecords: Array<{ kind: string; value: number }>;
@@ -2141,8 +2077,6 @@ describe("API pull request routes", () => {
     expect(body.items).toHaveLength(2);
     expect(body.items[0]?.sourceNumber).toBe(1);
     expect(body.items[0]?.latestSession?.session.id).toBe("session-pr-batch");
-    expect(body.items[0]?.latestSession?.linkedRun?.id).toBe("run-pr-batch");
-    expect(body.items[0]?.latestSession?.linkedRun?.status).toBe("success");
     expect(body.items[0]?.latestSession?.sourceContext.type).toBe("pull_request");
     expect(body.items[0]?.latestSession?.sourceContext.number).toBe(1);
     expect(body.items[0]?.latestSession?.sourceContext.title).toBe("Improve README");
