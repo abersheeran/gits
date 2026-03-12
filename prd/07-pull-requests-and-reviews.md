@@ -32,6 +32,7 @@ PR 是当前产品里的交付中心和评审中心。
 - 文件 diff
 - `Files changed` 默认只显示改动行以及上下 5 行代码，允许用户按需展开更多上下文
 - `Files changed` 与 commit changes 左侧展示按目录组织的文件树，并标记新增 / 修改 / 删除文件
+- `Files changed` 中新增或删除的文本文件继续按文本 diff 展示，不会错误降级成 `Binary change`
 - review summary
 - validation summary
 - merge summary

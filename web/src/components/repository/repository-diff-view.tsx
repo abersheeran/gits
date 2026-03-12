@@ -45,7 +45,7 @@ const LazyRepositoryChangeDiffEditor = lazy(async () => {
 function changeBadgeVariant(status: RepositoryCompareChange["status"]) {
   switch (status) {
     case "added":
-      return "default";
+      return "success";
     case "deleted":
       return "destructive";
     default:
@@ -151,12 +151,14 @@ function RepositoryDiffEditorFallback(props: {
   height: number;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-md border bg-background", props.className)}>
-      <div
-        className="flex items-center justify-center px-3 py-2 text-xs text-muted-foreground"
-        style={{ height: props.height }}
-      >
-        Loading diff…
+    <div className={cn("monaco-shell", props.className)}>
+      <div className="monaco-shell__viewport">
+        <div
+          className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
+          style={{ height: props.height }}
+        >
+          Loading diff…
+        </div>
       </div>
     </div>
   );

@@ -46,6 +46,11 @@ export default {
           border: "var(--border-danger)",
           text: "var(--text-danger)",
         },
+        success: {
+          DEFAULT: "var(--color-status-success)",
+          foreground: "var(--text-inverse)",
+          surface: "var(--color-status-success-muted)",
+        },
         background: "var(--color-surface-canvas)",
         foreground: "var(--text-primary)",
         input: "var(--border-default)",

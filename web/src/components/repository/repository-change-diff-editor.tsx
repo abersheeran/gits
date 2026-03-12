@@ -254,65 +254,71 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
   }
 
   return (
-    <div className="overflow-hidden rounded-md border bg-background">
-      <DiffEditor
-        original={props.change.oldContent ?? ""}
-        modified={props.change.newContent ?? ""}
-        originalModelPath={originalPath}
-        modifiedModelPath={modifiedPath}
-        language={language}
-        theme="gits-light"
-        height={props.height}
-        loading={<div className="px-3 py-2 text-xs text-muted-foreground">Loading diff…</div>}
-        beforeMount={configureMonaco}
-        onMount={(editor, monacoInstance) => {
-          diffEditorRef.current = editor;
-          monacoRef.current = monacoInstance;
-          originalListenerRef.current?.dispose();
-          modifiedListenerRef.current?.dispose();
-          originalListenerRef.current = bindLineSelection(editor.getOriginalEditor(), "base");
-          modifiedListenerRef.current = bindLineSelection(editor.getModifiedEditor(), "head");
-        }}
-        options={{
-          automaticLayout: true,
-          contextmenu: true,
-          diffCodeLens: false,
-          enableSplitViewResizing: true,
-          folding: false,
-          fontFamily: monacoViewerFontFamily(),
-          fontSize: 12,
-          glyphMargin: true,
-          lineDecorationsWidth: 12,
-          lineHeight: 20,
-          minimap: {
-            enabled: false
-          },
-          originalEditable: false,
-          overviewRulerBorder: false,
-          readOnly: true,
-          hideUnchangedRegions: {
-            enabled: true,
-            contextLineCount: DIFF_CONTEXT_LINE_COUNT,
-            revealLineCount: DIFF_HIDDEN_REGION_REVEAL_LINE_COUNT,
-            minimumLineCount: DIFF_HIDDEN_REGION_MINIMUM_LINE_COUNT
-          },
-          renderIndicators: true,
-          renderMarginRevertIcon: false,
-          renderOverviewRuler: false,
-          renderSideBySide: true,
-          scrollBeyondLastLine: false,
-          scrollbar: {
-            alwaysConsumeMouseWheel: false,
-            horizontalScrollbarSize: 10,
-            verticalScrollbarSize: 10
-          },
-          stickyScroll: {
-            enabled: false
-          },
-          useInlineViewWhenSpaceIsLimited: true,
-          wordWrap: "off"
-        }}
-      />
+    <div className="monaco-shell">
+      <div className="monaco-shell__viewport">
+        <DiffEditor
+          original={props.change.oldContent ?? ""}
+          modified={props.change.newContent ?? ""}
+          originalModelPath={originalPath}
+          modifiedModelPath={modifiedPath}
+          language={language}
+          theme="gits-light"
+          height={props.height}
+          loading={<div className="px-3 py-2 text-xs text-text-secondary">Loading diff…</div>}
+          beforeMount={configureMonaco}
+          onMount={(editor, monacoInstance) => {
+            diffEditorRef.current = editor;
+            monacoRef.current = monacoInstance;
+            originalListenerRef.current?.dispose();
+            modifiedListenerRef.current?.dispose();
+            originalListenerRef.current = bindLineSelection(editor.getOriginalEditor(), "base");
+            modifiedListenerRef.current = bindLineSelection(editor.getModifiedEditor(), "head");
+          }}
+          options={{
+            automaticLayout: true,
+            contextmenu: true,
+            diffCodeLens: false,
+            enableSplitViewResizing: true,
+            folding: false,
+            fontFamily: monacoViewerFontFamily(),
+            fontSize: 12,
+            glyphMargin: true,
+            lineDecorationsWidth: 12,
+            lineHeight: 20,
+            minimap: {
+              enabled: false
+            },
+            originalEditable: false,
+            overviewRulerBorder: false,
+            padding: {
+              top: 10,
+              bottom: 10
+            },
+            readOnly: true,
+            hideUnchangedRegions: {
+              enabled: true,
+              contextLineCount: DIFF_CONTEXT_LINE_COUNT,
+              revealLineCount: DIFF_HIDDEN_REGION_REVEAL_LINE_COUNT,
+              minimumLineCount: DIFF_HIDDEN_REGION_MINIMUM_LINE_COUNT
+            },
+            renderIndicators: true,
+            renderMarginRevertIcon: false,
+            renderOverviewRuler: false,
+            renderSideBySide: true,
+            scrollBeyondLastLine: false,
+            scrollbar: {
+              alwaysConsumeMouseWheel: false,
+              horizontalScrollbarSize: 10,
+              verticalScrollbarSize: 10
+            },
+            stickyScroll: {
+              enabled: false
+            },
+            useInlineViewWhenSpaceIsLimited: true,
+            wordWrap: "off"
+          }}
+        />
+      </div>
     </div>
   );
 }

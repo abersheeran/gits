@@ -16,6 +16,8 @@ const twMerge = extendTailwindMerge({
         "text-destructive",
         "text-destructive-foreground",
         "text-danger-text",
+        "text-success",
+        "text-success-foreground",
         "text-text-primary",
         "text-text-secondary",
         "text-text-tertiary",

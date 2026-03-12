@@ -12,6 +12,7 @@ const badgeVariants = cva(
           "border-transparent bg-action-primaryBg text-text-inverse shadow-button",
         secondary: "border-transparent bg-fill-primary text-text-primary",
         destructive: "border-danger-border bg-danger-surface text-danger-text",
+        success: "border-transparent bg-success-surface text-success",
         outline: "border-border-subtle bg-surface-base text-text-supporting",
       },
     },

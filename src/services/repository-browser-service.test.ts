@@ -88,6 +88,14 @@ describe("RepositoryBrowserService", () => {
     expect(readmeChange?.hunks.length).toBeGreaterThan(0);
     expect(readmeChange?.hunks[0]?.lines.some((line) => line.kind === "add")).toBe(true);
     expect(readmeChange?.hunks[0]?.lines.some((line) => line.kind === "context")).toBe(true);
+
+    const addedTextChange = detail.changes.find((change) => change.path === "src/app.txt");
+    expect(addedTextChange?.status).toBe("added");
+    expect(addedTextChange?.isBinary).toBe(false);
+    expect(addedTextChange?.oldContent).toBe("");
+    expect(addedTextChange?.newContent).toContain("console.log('hello')");
+    expect(addedTextChange?.hunks.length).toBeGreaterThan(0);
+    expect(addedTextChange?.hunks[0]?.lines.some((line) => line.kind === "add")).toBe(true);
   });
 
   it("returns structured diff hunks for compare refs", async () => {
@@ -113,5 +121,13 @@ describe("RepositoryBrowserService", () => {
         (line) => line.kind === "add" && line.newLineNumber !== null && line.content.includes("Updated")
       )
     ).toBe(true);
+
+    const addedTextChange = comparison.changes.find((change) => change.path === "src/app.txt");
+    expect(addedTextChange?.status).toBe("added");
+    expect(addedTextChange?.isBinary).toBe(false);
+    expect(addedTextChange?.oldContent).toBe("");
+    expect(addedTextChange?.newContent).toContain("console.log('hello')");
+    expect(addedTextChange?.hunks.length).toBeGreaterThan(0);
+    expect(addedTextChange?.hunks[0]?.lines.some((line) => line.kind === "add")).toBe(true);
   });
 });

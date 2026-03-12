@@ -122,7 +122,7 @@ function collectDirectoryPaths(nodes: TreeNode[]): string[] {
 function changeStatusBadgeVariant(status: RepositoryCompareChange["status"]) {
   switch (status) {
     case "added":
-      return "default";
+      return "success";
     case "deleted":
       return "destructive";
     default:
@@ -222,7 +222,7 @@ function TreeBranch({
                 {fileBadges}
                 <Badge
                   variant={changeStatusBadgeVariant(node.change.status)}
-                  className="min-w-7 justify-center bg-surface-base px-2 font-mono text-[11px]"
+                  className="min-w-7 justify-center px-2 font-mono text-[11px]"
                 >
                   {changeStatusShortLabel(node.change.status)}
                 </Badge>

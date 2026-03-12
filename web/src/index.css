@@ -37,6 +37,8 @@
     --color-danger-surface: #f9ece8;
     --border-danger: #e9c6bf;
     --text-danger: #7f3128;
+    --color-status-success: #5d7b67;
+    --color-status-success-muted: #edf3ee;
 
     --layout-gutter-mobile: 12px;
     --layout-content-mobile: calc(100vw - (2 * var(--layout-gutter-mobile)));
@@ -84,6 +86,8 @@
     --color-danger-surface: #3b201d;
     --border-danger: #714038;
     --text-danger: #f6c7bf;
+    --color-status-success: #9bbca5;
+    --color-status-success-muted: #213128;
   }
 
   * {
@@ -121,8 +125,13 @@
     @apply bg-fill-primary text-text-primary;
   }
 
+  .monaco-editor .scrollbar > .slider,
+  .monaco-diff-editor .scrollbar > .slider {
+    border-radius: 9999px;
+  }
+
   .monaco-editor .gits-monaco-selected-line {
-    background: color-mix(in srgb, var(--color-fill-primary) 72%, transparent);
+    background: color-mix(in srgb, var(--color-fill-primary) 58%, transparent);
   }
 
   .monaco-editor .gits-monaco-selected-line-number {
@@ -131,22 +140,45 @@
   }
 
   .monaco-editor .gits-monaco-selected-line-decoration {
-    border-left: 3px solid var(--text-primary);
+    border-left: 3px solid var(--text-supporting-strong);
     margin-left: 2px;
   }
 
   .monaco-editor .gits-monaco-thread-line {
-    background: color-mix(in srgb, var(--color-surface-focus) 85%, transparent);
+    background: color-mix(in srgb, var(--color-surface-focus) 72%, transparent);
   }
 
   .monaco-editor .gits-monaco-thread-line-number {
-    color: var(--text-supporting-strong);
+    color: var(--text-secondary);
     font-weight: 600;
   }
 
   .monaco-editor .gits-monaco-thread-line-decoration {
-    border-left: 3px solid var(--color-fill-secondary);
+    border-left: 3px solid color-mix(in srgb, var(--color-fill-secondary) 84%, transparent);
     margin-left: 2px;
+  }
+
+  .monaco-editor .diff-hidden-lines .center {
+    background: color-mix(
+      in srgb,
+      var(--color-surface-focus) 84%,
+      var(--color-surface-base)
+    );
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+
+  .monaco-editor .diff-hidden-lines .center a,
+  .monaco-editor .diff-hidden-lines div.breadcrumb-item {
+    color: inherit;
+  }
+
+  .monaco-editor .diff-hidden-lines .center a:hover,
+  .monaco-editor .diff-hidden-lines div.breadcrumb-item:hover {
+    color: var(--text-primary);
   }
 }
 
@@ -193,6 +225,14 @@
 
   .soft-code {
     @apply rounded-2xl border border-border-subtle bg-surface-focus px-2 py-1 font-mono text-code-sm text-text-primary;
+  }
+
+  .monaco-shell {
+    @apply overflow-hidden rounded-[24px] border border-border-subtle bg-surface-focus p-1.5 shadow-container;
+  }
+
+  .monaco-shell__viewport {
+    @apply overflow-hidden rounded-[18px] border border-border-subtle bg-surface-base;
   }
 }
 

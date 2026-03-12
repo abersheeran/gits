@@ -712,7 +712,7 @@ export class RepositoryBrowserService {
               gitdir: args.gitdir,
               oid: previousEntry.oid
             })
-          : Promise.resolve({ content: null, isBinary: true, size: 0 }),
+          : Promise.resolve({ content: "", isBinary: false, size: 0 }),
         nextEntry?.type === "blob"
           ? this.readTextBlob({
               fs: args.fs,
@@ -720,7 +720,7 @@ export class RepositoryBrowserService {
               gitdir: args.gitdir,
               oid: nextEntry.oid
             })
-          : Promise.resolve({ content: null, isBinary: true, size: 0 })
+          : Promise.resolve({ content: "", isBinary: false, size: 0 })
       ]);
       const change = this.buildDiffChange({
         path,
