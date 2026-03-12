@@ -177,18 +177,41 @@ export function configureMonaco(instance: Monaco) {
   const borderDefault = readThemeColor(rootStyles, "--border-default", "#e5e5e5");
   const dangerSurface = readThemeColor(rootStyles, "--color-danger-surface", "#f9ece8");
   const dangerBorder = readThemeColor(rootStyles, "--border-danger", "#e9c6bf");
+  const dangerText = readThemeColor(rootStyles, "--text-danger", "#7f3128");
   const success = readThemeColor(rootStyles, "--color-status-success", "#5d7b67");
   const successMuted = readThemeColor(rootStyles, "--color-status-success-muted", "#edf3ee");
-  const syntaxComment = blendColors(textTertiary, 84, surfaceBase);
-  const syntaxKeyword = blendColors(textSupportingStrong, 74, fillTertiary);
-  const syntaxOperator = blendColors(textSupporting, 78, fillSecondary);
-  const syntaxString = blendColors(success, 52, textSupportingStrong);
-  const syntaxConstant = blendColors(fillTertiary, 44, textSupportingStrong);
-  const syntaxType = blendColors(textPrimary, 62, fillSecondary);
-  const syntaxFunction = blendColors(textPrimary, 72, textSecondary);
-  const syntaxTag = blendColors(textSupportingStrong, 72, success);
-  const syntaxAttribute = blendColors(textSecondary, 64, fillTertiary);
-  const syntaxDelimiter = blendColors(textSupporting, 76, surfaceBase);
+  const syntaxComment = blendColors(textTertiary, 74, surfaceBase);
+  const syntaxKeyword = blendColors(success, 62, textSupportingStrong);
+  const syntaxOperator = blendColors(textSupporting, 86, fillSecondary);
+  const syntaxString = blendColors(success, 76, fillTertiary);
+  const syntaxConstant = blendColors(dangerText, 54, fillTertiary);
+  const syntaxType = blendColors(success, 42, textPrimary);
+  const syntaxFunction = blendColors(textPrimary, 62, success);
+  const syntaxTag = blendColors(success, 58, textSupportingStrong);
+  const syntaxAttribute = blendColors(textSupportingStrong, 62, success);
+  const syntaxDelimiter = blendColors(textSupporting, 82, surfaceBase);
+  const insertedTextBackground = blendColors(
+    successMuted,
+    82,
+    blendColors(success, 18, surfaceBase)
+  );
+  const insertedLineBackground = blendColors(
+    successMuted,
+    68,
+    blendColors(success, 16, surfaceBase)
+  );
+  const insertedLineBorder = blendColors(success, 44, successMuted);
+  const removedTextBackground = blendColors(
+    dangerSurface,
+    84,
+    blendColors(dangerText, 10, surfaceBase)
+  );
+  const removedLineBackground = blendColors(
+    dangerSurface,
+    70,
+    blendColors(dangerText, 8, surfaceBase)
+  );
+  const removedLineBorder = blendColors(dangerText, 36, dangerSurface);
 
   instance.editor.defineTheme("gits-light", {
     base: "vs",
@@ -222,14 +245,14 @@ export function configureMonaco(instance: Monaco) {
       "editorLink.activeForeground": textPrimary,
       "diffEditor.border": borderSubtle,
       "diffEditor.diagonalFill": blendColors(borderSubtle, 72, surfaceBase),
-      "diffEditor.insertedTextBackground": blendColors(successMuted, 88, surfaceBase),
-      "diffEditor.insertedLineBackground": blendColors(successMuted, 72, surfaceBase),
-      "diffEditor.insertedTextBorder": blendColors(success, 28, successMuted),
-      "diffEditor.removedTextBackground": mixColor(dangerSurface, 78),
-      "diffEditor.removedLineBackground": mixColor(dangerSurface, 52),
-      "diffEditor.removedTextBorder": dangerBorder,
-      "diffEditorGutter.insertedLineBackground": blendColors(successMuted, 78, surfaceBase),
-      "diffEditorGutter.removedLineBackground": mixColor(dangerSurface, 68),
+      "diffEditor.insertedTextBackground": insertedTextBackground,
+      "diffEditor.insertedLineBackground": insertedLineBackground,
+      "diffEditor.insertedTextBorder": insertedLineBorder,
+      "diffEditor.removedTextBackground": removedTextBackground,
+      "diffEditor.removedLineBackground": removedLineBackground,
+      "diffEditor.removedTextBorder": removedLineBorder,
+      "diffEditorGutter.insertedLineBackground": blendColors(successMuted, 74, success),
+      "diffEditorGutter.removedLineBackground": blendColors(dangerSurface, 76, dangerBorder),
       "diffEditor.unchangedRegionBackground": blendColors(surfaceFocus, 82, surfaceBase),
       "diffEditor.unchangedRegionForeground": textSecondary,
       "diffEditor.unchangedRegionShadow": mixColor(textPrimary, 16)

@@ -50,6 +50,7 @@ export default {
           DEFAULT: "var(--color-status-success)",
           foreground: "var(--text-inverse)",
           surface: "var(--color-status-success-muted)",
+          border: "var(--border-success)",
         },
         background: "var(--color-surface-canvas)",
         foreground: "var(--text-primary)",
