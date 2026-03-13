@@ -5,7 +5,6 @@ import { IssueAcceptanceCriteriaPanel } from "@/components/repository/issue-acce
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
-import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { DetailSection } from "@/components/common/detail-section";
 import { LabeledSelectField } from "@/components/common/labeled-select-field";
@@ -26,7 +25,6 @@ import {
   formatApiError,
   getIssue,
   getRepositoryDetail,
-  listRepositoryParticipants,
   listIssueComments,
   resumeIssueAgent,
   updateIssue,
@@ -40,7 +38,6 @@ import {
   type IssueTaskFlowRecord,
   type IssueTaskStatus,
   type RepositoryDetailResponse,
-  type RepositoryUserSummary,
   type TaskFlowWaitingOn
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
@@ -102,8 +99,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [linkedPullRequests, setLinkedPullRequests] = useState<IssueLinkedPullRequestRecord[]>([]);
   const [taskFlow, setTaskFlow] = useState<IssueTaskFlowRecord | null>(null);
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
-  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [latestIssueSession, setLatestIssueSession] = useState<AgentSessionRecord | null>(null);
   const [latestPullRequestProvenanceByNumber, setLatestPullRequestProvenanceByNumber] =
     useState<Record<number, AgentSessionDetail | null>>({});
@@ -121,7 +116,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [updating, setUpdating] = useState(false);
   const [taskStatusSaving, setTaskStatusSaving] = useState(false);
   const [acceptanceCriteriaSaving, setAcceptanceCriteriaSaving] = useState(false);
-  const [metadataSaving, setMetadataSaving] = useState(false);
   const [commentBody, setCommentBody] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentEditorExpanded, setCommentEditorExpanded] = useState(false);
@@ -205,8 +199,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           nextDetail,
           nextIssueDetail,
           nextComments,
-          latestSessionItems,
-          nextParticipants
+          latestSessionItems
         ] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getIssue(owner, repo, number),
@@ -214,8 +207,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           listLatestAgentSessionsBySource(owner, repo, {
             sourceType: "issue",
             numbers: [number]
-          }),
-          user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
+          })
         ]);
         const latestCommentSessionItemsPromise =
           nextComments.length > 0
@@ -254,7 +246,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setLinkedPullRequests(nextIssueDetail.linkedPullRequests);
         setTaskFlow(nextIssueDetail.taskFlow);
         setComments(nextComments);
-        setParticipants(nextParticipants);
         setLatestIssueSession(latestSessionItems[0]?.session ?? null);
         setLatestSessionByCommentId(nextSessionByCommentId);
         setLatestPullRequestProvenanceByNumber(nextPullRequestProvenanceByNumber);
@@ -278,7 +269,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     if (!issue) {
       return;
     }
-    setSelectedAssigneeIds(issue.assignees.map((assignee) => assignee.id));
     setTaskStatusDraft(issue.task_status);
     setAcceptanceCriteriaDraft(issue.acceptance_criteria);
   }, [issue]);
@@ -369,24 +359,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const canComment = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const currentTaskFlow: IssueTaskFlowRecord = taskFlow;
-
-  async function saveMetadata() {
-    if (metadataSaving) {
-      return;
-    }
-    setMetadataSaving(true);
-    setActionError(null);
-    try {
-      const updated = await updateIssue(owner, repo, number, {
-        assigneeUserIds: selectedAssigneeIds
-      });
-      setIssue(updated);
-    } catch (error) {
-      setActionError(formatApiError(error));
-    } finally {
-      setMetadataSaving(false);
-    }
-  }
 
   async function changeState(nextState: "open" | "closed") {
     if (updating) {
@@ -962,18 +934,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             )}
           </DetailSection>
 
-          <DetailSection>
-            <RepositoryMetadataFields
-              canEdit={canUpdate}
-              participants={participants}
-              assigneeIds={selectedAssigneeIds}
-              onAssigneeIdsChange={setSelectedAssigneeIds}
-              onSave={() => {
-                void saveMetadata();
-              }}
-              saving={metadataSaving}
-            />
-          </DetailSection>
         </aside>
       </div>
     </div>

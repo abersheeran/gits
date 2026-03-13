@@ -21,7 +21,6 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 - Issue 列表与分页
 - Issue 详情
 - Issue 评论
-- 指派人
 - Issue 与评论 Reaction
 
 ### 2.2 任务中心
@@ -108,7 +107,6 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 
 - `issues`
 - `issue_comments`
-- `issue_assignees`
 
 ## 7. 关键代码文件
 
@@ -118,7 +116,6 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `src/services/action-trigger-service.ts`
 - `src/routes/api/index.ts`
 - `src/routes/api/issue-routes.ts`
-- `src/routes/api/repository-metadata-routes.ts`
 - `src/routes/api/issue-routes.test.ts`
 - `web/src/pages/repository-issues-page.tsx`
 - `web/src/pages/new-issue-page.tsx`

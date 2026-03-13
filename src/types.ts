@@ -195,7 +195,6 @@ export type IssueRecord = {
   task_status: IssueTaskStatus;
   acceptance_criteria: string;
   comment_count: number;
-  assignees: RepositoryUserSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -245,8 +244,6 @@ export type PullRequestRecord = {
   head_ref: string;
   base_oid: string;
   head_oid: string;
-  assignees: RepositoryUserSummary[];
-  requested_reviewers: RepositoryUserSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;
   behind_by?: number;

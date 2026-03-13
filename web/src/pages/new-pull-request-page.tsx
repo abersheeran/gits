@@ -21,10 +21,8 @@ import {
   createPullRequest,
   formatApiError,
   getRepositoryDetail,
-  listRepositoryParticipants,
   type AuthUser,
-  type RepositoryDetailResponse,
-  type RepositoryUserSummary
+  type RepositoryDetailResponse
 } from "@/lib/api";
 
 type NewPullRequestPageProps = {
@@ -45,9 +43,6 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
   const [baseRef, setBaseRef] = useState("");
   const [headRef, setHeadRef] = useState("");
   const [closeIssuesInput, setCloseIssuesInput] = useState("");
-  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
-  const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
   const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -61,15 +56,11 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextParticipants] = await Promise.all([
-          getRepositoryDetail(owner, repo),
-          listRepositoryParticipants(owner, repo)
-        ]);
+        const nextDetail = await getRepositoryDetail(owner, repo);
         if (canceled) {
           return;
         }
         setDetail(nextDetail);
-        setParticipants(nextParticipants);
         const defaultBase =
           nextDetail.defaultBranch && nextDetail.branches.some((item) => item.name === nextDetail.defaultBranch)
             ? nextDetail.defaultBranch
@@ -174,9 +165,7 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         baseRef,
         headRef,
         ...(closeIssueNumbers.length > 0 ? { closeIssueNumbers } : {}),
-        draft,
-        assigneeUserIds: selectedAssigneeIds,
-        requestedReviewerIds: selectedReviewerIds
+        draft
       });
       navigate(`/repo/${owner}/${repo}/pulls/${pullRequest.number}`, { replace: true });
     } catch (submitError) {
@@ -278,17 +267,12 @@ export function NewPullRequestPage({ user }: NewPullRequestPageProps) {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>Metadata</CardTitle>
-            <HelpTip content="创建时就可以指定 draft、reviewers 和 assignees，避免开 PR 后再补充。" />
+            <HelpTip content="创建时就可以指定 draft，避免开 PR 后再补充。" />
           </div>
         </CardHeader>
         <CardContent>
           <RepositoryMetadataFields
             canEdit
-            participants={participants}
-            assigneeIds={selectedAssigneeIds}
-            onAssigneeIdsChange={setSelectedAssigneeIds}
-            reviewerIds={selectedReviewerIds}
-            onReviewerIdsChange={setSelectedReviewerIds}
             draft={draft}
             onDraftChange={setDraft}
           />

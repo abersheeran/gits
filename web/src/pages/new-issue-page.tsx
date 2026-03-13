@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { HelpTip } from "@/components/common/help-tip";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
-import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,10 +13,8 @@ import {
   createIssue,
   formatApiError,
   getRepositoryDetail,
-  listRepositoryParticipants,
   type AuthUser,
-  type RepositoryDetailResponse,
-  type RepositoryUserSummary
+  type RepositoryDetailResponse
 } from "@/lib/api";
 
 type NewIssuePageProps = {
@@ -36,8 +33,6 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
-  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -50,13 +45,9 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextDetail, nextParticipants] = await Promise.all([
-          getRepositoryDetail(owner, repo),
-          listRepositoryParticipants(owner, repo)
-        ]);
+        const nextDetail = await getRepositoryDetail(owner, repo);
         if (!canceled) {
           setDetail(nextDetail);
-          setParticipants(nextParticipants);
         }
       } catch (loadError) {
         if (!canceled) {
@@ -127,8 +118,7 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
       const issue = await createIssue(owner, repo, {
         title,
         body,
-        acceptanceCriteria,
-        assigneeUserIds: selectedAssigneeIds
+        acceptanceCriteria
       });
       navigate(`/repo/${owner}/${repo}/issues/${issue.number}`, { replace: true });
     } catch (submitError) {
@@ -139,12 +129,12 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-4">
       <Card>
         <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>New issue · {owner}/{repo}</CardTitle>
-            <HelpTip content="新 issue 会直接进入仓库问题列表，适合记录需求、缺陷和待办。" />
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle>New issue · {owner}/{repo}</CardTitle>
+              <HelpTip content="新 issue 会直接进入仓库问题列表，适合记录需求、缺陷和待办。" />
           </div>
         </CardHeader>
         <CardContent>
@@ -187,23 +177,6 @@ export function NewIssuePage({ user }: NewIssuePageProps) {
               </Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>Metadata</CardTitle>
-            <HelpTip content="可以在创建时一次性指定 assignee，避免 issue 落地后再补字段。" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <RepositoryMetadataFields
-            canEdit
-            participants={participants}
-            assigneeIds={selectedAssigneeIds}
-            onAssigneeIdsChange={setSelectedAssigneeIds}
-          />
         </CardContent>
       </Card>
     </div>

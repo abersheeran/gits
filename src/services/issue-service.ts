@@ -109,7 +109,6 @@ export class IssueService {
       task_status: row.task_status,
       acceptance_criteria: row.acceptance_criteria,
       comment_count: metadata.commentCountByIssueId[row.id] ?? 0,
-      assignees: metadata.assigneesByIssueId[row.id] ?? [],
       created_at: row.created_at,
       updated_at: row.updated_at,
       closed_at: row.closed_at

@@ -200,33 +200,6 @@ CREATE TABLE IF NOT EXISTS repository_actions_configs (
   FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS issue_assignees (
-  issue_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (issue_id, user_id),
-  FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS pull_request_assignees (
-  pull_request_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (pull_request_id, user_id),
-  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS pull_request_review_requests (
-  pull_request_id TEXT NOT NULL,
-  reviewer_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (pull_request_id, reviewer_id),
-  FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE,
-  FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS action_workflows (
   id TEXT PRIMARY KEY,
   repository_id TEXT NOT NULL,
@@ -445,12 +418,6 @@ CREATE INDEX IF NOT EXISTS idx_pull_request_review_threads_status
   ON pull_request_review_threads(repository_id, pull_request_number, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pull_request_review_thread_comments_lookup
   ON pull_request_review_thread_comments(repository_id, pull_request_number, thread_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_issue_assignees_lookup
-  ON issue_assignees(issue_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_pull_request_assignees_lookup
-  ON pull_request_assignees(pull_request_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_pull_request_review_requests_lookup
-  ON pull_request_review_requests(pull_request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_pull_request_closing_issues_lookup
   ON pull_request_closing_issues(repository_id, pull_request_number, issue_number ASC);
 CREATE INDEX IF NOT EXISTS idx_action_workflows_lookup

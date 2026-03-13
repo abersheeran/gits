@@ -36,7 +36,6 @@ function buildIssue(overrides?: Partial<IssueRecord>): IssueRecord {
     task_status: "open",
     acceptance_criteria: "",
     comment_count: 0,
-    assignees: [],
     created_at: 1,
     updated_at: 1,
     closed_at: null,

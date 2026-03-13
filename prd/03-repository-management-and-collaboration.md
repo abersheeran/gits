@@ -23,7 +23,7 @@
   - 列表查询
   - 新增或更新权限
   - 移除协作者
-- 参与者列表可供 Issue 指派、PR 指派和 reviewer 选择复用。
+- 参与者列表接口仍保留为仓库范围用户选择基础数据，但不再承载 Issue / PR 的 assignee / reviewer 元数据。
 - 仓库详情接口会返回：
   - open issue / open pull request 计数
   - 是否可创建 issue / pull request

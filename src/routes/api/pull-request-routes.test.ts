@@ -174,7 +174,7 @@ describe("API pull request routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe(
-      "Pull request labels and milestones have been removed; use reviewers, assignees, and draft state instead."
+      "Pull request labels, milestones, assignees, and reviewers have been removed; use draft state instead."
     );
   });
 
@@ -194,7 +194,6 @@ describe("API pull request routes", () => {
         task_status: "waiting-human",
         acceptance_criteria: "- login succeeds",
         comment_count: 0,
-        assignees: [],
         created_at: now - 5_000,
         updated_at: now - 1_000,
         closed_at: null

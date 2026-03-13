@@ -280,27 +280,6 @@ export async function listRepositoryParticipants(
   );
 }
 
-export async function assertAssignableUserIds(args: {
-  repositoryService: RepositoryService;
-  repository: RepositoryRecord;
-  userIds: string[] | undefined;
-  field: string;
-}): Promise<string[] | undefined> {
-  if (!args.userIds) {
-    return undefined;
-  }
-  const participants = await listRepositoryParticipants(args.repositoryService, args.repository);
-  const allowedIds = new Set(participants.map((participant) => participant.id));
-  for (const userId of args.userIds) {
-    if (!allowedIds.has(userId)) {
-      throw new HTTPException(400, {
-        message: `Field '${args.field}' contains a user that cannot be assigned in this repository`
-      });
-    }
-  }
-  return args.userIds;
-}
-
 export const TERMINAL_SESSION_STATUSES = new Set(["success", "failed", "cancelled"]);
 export const SESSION_LOG_STREAM_POLL_INTERVAL_MS = 1_000;
 export const SESSION_LOG_STREAM_MAX_DURATION_MS = 25_000;

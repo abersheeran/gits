@@ -22,7 +22,6 @@ export { AgentSessionService } from "../../services/agent-session-service";
 export { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
 export { ActionsService } from "../../services/actions-service";
 export { AuthService } from "../../services/auth-service";
-export { RepositoryMetadataService } from "../../services/repository-metadata-service";
 export {
   collectPlatformMcpForwardHeaders,
   createPlatformMcpServer

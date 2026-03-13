@@ -248,11 +248,6 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                         <p className="text-xs text-muted-foreground">
                           {issue.author_username} opened {formatRelativeTime(issue.created_at)}
                         </p>
-                        {issue.assignees.length > 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            Assignees: {issue.assignees.map((assignee) => assignee.username).join(", ")}
-                          </p>
-                        ) : null}
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">

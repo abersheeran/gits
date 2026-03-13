@@ -46,14 +46,14 @@
 
 ### 4.1 任务入口
 
-- Issue 支持标题、正文、评论、指派人、Reaction。
+- Issue 支持标题、正文、评论和独立 `acceptance_criteria`。
 - Issue 支持独立 `acceptance_criteria`。
 - `issues.task_status` 当前使用 `open / agent-working / waiting-human / done` 四态。
 - Issue 列表和详情在返回前会按主流程重算相关状态，避免列表与详情分叉。
 
 ### 4.2 交付入口
 
-- PR 支持从 `baseRef / headRef` 创建，支持 draft、closing issues、assignees、reviewers。
+- PR 支持从 `baseRef / headRef` 创建，支持 draft 和 closing issues。
 - PR 详情聚合 compare、reviews、review threads、validation summary、merge summary 和 handoff。
 - Review thread 支持 anchored range、suggested changes、多轮 comment、resolve，以及新 commit 后的 `current / reanchored / stale` 状态。
 - 当前合并策略只有 squash merge。

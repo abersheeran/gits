@@ -159,7 +159,7 @@ describe("API issue routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe(
-      "Issue labels and milestones have been removed; use assignees and acceptance criteria instead."
+      "Issue labels, milestones, assignees have been removed; use acceptance criteria instead."
     );
   });
 
@@ -179,7 +179,6 @@ describe("API issue routes", () => {
       task_status: "agent-working",
       acceptance_criteria: "- login succeeds\n- error state is visible",
       comment_count: 0,
-      assignees: [],
       created_at: now,
         updated_at: now,
         closed_at: null
@@ -857,7 +856,6 @@ describe("API issue routes", () => {
       task_status: "agent-working",
       acceptance_criteria: "- bug fixed",
       comment_count: 0,
-      assignees: [],
       created_at: Date.now(),
       updated_at: Date.now(),
       closed_at: null
@@ -1022,7 +1020,6 @@ describe("API issue routes", () => {
         task_status: "waiting-human",
         acceptance_criteria: "",
         comment_count: 0,
-        assignees: [],
         created_at: Date.now(),
         updated_at: Date.now(),
         closed_at: null

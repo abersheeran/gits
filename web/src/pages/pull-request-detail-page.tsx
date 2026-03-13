@@ -35,7 +35,6 @@ import {
   getPullRequest,
   getPullRequestProvenance,
   getRepositoryDetail,
-  listRepositoryParticipants,
   listPullRequestReviews,
   listPullRequestReviewThreads,
   resumePullRequestAgent,
@@ -56,7 +55,6 @@ import {
   type PullRequestTaskFlowRecord,
   type RepositoryCompareResponse,
   type RepositoryDetailResponse,
-  type RepositoryUserSummary,
   type TaskFlowWaitingOn
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
@@ -339,9 +337,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [reviews, setReviews] = useState<PullRequestReviewRecord[]>([]);
   const [reviewThreads, setReviewThreads] = useState<PullRequestReviewThreadRecord[]>([]);
-  const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
-  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
-  const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
   const [draft, setDraft] = useState(false);
   const [latestPullRequestSession, setLatestPullRequestSession] = useState<AgentSessionRecord | null>(
     null
@@ -416,15 +411,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           nextPullRequestDetail,
           nextProvenance,
           nextReviews,
-          nextReviewThreads,
-          nextParticipants
+          nextReviewThreads
         ] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getPullRequest(owner, repo, number),
           getPullRequestProvenance(owner, repo, number),
           listPullRequestReviews(owner, repo, number),
-          listPullRequestReviewThreads(owner, repo, number),
-          user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
+          listPullRequestReviewThreads(owner, repo, number)
         ]);
         const nextComparison = await compareRepositoryRefs(owner, repo, {
           baseRef: nextPullRequestDetail.pullRequest.base_ref,
@@ -445,7 +438,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setReviews(nextReviews.reviews);
         setReviewSummary(nextReviews.reviewSummary);
         setReviewThreads(nextReviewThreads);
-        setParticipants(nextParticipants);
         setComparison(nextComparison);
         setLatestPullRequestSession(latestSessionItems[0]?.session ?? null);
       } catch (loadError) {
@@ -468,8 +460,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     if (!pullRequest) {
       return;
     }
-    setSelectedAssigneeIds(pullRequest.assignees.map((assignee) => assignee.id));
-    setSelectedReviewerIds(pullRequest.requested_reviewers.map((reviewer) => reviewer.id));
     setDraft(pullRequest.draft);
   }, [pullRequest]);
 
@@ -561,9 +551,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setError(null);
     try {
       const updated = await updatePullRequest(owner, repo, number, {
-        draft,
-        assigneeUserIds: selectedAssigneeIds,
-        requestedReviewerIds: selectedReviewerIds
+        draft
       });
       const nextComparison = await compareRepositoryRefs(owner, repo, {
         baseRef: updated.base_ref,
@@ -1702,11 +1690,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <DetailSection>
             <RepositoryMetadataFields
               canEdit={canUpdate}
-              participants={participants}
-              assigneeIds={selectedAssigneeIds}
-              onAssigneeIdsChange={setSelectedAssigneeIds}
-              reviewerIds={selectedReviewerIds}
-              onReviewerIdsChange={setSelectedReviewerIds}
               draft={draft}
               onDraftChange={setDraft}
               onSave={() => {

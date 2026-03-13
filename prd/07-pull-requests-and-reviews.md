@@ -21,7 +21,6 @@ PR 是当前产品里的交付中心和评审中心。
 - 选择 `baseRef / headRef`
 - draft
 - closing issues
-- assignees、requested reviewers
 - 阻止同一 `head/base` 组合的重复 open PR
 
 ### 2.2 PR 详情
@@ -144,8 +143,6 @@ PR 页面已经直接消费 session 的验证信息：
 - `pull_request_review_threads`
 - `pull_request_review_thread_comments`
 - `pull_request_closing_issues`
-- `pull_request_assignees`
-- `pull_request_review_requests`
 
 ## 8. 关键代码文件
 

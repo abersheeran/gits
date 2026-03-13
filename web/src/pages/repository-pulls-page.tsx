@@ -255,19 +255,6 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                         <p className="text-xs text-muted-foreground">
                           {stripHeadsRef(pullRequest.head_ref)} to {stripHeadsRef(pullRequest.base_ref)}
                         </p>
-                        {pullRequest.assignees.length > 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            Assignees: {pullRequest.assignees.map((assignee) => assignee.username).join(", ")}
-                          </p>
-                        ) : null}
-                        {pullRequest.requested_reviewers.length > 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            Reviewers:{" "}
-                            {pullRequest.requested_reviewers
-                              .map((reviewer) => reviewer.username)
-                              .join(", ")}
-                          </p>
-                        ) : null}
                       </div>
                     </div>
                     <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />

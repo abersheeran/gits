@@ -7,7 +7,6 @@ import {
   PullRequestMergeConflictError,
   PullRequestMergeNotSupportedError,
   PullRequestService,
-  RepositoryMetadataService,
   RepositoryService,
   containsActionsMention,
   createRepositoryObjectClient,
@@ -21,11 +20,9 @@ import {
 
 import {
   assertActionAgentType,
-  assertAssignableUserIds,
   assertOptionalBoolean,
   assertOptionalIssueNumberArray,
   assertOptionalString,
-  assertOptionalStringArray,
   assertPositiveInteger,
   assertPullRequestState,
   assertString,
@@ -45,7 +42,7 @@ import {
 
 export function registerPullRequestCommandRoutes(router: ApiRouter): void {
     const unsupportedPullRequestMetadataMessage =
-      "Pull request labels and milestones have been removed; use reviewers, assignees, and draft state instead.";
+      "Pull request labels, milestones, assignees, and reviewers have been removed; use draft state instead.";
 
     router.post("/repos/:owner/:repo/pulls/:number/resume-agent", requireSession, async (c) => {
       const owner = c.req.param("owner");
@@ -174,21 +171,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
         throw new HTTPException(400, { message: unsupportedPullRequestMetadataMessage });
       }
-      if (payload.assigneeUserIds !== undefined) {
-        const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
-        if (assigneeUserIds !== undefined) {
-          input.assigneeUserIds = assigneeUserIds;
-        }
-      }
-      if (payload.requestedReviewerIds !== undefined) {
-        const requestedReviewerIds = assertOptionalStringArray(
-          payload.requestedReviewerIds,
-          "requestedReviewerIds"
-        );
-        if (requestedReviewerIds !== undefined) {
-          input.requestedReviewerIds = requestedReviewerIds;
-        }
-      }
       if (input.baseRef === input.headRef) {
         throw new HTTPException(400, { message: "Field 'headRef' must differ from 'baseRef'" });
       }
@@ -226,21 +208,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
 
       const pullRequestService = new PullRequestService(c.env.DB);
       const issueService = new IssueService(c.env.DB);
-      const metadataService = new RepositoryMetadataService(c.env.DB);
-      await Promise.all([
-        assertAssignableUserIds({
-          repositoryService,
-          repository,
-          userIds: input.assigneeUserIds,
-          field: "assigneeUserIds"
-        }),
-        assertAssignableUserIds({
-          repositoryService,
-          repository,
-          userIds: input.requestedReviewerIds,
-          field: "requestedReviewerIds"
-        })
-      ]);
       if (input.closeIssueNumbers && input.closeIssueNumbers.length > 0) {
         const existingIssueNumbers = await issueService.listIssueNumbers(repository.id, input.closeIssueNumbers);
         if (existingIssueNumbers.length !== input.closeIssueNumbers.length) {
@@ -278,15 +245,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
           pullRequestNumber: createdPullRequest.number,
           issueNumbers: input.closeIssueNumbers ?? []
         });
-        if (input.assigneeUserIds !== undefined) {
-          await metadataService.replacePullRequestAssignees(createdPullRequest.id, input.assigneeUserIds);
-        }
-        if (input.requestedReviewerIds !== undefined) {
-          await metadataService.replacePullRequestReviewRequests(
-            createdPullRequest.id,
-            input.requestedReviewerIds
-          );
-        }
         const pullRequest =
           (await pullRequestService.findPullRequestByNumber(
             repository.id,
@@ -366,21 +324,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
         throw new HTTPException(400, { message: unsupportedPullRequestMetadataMessage });
       }
-      if (payload.assigneeUserIds !== undefined) {
-        const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
-        if (assigneeUserIds !== undefined) {
-          patch.assigneeUserIds = assigneeUserIds;
-        }
-      }
-      if (payload.requestedReviewerIds !== undefined) {
-        const requestedReviewerIds = assertOptionalStringArray(
-          payload.requestedReviewerIds,
-          "requestedReviewerIds"
-        );
-        if (requestedReviewerIds !== undefined) {
-          patch.requestedReviewerIds = requestedReviewerIds;
-        }
-      }
       if (payload.state !== undefined) {
         const nextState = assertPullRequestState(payload.state);
         patch.state = nextState;
@@ -390,9 +333,7 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         patch.body === undefined &&
         patch.state === undefined &&
         patch.closeIssueNumbers === undefined &&
-        patch.draft === undefined &&
-        patch.assigneeUserIds === undefined &&
-        patch.requestedReviewerIds === undefined
+        patch.draft === undefined
       ) {
         throw new HTTPException(400, { message: "No updatable fields provided" });
       }
@@ -415,21 +356,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
 
       const pullRequestService = new PullRequestService(c.env.DB);
       const issueService = new IssueService(c.env.DB);
-      const metadataService = new RepositoryMetadataService(c.env.DB);
-      await Promise.all([
-        assertAssignableUserIds({
-          repositoryService,
-          repository,
-          userIds: patch.assigneeUserIds,
-          field: "assigneeUserIds"
-        }),
-        assertAssignableUserIds({
-          repositoryService,
-          repository,
-          userIds: patch.requestedReviewerIds,
-          field: "requestedReviewerIds"
-        })
-      ]);
       const existingPullRequest = await pullRequestService.findPullRequestByNumber(
         repository.id,
         number,
@@ -515,15 +441,6 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
       });
       if (!updatedPullRequest) {
         throw new HTTPException(404, { message: "Pull request not found" });
-      }
-      if (patch.assigneeUserIds !== undefined) {
-        await metadataService.replacePullRequestAssignees(existingPullRequest.id, patch.assigneeUserIds);
-      }
-      if (patch.requestedReviewerIds !== undefined) {
-        await metadataService.replacePullRequestReviewRequests(
-          existingPullRequest.id,
-          patch.requestedReviewerIds
-        );
       }
       const closingIssueNumbers = await pullRequestService.listPullRequestClosingIssueNumbers(repository.id, number);
       const pullRequest =

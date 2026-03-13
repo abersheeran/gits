@@ -1,4 +1,3 @@
-import { RepositoryMetadataService } from "./repository-metadata-service";
 import type {
   PullRequestRecord,
   PullRequestReviewDecision,
@@ -104,11 +103,7 @@ export class DuplicateOpenPullRequestError extends Error {
 }
 
 export class PullRequestService {
-  private readonly metadataService: RepositoryMetadataService;
-
-  constructor(private readonly db: D1Database) {
-    this.metadataService = new RepositoryMetadataService(db);
-  }
+  constructor(private readonly db: D1Database) {}
 
   private normalizeIssueNumbers(numbers: number[]): number[] {
     return Array.from(new Set(numbers)).sort((a, b) => a - b);
@@ -131,15 +126,7 @@ export class PullRequestService {
     };
   }
 
-  private async hydratePullRequests(
-    repositoryId: string,
-    rows: BasePullRequestRow[]
-  ): Promise<PullRequestRecord[]> {
-    const metadata = await this.metadataService.listPullRequestMetadata({
-      repositoryId,
-      pullRequestIds: rows.map((row) => row.id)
-    });
-
+  private async hydratePullRequests(rows: BasePullRequestRow[]): Promise<PullRequestRecord[]> {
     return rows.map((row) => ({
       id: row.id,
       repository_id: row.repository_id,
@@ -154,8 +141,6 @@ export class PullRequestService {
       head_ref: row.head_ref,
       base_oid: row.base_oid,
       head_oid: row.head_oid,
-      assignees: metadata.assigneesByPullRequestId[row.id] ?? [],
-      requested_reviewers: metadata.requestedReviewersByPullRequestId[row.id] ?? [],
       merge_commit_oid: row.merge_commit_oid,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -382,7 +367,7 @@ export class PullRequestService {
             .bind(repositoryId, state, limit, offset)
             .all<BasePullRequestRow>();
 
-    const items = await this.hydratePullRequests(repositoryId, rows.results);
+    const items = await this.hydratePullRequests(rows.results);
     const total = Number(countRow?.count ?? 0);
     return {
       items,
@@ -429,7 +414,7 @@ export class PullRequestService {
     if (!row) {
       return null;
     }
-    const [pullRequest] = await this.hydratePullRequests(repositoryId, [row]);
+    const [pullRequest] = await this.hydratePullRequests([row]);
     return pullRequest ?? null;
   }
 

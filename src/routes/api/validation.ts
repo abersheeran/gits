@@ -20,7 +20,6 @@ import { AgentSessionService } from "../../services/agent-session-service";
 import { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
 import { ActionsService } from "../../services/actions-service";
 import { AuthService } from "../../services/auth-service";
-import { RepositoryMetadataService } from "../../services/repository-metadata-service";
 import {
   collectPlatformMcpForwardHeaders,
   createPlatformMcpServer
@@ -92,7 +91,6 @@ export type CreateIssueInput = {
   title: string;
   body?: string;
   acceptanceCriteria?: string;
-  assigneeUserIds?: string[];
 };
 
 export type UpdateIssueInput = {
@@ -101,7 +99,6 @@ export type UpdateIssueInput = {
   state?: IssueState;
   taskStatus?: IssueTaskStatus;
   acceptanceCriteria?: string;
-  assigneeUserIds?: string[];
 };
 
 export type CreateIssueCommentInput = {
@@ -115,8 +112,6 @@ export type CreatePullRequestInput = {
   headRef: string;
   closeIssueNumbers?: number[];
   draft?: boolean;
-  assigneeUserIds?: string[];
-  requestedReviewerIds?: string[];
 };
 
 export type UpdatePullRequestInput = {
@@ -125,8 +120,6 @@ export type UpdatePullRequestInput = {
   state?: PullRequestState;
   closeIssueNumbers?: number[];
   draft?: boolean;
-  assigneeUserIds?: string[];
-  requestedReviewerIds?: string[];
 };
 
 export type CreatePullRequestReviewInput = {
@@ -249,25 +242,6 @@ export function assertOptionalString(value: unknown, field: string): string | un
     throw new HTTPException(400, { message: `Field '${field}' must be a string` });
   }
   return value.trim();
-}
-
-export function assertOptionalStringArray(value: unknown, field: string): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!Array.isArray(value)) {
-    throw new HTTPException(400, { message: `Field '${field}' must be an array` });
-  }
-  const values: string[] = [];
-  for (const item of value) {
-    if (typeof item !== "string" || item.trim().length === 0) {
-      throw new HTTPException(400, {
-        message: `Field '${field}' must contain non-empty strings`
-      });
-    }
-    values.push(item.trim());
-  }
-  return Array.from(new Set(values));
 }
 
 export function assertOptionalNullablePositiveInteger(

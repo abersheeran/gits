@@ -217,7 +217,6 @@ export type IssueRecord = {
   task_status: IssueTaskStatus;
   acceptance_criteria: string;
   comment_count: number;
-  assignees: RepositoryUserSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -281,8 +280,6 @@ export type PullRequestRecord = {
   head_ref: string;
   base_oid: string;
   head_oid: string;
-  assignees: RepositoryUserSummary[];
-  requested_reviewers: RepositoryUserSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;
   behind_by?: number;
@@ -1028,7 +1025,6 @@ export async function createIssue(
     title: string;
     body?: string;
     acceptanceCriteria?: string;
-    assigneeUserIds?: string[];
   }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(`/api/repos/${owner}/${repo}/issues`, {
@@ -1048,7 +1044,6 @@ export async function updateIssue(
     state?: IssueState;
     taskStatus?: IssueTaskStatus;
     acceptanceCriteria?: string;
-    assigneeUserIds?: string[];
   }
 ): Promise<IssueRecord> {
   const response = await requestJson<{ issue: IssueRecord }>(
@@ -1155,8 +1150,6 @@ export async function createPullRequest(
     headRef: string;
     closeIssueNumbers?: number[];
     draft?: boolean;
-    assigneeUserIds?: string[];
-    requestedReviewerIds?: string[];
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(
@@ -1179,8 +1172,6 @@ export async function updatePullRequest(
     state?: PullRequestState;
     closeIssueNumbers?: number[];
     draft?: boolean;
-    assigneeUserIds?: string[];
-    requestedReviewerIds?: string[];
   }
 ): Promise<PullRequestRecord> {
   const response = await requestJson<{ pullRequest: PullRequestRecord; closingIssueNumbers: number[] }>(

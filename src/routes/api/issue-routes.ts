@@ -2,7 +2,6 @@ import {
   AuthService,
   HTTPException,
   IssueService,
-  RepositoryMetadataService,
   RepositoryService,
   containsActionsMention,
   createRepositoryObjectClient,
@@ -16,11 +15,9 @@ import {
 
 import {
   assertActionAgentType,
-  assertAssignableUserIds,
   assertIssueState,
   assertIssueTaskStatus,
   assertOptionalString,
-  assertOptionalStringArray,
   assertPositiveInteger,
   assertString,
   buildInteractiveIssueAgentPrompt,
@@ -46,7 +43,7 @@ import {
 
 export function registerIssueRoutes(router: ApiRouter): void {
   const unsupportedIssueMetadataMessage =
-    "Issue labels and milestones have been removed; use assignees and acceptance criteria instead.";
+    "Issue labels, milestones, assignees have been removed; use acceptance criteria instead.";
 
   router.get("/repos/:owner/:repo/issues", optionalSession, async (c) => {
     const owner = c.req.param("owner");
@@ -161,12 +158,6 @@ export function registerIssueRoutes(router: ApiRouter): void {
     if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
       throw new HTTPException(400, { message: unsupportedIssueMetadataMessage });
     }
-    if (payload.assigneeUserIds !== undefined) {
-      const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
-      if (assigneeUserIds !== undefined) {
-        input.assigneeUserIds = assigneeUserIds;
-      }
-    }
 
     const repositoryService = new RepositoryService(c.env.DB);
     const sessionUser = mustSessionUser(c);
@@ -184,16 +175,6 @@ export function registerIssueRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
-    const metadataService = new RepositoryMetadataService(c.env.DB);
-    await Promise.all([
-      assertAssignableUserIds({
-        repositoryService,
-        repository,
-        userIds: input.assigneeUserIds,
-        field: "assigneeUserIds"
-      })
-    ]);
-
     const issueService = new IssueService(c.env.DB);
     const createdIssue = await issueService.createIssue({
       repositoryId: repository.id,
@@ -204,9 +185,6 @@ export function registerIssueRoutes(router: ApiRouter): void {
         ? { acceptanceCriteria: input.acceptanceCriteria }
         : {})
     });
-    if (input.assigneeUserIds !== undefined) {
-      await metadataService.replaceIssueAssignees(createdIssue.id, input.assigneeUserIds);
-    }
     const issue =
       (await issueService.findIssueByNumber(repository.id, createdIssue.number, sessionUser.id)) ??
       createdIssue;
@@ -290,19 +268,12 @@ export function registerIssueRoutes(router: ApiRouter): void {
     if (payload.labelIds !== undefined || payload.milestoneId !== undefined) {
       throw new HTTPException(400, { message: unsupportedIssueMetadataMessage });
     }
-    if (payload.assigneeUserIds !== undefined) {
-      const assigneeUserIds = assertOptionalStringArray(payload.assigneeUserIds, "assigneeUserIds");
-      if (assigneeUserIds !== undefined) {
-        patch.assigneeUserIds = assigneeUserIds;
-      }
-    }
     if (
       patch.title === undefined &&
       patch.body === undefined &&
       patch.state === undefined &&
       patch.taskStatus === undefined &&
-      patch.acceptanceCriteria === undefined &&
-      patch.assigneeUserIds === undefined
+      patch.acceptanceCriteria === undefined
     ) {
       throw new HTTPException(400, { message: "No updatable fields provided" });
     }
@@ -322,16 +293,6 @@ export function registerIssueRoutes(router: ApiRouter): void {
     if (!canCreateIssueOrPullRequest) {
       throw new HTTPException(403, { message: "Forbidden" });
     }
-
-    const metadataService = new RepositoryMetadataService(c.env.DB);
-    await Promise.all([
-      assertAssignableUserIds({
-        repositoryService,
-        repository,
-        userIds: patch.assigneeUserIds,
-        field: "assigneeUserIds"
-      })
-    ]);
 
     const issueService = new IssueService(c.env.DB);
     const existingIssue = await issueService.findIssueByNumber(repository.id, number, sessionUser.id);
@@ -354,9 +315,6 @@ export function registerIssueRoutes(router: ApiRouter): void {
     });
     if (!updatedIssue) {
       throw new HTTPException(404, { message: "Issue not found" });
-    }
-    if (patch.assigneeUserIds !== undefined) {
-      await metadataService.replaceIssueAssignees(existingIssue.id, patch.assigneeUserIds);
     }
     let issue =
       (await issueService.findIssueByNumber(repository.id, number, sessionUser.id)) ?? updatedIssue;
