@@ -15,6 +15,7 @@ import {
   assertString,
   findReadableRepositoryOr404,
   parseLimit,
+  parsePage,
   type ApiRouter
 } from "./shared";
 
@@ -119,10 +120,11 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     }
 
     const repositoryClient = createRepositoryObjectClient(c.env);
-    const historyInput: { owner: string; repo: string; ref?: string; limit: number } = {
+    const historyInput: { owner: string; repo: string; ref?: string; limit: number; page: number } = {
       owner,
       repo,
-      limit: parseLimit(c.req.query("limit"), 20)
+      limit: parseLimit(c.req.query("limit"), 20),
+      page: parsePage(c.req.query("page"))
     };
     const historyRef = c.req.query("ref");
     if (historyRef) {

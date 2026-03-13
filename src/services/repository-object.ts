@@ -4,6 +4,7 @@ import type {
   CommitSummary,
   LoadedRepositoryContext,
   RepositoryBrowseResult,
+  RepositoryCommitHistoryResult,
   RepositoryCompareResult,
   RepositoryCommitDetail,
   RepositoryDetail,
@@ -567,7 +568,8 @@ export class RepositoryObject {
               owner,
               repo,
               ...(typeof payload.ref === "string" ? { ref: payload.ref } : {}),
-              ...(typeof payload.limit === "number" ? { limit: payload.limit } : {})
+              ...(typeof payload.limit === "number" ? { limit: payload.limit } : {}),
+              ...(typeof payload.page === "number" ? { page: payload.page } : {})
             },
             await this.ensureLoadedContext(owner, repo)
           );
@@ -936,18 +938,17 @@ export class RepositoryObjectClient implements RepositoryComparisonReader {
     repo: string;
     ref?: string;
     limit?: number;
-  }): Promise<{ ref: string | null; commits: CommitSummary[] }> {
-    return this.sendJsonRequest<{
-      ref: string | null;
-      commits: CommitSummary[];
-    }>({
+    page?: number;
+  }): Promise<RepositoryCommitHistoryResult> {
+    return this.sendJsonRequest<RepositoryCommitHistoryResult>({
       repositoryId: args.repositoryId,
       operation: "list-commit-history",
       payload: {
         owner: args.owner,
         repo: args.repo,
         ...(args.ref ? { ref: args.ref } : {}),
-        ...(args.limit !== undefined ? { limit: args.limit } : {})
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+        ...(args.page !== undefined ? { page: args.page } : {})
       }
     });
   }

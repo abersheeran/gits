@@ -76,6 +76,33 @@ describe("API repository browser route integration", () => {
     expect(body.commits).toHaveLength(2);
     expect(body.commits[0]?.message).toContain("second commit");
     expect(body.commits[1]?.message).toContain("initial commit");
+    expect(body.pagination).toEqual({
+      page: 1,
+      perPage: 2,
+      hasNextPage: false
+    });
+  });
+
+  it("returns paginated commit history for later pages", async () => {
+    const bucket = new MockR2Bucket();
+    await seedSampleRepositoryToR2(bucket, "alice", "demo");
+    const response = await app.fetch(
+      new Request("http://localhost/api/repos/alice/demo/commits?limit=1&page=2"),
+      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      commits: Array<{ message: string }>;
+      pagination: { page: number; perPage: number; hasNextPage: boolean };
+    };
+    expect(body.commits).toHaveLength(1);
+    expect(body.commits[0]?.message).toContain("initial commit");
+    expect(body.pagination).toEqual({
+      page: 2,
+      perPage: 1,
+      hasNextPage: false
+    });
   });
 
   it("returns repository contents for root tree", async () => {

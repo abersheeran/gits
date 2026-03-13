@@ -41,6 +41,7 @@ export type RepositoryBranchMutationResponse = {
 export type CommitHistoryResponse = {
   ref: string | null;
   commits: CommitSummary[];
+  pagination: PaginationMetadata;
 };
 
 export type CommitSummary = {
@@ -918,7 +919,7 @@ export async function deleteRepositoryBranch(
 export async function getRepositoryCommits(
   owner: string,
   repo: string,
-  input?: { ref?: string; limit?: number }
+  input?: { ref?: string; limit?: number; page?: number }
 ): Promise<CommitHistoryResponse> {
   const query = new URLSearchParams();
   if (input?.ref) {
@@ -926,6 +927,9 @@ export async function getRepositoryCommits(
   }
   if (input?.limit) {
     query.set("limit", String(input.limit));
+  }
+  if (input?.page) {
+    query.set("page", String(input.page));
   }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return requestJson<CommitHistoryResponse>(`/api/repos/${owner}/${repo}/commits${suffix}`);

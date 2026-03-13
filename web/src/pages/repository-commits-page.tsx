@@ -61,6 +61,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
   const repo = params.repo ?? "";
   const requestedRef = searchParams.get("ref")?.trim() || undefined;
   const selectedCommitOid = searchParams.get("oid")?.trim() || null;
+  const requestedPage = Math.max(Number.parseInt(searchParams.get("page") ?? "1", 10) || 1, 1);
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [history, setHistory] = useState<CommitHistoryResponse | null>(null);
@@ -86,7 +87,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
       try {
         const [nextDetail, nextHistory] = await Promise.all([
           getRepositoryDetail(owner, repo, requestedRef),
-          getRepositoryCommits(owner, repo, { ref: requestedRef, limit: 100 })
+          getRepositoryCommits(owner, repo, { ref: requestedRef, limit: 20, page: requestedPage })
         ]);
         if (canceled) {
           return;
@@ -108,7 +109,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
     return () => {
       canceled = true;
     };
-  }, [owner, repo, requestedRef]);
+  }, [owner, repo, requestedPage, requestedRef]);
 
   useEffect(() => {
     let canceled = false;
@@ -169,7 +170,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
     : null;
   const activeCommitOid = selectedCommitOid;
 
-  function updateSearch(next: { ref?: string | null; oid?: string | null }) {
+  function updateSearch(next: { ref?: string | null; oid?: string | null; page?: number | null }) {
     const nextParams = new URLSearchParams(searchParams);
     if ("ref" in next) {
       if (next.ref) {
@@ -183,6 +184,13 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
         nextParams.set("oid", next.oid);
       } else {
         nextParams.delete("oid");
+      }
+    }
+    if ("page" in next) {
+      if (next.page && next.page > 1) {
+        nextParams.set("page", String(next.page));
+      } else {
+        nextParams.delete("page");
       }
     }
     setSearchParams(nextParams);
@@ -247,7 +255,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                 if (value.startsWith("__commit__:")) {
                   return;
                 }
-                updateSearch({ ref: value, oid: null });
+                updateSearch({ ref: value, oid: null, page: 1 });
               }}
             >
               <SelectTrigger className="h-9 w-[220px] bg-surface-base text-label-sm">
@@ -267,7 +275,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
               </SelectContent>
             </Select>
             <span className="text-body-xs text-text-secondary">
-              showing latest {history.commits.length} commits on {selectedBranchLabel ?? "default ref"}
+              第 {history.pagination.page} 页 · 每页 {history.pagination.perPage} 条 · {selectedBranchLabel ?? "default ref"}
             </span>
           </div>
         </div>
@@ -329,6 +337,31 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                 );
               })}
             </ul>
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <span className="text-body-xs text-text-secondary">
+                本页显示 {history.commits.length} 条提交记录
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={history.pagination.page <= 1 || loading}
+                  onClick={() => updateSearch({ page: history.pagination.page - 1, oid: null })}
+                >
+                  上一页
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!history.pagination.hasNextPage || loading}
+                  onClick={() => updateSearch({ page: history.pagination.page + 1, oid: null })}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
           </section>
         )}
       </section>

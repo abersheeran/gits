@@ -71,4 +71,51 @@ describe("API repository browser routes", () => {
 
     expect(response.status).toBe(404);
   });
+
+  it("passes commit pagination options to repository object client", async () => {
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () =>
+          buildRepositoryRow({
+            owner_id: "user-1",
+            is_private: 0
+          })
+      }
+    ]);
+    const listCommitHistorySpy = vi
+      .spyOn(RepositoryObjectClient.prototype, "listCommitHistory")
+      .mockResolvedValue({
+        ref: "refs/heads/main",
+        commits: [],
+        pagination: {
+          page: 2,
+          perPage: 10,
+          hasNextPage: true
+        }
+      });
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo/commits?limit=10&page=2"),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(listCommitHistorySpy).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      owner: "alice",
+      repo: "demo",
+      limit: 10,
+      page: 2
+    });
+    expect(await response.json()).toEqual({
+      ref: "refs/heads/main",
+      commits: [],
+      pagination: {
+        page: 2,
+        perPage: 10,
+        hasNextPage: true
+      }
+    });
+  });
 });

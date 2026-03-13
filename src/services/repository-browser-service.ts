@@ -83,6 +83,16 @@ export type RepositoryPathHistoryResult = {
   commits: CommitSummary[];
 };
 
+export type RepositoryCommitHistoryResult = {
+  ref: string | null;
+  commits: CommitSummary[];
+  pagination: {
+    page: number;
+    perPage: number;
+    hasNextPage: boolean;
+  };
+};
+
 export type RepositoryCompareChange = {
   path: string;
   previousPath: string | null;
@@ -1074,17 +1084,26 @@ export class RepositoryBrowserService {
     repo: string;
     ref?: string;
     limit?: number;
-  }, loadedContext?: LoadedRepositoryContext): Promise<{ ref: string | null; commits: CommitSummary[] }> {
+    page?: number;
+  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryCommitHistoryResult> {
     const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
     const selectedRef = this.selectRef(input.ref, loaded);
+    const perPage = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const page = Math.max(input.page ?? 1, 1);
     if (!selectedRef) {
       return {
         ref: null,
-        commits: []
+        commits: [],
+        pagination: {
+          page,
+          perPage,
+          hasNextPage: false
+        }
       };
     }
 
-    const depth = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const offset = (page - 1) * perPage;
+    const depth = offset + perPage + 1;
     let commitsRaw: Array<{
       oid: string;
       commit: {
@@ -1116,13 +1135,26 @@ export class RepositoryBrowserService {
     } catch {
       return {
         ref: selectedRef,
-        commits: []
+        commits: [],
+        pagination: {
+          page,
+          perPage,
+          hasNextPage: false
+        }
       };
     }
 
+    const hasNextPage = commitsRaw.length > offset + perPage;
+    const commits = commitsRaw.slice(offset, offset + perPage).map((item) => toCommitSummary(item));
+
     return {
       ref: selectedRef,
-      commits: commitsRaw.map((item) => toCommitSummary(item))
+      commits,
+      pagination: {
+        page,
+        perPage,
+        hasNextPage
+      }
     };
   }
 

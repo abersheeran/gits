@@ -32,7 +32,7 @@
 
 ### 2.3 历史与比较
 
-- 独立仓库 commit 历史页
+- 独立仓库 commit 历史页，支持按页浏览提交记录
 - 分支 commit 历史
 - 单路径历史
 - 单提交详情
@@ -78,7 +78,7 @@
 - `GET /api/repos/:owner/:repo`
 - `GET /api/repos/:owner/:repo/branches`
 - `GET /api/repos/:owner/:repo/contents`
-- `GET /api/repos/:owner/:repo/commits`
+- `GET /api/repos/:owner/:repo/commits`，支持 `page` / `limit` 分页参数并返回分页元数据
 - `GET /api/repos/:owner/:repo/commits/:oid`
 - `GET /api/repos/:owner/:repo/history`
 - `GET /api/repos/:owner/:repo/compare`
