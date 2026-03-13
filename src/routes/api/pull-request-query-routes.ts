@@ -11,7 +11,7 @@ import {
   buildLatestPullRequestProvenancePayload,
   createWorkflowTaskFlowService,
   findReadableRepositoryOr404,
-  parseActionRunSourceNumbers,
+  parseAgentSessionSourceNumbers,
   parseLimit,
   parsePage,
   parsePullRequestListState,
@@ -57,7 +57,7 @@ export function registerPullRequestQueryRoutes(router: ApiRouter): void {
     router.get("/repos/:owner/:repo/pulls/provenance/latest", optionalSession, async (c) => {
       const owner = c.req.param("owner");
       const repo = c.req.param("repo");
-      const pullRequestNumbers = parseActionRunSourceNumbers(c.req.query("numbers"));
+      const pullRequestNumbers = parseAgentSessionSourceNumbers(c.req.query("numbers"));
       const repositoryService = new RepositoryService(c.env.DB);
       const sessionUser = c.get("sessionUser");
       const repository = await findReadableRepositoryOr404({

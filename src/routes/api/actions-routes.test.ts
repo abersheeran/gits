@@ -427,6 +427,15 @@ describe("API actions and session routes", () => {
 
   it("streams action run logs over SSE", async () => {
     const now = Date.now();
+    const bucket = new MockR2Bucket();
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
+    await logStorage.writeAttemptArtifactLogs(
+      "repo-1",
+      "run-1",
+      "attempt-1",
+      "session_logs",
+      "line 1\nline 2"
+    );
     const db = createMockD1Database([
       {
         when: "WHERE u.username = ? AND r.name = ?",
@@ -447,7 +456,6 @@ describe("API actions and session routes", () => {
             created_by_username: "alice",
             status: "success",
             prompt: "run tests",
-            logs: "line 1\nline 2",
             exit_code: 0,
             container_instance: "agent-session-run-1",
             created_at: now - 1_000,
@@ -460,7 +468,10 @@ describe("API actions and session routes", () => {
 
     const response = await createApp().fetch(
       new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-1/logs/stream"),
-      createBaseEnv(db)
+      {
+        ...createBaseEnv(db),
+        GIT_BUCKET: bucket as unknown as R2Bucket
+      }
     );
 
     expect(response.status).toBe(200);
@@ -470,7 +481,7 @@ describe("API actions and session routes", () => {
     expect(events[0]).toBe("retry: 1000");
     expect(events[1]).toContain("event: snapshot");
     expect(events[1]).toContain("data: {");
-    expect(events[1]).toContain("\"run\":{\"id\":\"run-1\"");
+    expect(events[1]).toContain("\"session\":{\"id\":\"run-1\"");
     expect(events[1]).toContain("\"logs\":\"line 1\\nline 2\"");
     expect(events[2]).toContain("event: done");
     expect(events[2]).toContain("data: {");
@@ -479,6 +490,8 @@ describe("API actions and session routes", () => {
 
   it("streams append and status updates for running action runs", async () => {
     const now = Date.now();
+    const bucket = new MockR2Bucket();
+    const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
     let readCount = 0;
     const db = createMockD1Database([
       {
@@ -502,7 +515,6 @@ describe("API actions and session routes", () => {
               created_by_username: "alice",
               status: "running",
               prompt: "run tests",
-              logs: "",
               created_at: now - 2_000,
               started_at: now - 1_900,
               completed_at: null,
@@ -510,6 +522,13 @@ describe("API actions and session routes", () => {
             });
           }
           if (readCount === 2) {
+            void logStorage.writeAttemptArtifactLogs(
+              "repo-1",
+              "run-2",
+              "attempt-1",
+              "session_logs",
+              "line 1"
+            );
             return buildAgentSessionRow({
               id: "run-2",
               session_number: 2,
@@ -522,7 +541,6 @@ describe("API actions and session routes", () => {
               created_by_username: "alice",
               status: "running",
               prompt: "run tests",
-              logs: "line 1",
               created_at: now - 2_000,
               started_at: now - 1_900,
               completed_at: null,
@@ -541,7 +559,6 @@ describe("API actions and session routes", () => {
             created_by_username: "alice",
             status: "success",
             prompt: "run tests",
-            logs: "line 1",
             exit_code: 0,
             created_at: now - 2_000,
             started_at: now - 1_900,
@@ -554,7 +571,10 @@ describe("API actions and session routes", () => {
 
     const response = await createApp().fetch(
       new Request("http://localhost/api/repos/alice/demo/agent-sessions/run-2/logs/stream"),
-      createBaseEnv(db)
+      {
+        ...createBaseEnv(db),
+        GIT_BUCKET: bucket as unknown as R2Bucket
+      }
     );
 
     expect(response.status).toBe(200);
@@ -571,7 +591,13 @@ describe("API actions and session routes", () => {
   it("returns full action run logs from object storage when available", async () => {
     const bucket = new MockR2Bucket();
     const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
-    await logStorage.writeRunLogs("repo-1", "run-full-logs", "line 1\nline 2\nline 3");
+    await logStorage.writeAttemptArtifactLogs(
+      "repo-1",
+      "run-full-logs",
+      "attempt-1",
+      "session_logs",
+      "line 1\nline 2\nline 3"
+    );
     const db = createMockD1Database([
       {
         when: "WHERE u.username = ? AND r.name = ?",
@@ -583,8 +609,7 @@ describe("API actions and session routes", () => {
           buildAgentSessionRow({
             id: "run-full-logs",
             session_number: 4,
-            status: "success",
-            logs: "excerpt"
+            status: "success"
           })
       }
     ]);
@@ -675,9 +700,7 @@ describe("API actions and session routes", () => {
             ...sourceRun,
             id: runId,
             session_number: 2,
-            run_number: 2,
             status: "queued",
-            logs: "",
             exit_code: null,
             container_instance: null,
             parent_session_id: "run-1",
@@ -959,9 +982,10 @@ describe("API actions and session routes", () => {
   it("returns full agent session artifact content from object storage when available", async () => {
     const bucket = new MockR2Bucket();
     const logStorage = new ActionLogStorageService(bucket as unknown as R2Bucket);
-    await logStorage.writeSessionArtifactLogs(
+    await logStorage.writeAttemptArtifactLogs(
       "repo-1",
       "session-artifact",
+      "attempt-1",
       "stdout",
       "full stdout output"
     );
@@ -974,6 +998,7 @@ describe("API actions and session routes", () => {
         when: "WHERE repository_id = ? AND session_id = ? AND id = ?",
         first: () => ({
           id: "artifact-stdout",
+          attempt_id: "attempt-1",
           session_id: "session-artifact",
           repository_id: "repo-1",
           kind: "stdout",
@@ -1326,6 +1351,110 @@ describe("API actions and session routes", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { session: { status: string } };
     expect(body.session.status).toBe("cancelled");
+  });
+
+  it("cancels a running agent session and asks the runner container to stop", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    let sessionReadCount = 0;
+    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () => {
+          sessionReadCount += 1;
+          return buildAgentSessionRow({
+            id: "session-cancel-running",
+            status: sessionReadCount >= 2 ? "cancelled" : "running",
+            active_attempt_id: "attempt-cancel-running",
+            latest_attempt_id: "attempt-cancel-running",
+            container_instance: "agent-session-session-cancel-running-attempt-1",
+            completed_at: sessionReadCount >= 2 ? Date.now() : null
+          });
+        }
+      },
+      {
+        when: "WHERE repository_id = ? AND id = ?",
+        first: () => ({
+          id: "attempt-cancel-running",
+          session_id: "session-cancel-running",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "running",
+          instance_type: "lite",
+          promoted_from_instance_type: null,
+          container_instance: "agent-session-session-cancel-running-attempt-1",
+          exit_code: null,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: Date.now(),
+          claimed_at: Date.now() - 2_000,
+          started_at: Date.now() - 1_500,
+          completed_at: null,
+          updated_at: Date.now() - 500
+        })
+      },
+      {
+        when: "UPDATE agent_session_attempts",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      },
+      {
+        when: "UPDATE agent_sessions",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      },
+      {
+        when: "INSERT INTO agent_session_attempt_events",
+        run: () => ({ success: true })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request(
+        "http://localhost/api/repos/alice/demo/agent-sessions/session-cancel-running/cancel",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer session-ok"
+          }
+        }
+      ),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: stopFetch
+          })
+        } as unknown as DurableObjectNamespace
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { session: { status: string } };
+    expect(body.session.status).toBe("cancelled");
+    expect(stopFetch).toHaveBeenCalledWith("https://actions-container.internal/stop", {
+      method: "POST"
+    });
   });
 
   it("allows collaborators to create actions workflows", async () => {

@@ -10,11 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
-  listLatestActionRunsBySource,
   formatApiError,
   getRepositoryDetail,
+  listLatestAgentSessionsBySource,
   listPullRequests,
-  type ActionRunRecord,
+  type AgentSessionRecord,
   type AuthUser,
   type PullRequestListState,
   type PullRequestRecord,
@@ -38,9 +38,9 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequests, setPullRequests] = useState<PullRequestRecord[]>([]);
   const [totalPullRequests, setTotalPullRequests] = useState(0);
-  const [latestRunByPullNumber, setLatestRunByPullNumber] = useState<Record<number, ActionRunRecord>>(
-    {}
-  );
+  const [latestSessionByPullNumber, setLatestSessionByPullNumber] = useState<
+    Record<number, AgentSessionRecord>
+  >({});
   const [state, setState] = useState<PullRequestListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,17 +60,17 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
           listPullRequests(owner, repo, { state, limit: 100 })
         ]);
         const pullNumbers = nextPullRequests.pullRequests.map((pullRequest) => pullRequest.number);
-        const latestRunItems =
+        const latestSessionItems =
           pullNumbers.length > 0
-            ? await listLatestActionRunsBySource(owner, repo, {
+            ? await listLatestAgentSessionsBySource(owner, repo, {
                 sourceType: "pull_request",
                 numbers: pullNumbers
               })
             : [];
-        const nextRunByPullNumber: Record<number, ActionRunRecord> = {};
-        for (const item of latestRunItems) {
-          if (item.run) {
-            nextRunByPullNumber[item.sourceNumber] = item.run;
+        const nextSessionByPullNumber: Record<number, AgentSessionRecord> = {};
+        for (const item of latestSessionItems) {
+          if (item.session) {
+            nextSessionByPullNumber[item.sourceNumber] = item.session;
           }
         }
         if (canceled) {
@@ -79,7 +79,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
         setDetail(nextDetail);
         setPullRequests(nextPullRequests.pullRequests);
         setTotalPullRequests(nextPullRequests.pagination.total);
-        setLatestRunByPullNumber(nextRunByPullNumber);
+        setLatestSessionByPullNumber(nextSessionByPullNumber);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -97,29 +97,29 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
     };
   }, [owner, repo, state]);
 
-  const hasPendingRun = pullRequests.some((pullRequest) => {
-    const run = latestRunByPullNumber[pullRequest.number];
-    return run ? run.status === "queued" || run.status === "running" : false;
+  const hasPendingSession = pullRequests.some((pullRequest) => {
+    const session = latestSessionByPullNumber[pullRequest.number];
+    return session ? session.status === "queued" || session.status === "running" : false;
   });
 
   useEffect(() => {
-    if (!hasPendingRun || !owner || !repo || pullRequests.length === 0) {
+    if (!hasPendingSession || !owner || !repo || pullRequests.length === 0) {
       return;
     }
     const timer = window.setInterval(async () => {
       const pullNumbers = pullRequests.map((pullRequest) => pullRequest.number);
       try {
-        const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
+        const latestSessionItems = await listLatestAgentSessionsBySource(owner, repo, {
           sourceType: "pull_request",
           numbers: pullNumbers
         });
-        const nextRunByPullNumber: Record<number, ActionRunRecord> = {};
-        for (const item of latestRunItems) {
-          if (item.run) {
-            nextRunByPullNumber[item.sourceNumber] = item.run;
+        const nextSessionByPullNumber: Record<number, AgentSessionRecord> = {};
+        for (const item of latestSessionItems) {
+          if (item.session) {
+            nextSessionByPullNumber[item.sourceNumber] = item.session;
           }
         }
-        setLatestRunByPullNumber(nextRunByPullNumber);
+        setLatestSessionByPullNumber(nextSessionByPullNumber);
       } catch {
         // Ignore transient polling errors.
       }
@@ -127,7 +127,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRun, owner, repo, pullRequests]);
+  }, [hasPendingSession, owner, repo, pullRequests]);
 
   if (!owner || !repo) {
     return (
@@ -216,7 +216,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
         ) : (
           <ul className="divide-y">
             {pullRequests.map((pullRequest) => {
-              const actionRun = latestRunByPullNumber[pullRequest.number];
+              const latestSession = latestSessionByPullNumber[pullRequest.number];
               return (
                 <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
                   <div className="flex items-start justify-between gap-3">
@@ -236,13 +236,13 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
                               Draft
                             </Badge>
                           ) : null}
-                          {actionRun ? (
+                          {latestSession ? (
                             <Link
                               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                              to={`/repo/${owner}/${repo}/actions?sessionId=${actionRun.id}`}
+                              to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
                             >
                               <ActionStatusBadge
-                                status={actionRun.status}
+                                status={latestSession.status}
                                 withDot
                                 className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
                               />

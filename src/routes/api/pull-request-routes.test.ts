@@ -21,7 +21,6 @@ import {
 } from "../../test-utils/mock-d1";
 
 import {
-  buildActionRunRow,
   buildAgentSessionRow,
   buildPullRequestReviewThreadCommentRow,
   buildPullRequestReviewThreadRow,

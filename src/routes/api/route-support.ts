@@ -1,67 +1,21 @@
-import { Hono } from "hono";
-import { deleteCookie, setCookie } from "hono/cookie";
-import { HTTPException } from "hono/http-exception";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { mustSessionUser, optionalSession, requireSession } from "../../middleware/auth";
 import {
-  ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
-  ISSUE_REPLY_TOKEN_PLACEHOLDER
-} from "../../services/action-runner-prompt-tokens";
-import {
-  containsActionsMention,
-  scheduleActionRunExecution,
-  triggerInteractiveAgentSession,
-  triggerActionWorkflows,
-  triggerMentionActionRun
-} from "../../services/action-trigger-service";
-import { ACTION_CONTAINER_INSTANCE_TYPES } from "../../services/action-container-instance-types";
-import { ActionLogStorageService } from "../../services/action-log-storage-service";
-import { AgentSessionService } from "../../services/agent-session-service";
-import { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
-import { AuthService } from "../../services/auth-service";
-import { RepositoryMetadataService } from "../../services/repository-metadata-service";
-import {
-  collectPlatformMcpForwardHeaders,
-  createPlatformMcpServer
-} from "../../services/platform-mcp-service";
-import {
-  RepositoryBrowseInvalidPathError,
-  RepositoryBrowsePathNotFoundError,
-  type RepositoryCompareResult,
-  type RepositoryDiffHunk
-} from "../../services/repository-browser-service";
-import { IssueService, type IssueListState } from "../../services/issue-service";
-import {
-  PullRequestMergeBranchNotFoundError,
-  PullRequestMergeConflictError,
-  PullRequestMergeNotSupportedError
-} from "../../services/pull-request-merge-service";
-import {
-  DuplicateOpenPullRequestError,
+  ActionLogStorageService,
+  AgentSessionService,
+  HTTPException,
+  IssueService,
   PullRequestService,
-  type PullRequestListState
-} from "../../services/pull-request-service";
-import { enrichPullRequestReviewThreads } from "../../services/pull-request-review-thread-anchor-service";
-import { createRepositoryObjectClient } from "../../services/repository-object";
-import { RepositoryService } from "../../services/repository-service";
-import { WorkflowTaskFlowService } from "../../services/workflow-task-flow-service";
+  RepositoryService,
+  WorkflowTaskFlowService,
+  buildAgentSessionValidationSummary,
+  createRepositoryObjectClient
+} from "./deps";
 import type {
-  ActionAgentType,
-  ActionContainerInstanceType,
-  ActionWorkflowTrigger,
+  AgentSessionApiRecord,
   AgentSessionRecord,
-  AgentSessionSourceType,
   AppEnv,
-  IssueCommentRecord,
   IssueRecord,
-  IssueState,
-  IssueTaskStatus,
-  PullRequestReviewDecision,
-  PullRequestReviewThreadRecord,
-  PullRequestReviewThreadSide,
-  PullRequestState,
   RepositoryRecord
-} from "../../types";
+} from "./deps";
 
 
 export async function findReadableRepositoryOr404(args: {
@@ -177,7 +131,7 @@ export async function buildAgentSessionDetailPayload(args: {
   session: AgentSessionRecord;
   viewerId?: string;
 }): Promise<{
-  session: AgentSessionRecord;
+  session: AgentSessionApiRecord;
   sourceContext: Awaited<ReturnType<typeof buildAgentSessionSourceContext>>;
   attempts: Awaited<ReturnType<AgentSessionService["listAttempts"]>>;
   activeAttempt: Awaited<ReturnType<AgentSessionService["findActiveAttemptForSession"]>>;
@@ -213,6 +167,7 @@ export async function buildAgentSessionDetailPayload(args: {
   return {
     session: {
       ...args.session,
+      logs: artifacts.find((artifact) => artifact.kind === "session_logs")?.content_text ?? "",
       has_full_logs: true,
       logs_url: `/api/repos/${args.owner}/${args.repo}/agent-sessions/${args.session.id}/logs`
     },
@@ -241,25 +196,14 @@ export function createActionLogStorageService(
   return new ActionLogStorageService(env.ACTION_LOGS_BUCKET ?? env.GIT_BUCKET);
 }
 
-export function withActionRunApiMetadata(
-  owner: string,
-  repo: string,
-  run: AgentSessionRecord
-): AgentSessionRecord {
-  return {
-    ...run,
-    has_full_logs: true,
-    logs_url: `/api/repos/${owner}/${repo}/agent-sessions/${run.id}/logs`
-  };
-}
-
 export function withAgentSessionApiMetadata(
   owner: string,
   repo: string,
   session: AgentSessionRecord
-): AgentSessionRecord {
+): AgentSessionApiRecord {
   return {
     ...session,
+    logs: "",
     has_full_logs: true,
     logs_url: `/api/repos/${owner}/${repo}/agent-sessions/${session.id}/logs`
   };
@@ -357,10 +301,10 @@ export async function assertAssignableUserIds(args: {
   return args.userIds;
 }
 
-export const TERMINAL_ACTION_RUN_STATUSES = new Set(["success", "failed", "cancelled"]);
-export const ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS = 1_000;
-export const ACTION_RUN_LOG_STREAM_MAX_DURATION_MS = 25_000;
-export const ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
+export const TERMINAL_SESSION_STATUSES = new Set(["success", "failed", "cancelled"]);
+export const SESSION_LOG_STREAM_POLL_INTERVAL_MS = 1_000;
+export const SESSION_LOG_STREAM_MAX_DURATION_MS = 25_000;
+export const SESSION_LOG_STREAM_HEARTBEAT_INTERVAL_MS = 10_000;
 
 export type SseEventPayload = {
   event: string;
@@ -371,34 +315,34 @@ export function createSseEventChunk(payload: SseEventPayload): string {
   return `event: ${payload.event}\ndata: ${JSON.stringify(payload.data)}\n\n`;
 }
 
-export function buildRunLogStreamEvents(
-  previousRun: AgentSessionRecord | null,
-  currentRun: AgentSessionRecord
+export function buildSessionLogStreamEvents(
+  previousSession: AgentSessionApiRecord | null,
+  currentSession: AgentSessionApiRecord
 ): SseEventPayload[] {
-  if (!previousRun) {
+  if (!previousSession) {
     return [
       {
         event: "snapshot",
         data: {
-          run: currentRun
+          session: currentSession
         }
       }
     ];
   }
 
-  if (currentRun.logs !== previousRun.logs) {
-    if (currentRun.logs.startsWith(previousRun.logs)) {
-      const chunk = currentRun.logs.slice(previousRun.logs.length);
+  if (currentSession.logs !== previousSession.logs) {
+    if (currentSession.logs.startsWith(previousSession.logs)) {
+      const chunk = currentSession.logs.slice(previousSession.logs.length);
       return [
         {
           event: "append",
           data: {
-            runId: currentRun.id,
+            sessionId: currentSession.id,
             chunk,
-            status: currentRun.status,
-            exitCode: currentRun.exit_code,
-            completedAt: currentRun.completed_at,
-            updatedAt: currentRun.updated_at
+            status: currentSession.status,
+            exitCode: currentSession.exit_code,
+            completedAt: currentSession.completed_at,
+            updatedAt: currentSession.updated_at
           }
         }
       ];
@@ -408,27 +352,27 @@ export function buildRunLogStreamEvents(
       {
         event: "replace",
         data: {
-          run: currentRun
+          session: currentSession
         }
       }
     ];
   }
 
   if (
-    currentRun.status !== previousRun.status ||
-    currentRun.exit_code !== previousRun.exit_code ||
-    currentRun.completed_at !== previousRun.completed_at ||
-    currentRun.updated_at !== previousRun.updated_at
+    currentSession.status !== previousSession.status ||
+    currentSession.exit_code !== previousSession.exit_code ||
+    currentSession.completed_at !== previousSession.completed_at ||
+    currentSession.updated_at !== previousSession.updated_at
   ) {
     return [
       {
         event: "status",
         data: {
-          runId: currentRun.id,
-          status: currentRun.status,
-          exitCode: currentRun.exit_code,
-          completedAt: currentRun.completed_at,
-          updatedAt: currentRun.updated_at
+          sessionId: currentSession.id,
+          status: currentSession.status,
+          exitCode: currentSession.exit_code,
+          completedAt: currentSession.completed_at,
+          updatedAt: currentSession.updated_at
         }
       }
     ];
@@ -437,23 +381,32 @@ export function buildRunLogStreamEvents(
   return [];
 }
 
-export async function hydrateRunWithFullLogs(args: {
+export async function hydrateSessionWithFullLogs(args: {
   logStorage: ActionLogStorageService;
   repositoryId: string;
-  run: AgentSessionRecord;
-}): Promise<AgentSessionRecord> {
-  const logs = await args.logStorage.readSessionLogs(args.repositoryId, args.run.id);
+  session: AgentSessionRecord;
+}): Promise<AgentSessionApiRecord> {
+  const attemptId = args.session.latest_attempt_id ?? args.session.active_attempt_id ?? null;
+  const logs =
+    attemptId === null
+      ? null
+      : await args.logStorage.readAttemptArtifactLogs(
+          args.repositoryId,
+          args.session.id,
+          attemptId,
+          "session_logs"
+        );
   if (logs === null) {
-    return args.run;
+    return {
+      ...args.session,
+      logs: ""
+    };
   }
   return {
-    ...args.run,
+    ...args.session,
     logs
   };
 }
-
-export const buildSessionLogStreamEvents = buildRunLogStreamEvents;
-export const hydrateSessionWithFullLogs = hydrateRunWithFullLogs;
 
 export async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise((resolve) => {

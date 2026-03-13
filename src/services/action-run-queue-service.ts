@@ -4,7 +4,7 @@ import { AuthService } from "./auth-service";
 import { AgentSessionService } from "./agent-session-service";
 import { RepositoryService } from "./repository-service";
 
-function isActionRunQueueMessage(value: unknown): value is AgentSessionQueueMessage {
+function isAgentSessionQueueMessage(value: unknown): value is AgentSessionQueueMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -96,7 +96,7 @@ export async function consumeActionRunQueueBatch(input: {
 }): Promise<void> {
   for (const queueMessage of input.batch.messages) {
     const body = queueMessage.body;
-    if (!isActionRunQueueMessage(body)) {
+    if (!isAgentSessionQueueMessage(body)) {
       queueMessage.ack();
       continue;
     }

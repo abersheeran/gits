@@ -11,11 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
-  listLatestActionRunsBySource,
   formatApiError,
   getRepositoryDetail,
+  listLatestAgentSessionsBySource,
   listIssues,
-  type ActionRunRecord,
+  type AgentSessionRecord,
   type AuthUser,
   type IssueListState,
   type IssueRecord,
@@ -35,9 +35,9 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issues, setIssues] = useState<IssueRecord[]>([]);
   const [totalIssues, setTotalIssues] = useState(0);
-  const [latestRunByIssueNumber, setLatestRunByIssueNumber] = useState<Record<number, ActionRunRecord>>(
-    {}
-  );
+  const [latestSessionByIssueNumber, setLatestSessionByIssueNumber] = useState<
+    Record<number, AgentSessionRecord>
+  >({});
   const [state, setState] = useState<IssueListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,17 +57,17 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           listIssues(owner, repo, { state, limit: 100 })
         ]);
         const issueNumbers = nextIssues.issues.map((issue) => issue.number);
-        const latestRunItems =
+        const latestSessionItems =
           issueNumbers.length > 0
-            ? await listLatestActionRunsBySource(owner, repo, {
+            ? await listLatestAgentSessionsBySource(owner, repo, {
                 sourceType: "issue",
                 numbers: issueNumbers
               })
             : [];
-        const nextRunByIssueNumber: Record<number, ActionRunRecord> = {};
-        for (const item of latestRunItems) {
-          if (item.run) {
-            nextRunByIssueNumber[item.sourceNumber] = item.run;
+        const nextSessionByIssueNumber: Record<number, AgentSessionRecord> = {};
+        for (const item of latestSessionItems) {
+          if (item.session) {
+            nextSessionByIssueNumber[item.sourceNumber] = item.session;
           }
         }
         if (canceled) {
@@ -76,7 +76,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
         setDetail(nextDetail);
         setIssues(nextIssues.issues);
         setTotalIssues(nextIssues.pagination.total);
-        setLatestRunByIssueNumber(nextRunByIssueNumber);
+        setLatestSessionByIssueNumber(nextSessionByIssueNumber);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -94,35 +94,35 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     };
   }, [owner, repo, state]);
 
-  const hasPendingRun = issues.some((issue) => {
-    const run = latestRunByIssueNumber[issue.number];
-    return run ? run.status === "queued" || run.status === "running" : false;
+  const hasPendingSession = issues.some((issue) => {
+    const session = latestSessionByIssueNumber[issue.number];
+    return session ? session.status === "queued" || session.status === "running" : false;
   });
 
   useEffect(() => {
-    if (!hasPendingRun || !owner || !repo || issues.length === 0) {
+    if (!hasPendingSession || !owner || !repo || issues.length === 0) {
       return;
     }
     const timer = window.setInterval(async () => {
       try {
         const nextIssues = await listIssues(owner, repo, { state, limit: 100 });
         const issueNumbers = nextIssues.issues.map((issue) => issue.number);
-        const latestRunItems =
+        const latestSessionItems =
           issueNumbers.length > 0
-            ? await listLatestActionRunsBySource(owner, repo, {
+            ? await listLatestAgentSessionsBySource(owner, repo, {
                 sourceType: "issue",
                 numbers: issueNumbers
               })
             : [];
-        const nextRunByIssueNumber: Record<number, ActionRunRecord> = {};
-        for (const item of latestRunItems) {
-          if (item.run) {
-            nextRunByIssueNumber[item.sourceNumber] = item.run;
+        const nextSessionByIssueNumber: Record<number, AgentSessionRecord> = {};
+        for (const item of latestSessionItems) {
+          if (item.session) {
+            nextSessionByIssueNumber[item.sourceNumber] = item.session;
           }
         }
         setIssues(nextIssues.issues);
         setTotalIssues(nextIssues.pagination.total);
-        setLatestRunByIssueNumber(nextRunByIssueNumber);
+        setLatestSessionByIssueNumber(nextSessionByIssueNumber);
       } catch {
         // Ignore transient polling errors.
       }
@@ -130,7 +130,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingRun, issues, owner, repo, state]);
+  }, [hasPendingSession, issues, owner, repo, state]);
 
   if (!owner || !repo) {
     return (
@@ -212,7 +212,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
         ) : (
           <ul className="divide-y">
             {issues.map((issue) => {
-              const actionRun = latestRunByIssueNumber[issue.number];
+              const latestSession = latestSessionByIssueNumber[issue.number];
               return (
                 <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
                   <div className="flex items-start justify-between gap-3">
@@ -232,13 +232,13 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
                               {issue.comment_count} comments
                             </Badge>
                           ) : null}
-                          {actionRun ? (
+                          {latestSession ? (
                             <Link
                               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                              to={`/repo/${owner}/${repo}/actions?sessionId=${actionRun.id}`}
+                              to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
                             >
                               <ActionStatusBadge
-                                status={actionRun.status}
+                                status={latestSession.status}
                                 withDot
                                 className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
                               />

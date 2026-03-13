@@ -8,13 +8,15 @@ export {
 } from "../../services/action-runner-prompt-tokens";
 export {
   containsActionsMention,
-  createLinkedAgentSessionForRun,
   scheduleActionRunExecution,
   triggerInteractiveAgentSession,
   triggerActionWorkflows,
   triggerMentionActionRun
 } from "../../services/action-trigger-service";
-export { ACTION_CONTAINER_INSTANCE_TYPES } from "../../services/action-container-instance-types";
+export {
+  ACTION_CONTAINER_INSTANCE_TYPES,
+  getActionRunnerNamespace
+} from "../../services/action-container-instance-types";
 export { ActionLogStorageService } from "../../services/action-log-storage-service";
 export { AgentSessionService } from "../../services/agent-session-service";
 export { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
@@ -49,9 +51,9 @@ export { WorkflowTaskFlowService } from "../../services/workflow-task-flow-servi
 export type {
   ActionAgentType,
   ActionContainerInstanceType,
-  ActionRunRecord,
-  ActionRunSourceType,
   ActionWorkflowTrigger,
+  AgentSessionApiRecord,
+  AgentSessionExecutionSourceType,
   AgentSessionRecord,
   AgentSessionSourceType,
   AppEnv,

@@ -18,7 +18,7 @@ import {
   ACTION_CONTAINER_INSTANCE_TYPES,
   getActionRunnerNamespace
 } from "./action-container-instance-types";
-import { buildActionRunLifecycleLines } from "./action-run-log-format";
+import { buildSessionLifecycleLines } from "./session-log-format";
 import { ACTIONS_SYSTEM_EMAIL, ACTIONS_SYSTEM_USERNAME } from "./auth-service";
 import { ActionsService } from "./actions-service";
 import { ActionLogStorageService, buildLogExcerpt } from "./action-log-storage-service";
@@ -68,8 +68,8 @@ type BoundedLogBuffer = {
 };
 
 const MAX_LOG_CHARS = 120_000;
-const RUN_LOG_FLUSH_INTERVAL_MS = 1_000;
-const RUN_LOG_FLUSH_MIN_CHARS = 1_024;
+const SESSION_LOG_FLUSH_INTERVAL_MS = 1_000;
+const SESSION_LOG_FLUSH_MIN_CHARS = 1_024;
 const MAX_RUNNER_STREAM_EVENT_CHARS = 256_000;
 const DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE = "lite";
 
@@ -135,9 +135,9 @@ function redactLogText(
   return redactText ? redactText(value) : value;
 }
 
-function buildRunLogs(input: {
-  runId: string;
-  runNumber: number;
+function buildSessionLogs(input: {
+  sessionId: string;
+  sessionNumber: number;
   attemptId?: string;
   attemptNumber?: number;
   instanceType?: ActionContainerInstanceType;
@@ -151,8 +151,8 @@ function buildRunLogs(input: {
   redactText?: (input: string) => string;
 }): string {
   const lines: string[] = [];
-  lines.push(`run_id: ${input.runId}`);
-  lines.push(`run_number: ${input.runNumber}`);
+  lines.push(`session_id: ${input.sessionId}`);
+  lines.push(`session_number: ${input.sessionNumber}`);
   if (input.attemptId) {
     lines.push(`attempt_id: ${input.attemptId}`);
   }
@@ -166,7 +166,7 @@ function buildRunLogs(input: {
   lines.push(`prompt: ${redactLogText(input.prompt, input.redactText)}`);
   lines.push("");
   lines.push(
-    ...buildActionRunLifecycleLines(
+    ...buildSessionLifecycleLines(
       {
         claimedAt: input.claimedAt,
         startedAt: input.startedAt,
@@ -225,7 +225,7 @@ function buildRunLogs(input: {
   return truncateLog(lines.join("\n"));
 }
 
-function appendRunLogSection(logs: string, section: string, detail: string): string {
+function appendSessionLogSection(logs: string, section: string, detail: string): string {
   const trimmedDetail = detail.trim();
   if (!trimmedDetail) {
     return logs;
@@ -269,9 +269,9 @@ function parseRunnerStreamEvent(raw: string): RunnerStreamEvent {
   }
 }
 
-function buildLiveRunLogs(input: {
-  runId: string;
-  runNumber: number;
+function buildLiveSessionLogs(input: {
+  sessionId: string;
+  sessionNumber: number;
   attemptId?: string;
   attemptNumber?: number;
   instanceType?: ActionContainerInstanceType;
@@ -292,9 +292,9 @@ function buildLiveRunLogs(input: {
     ...(input.error ? { error: input.error } : {})
   };
 
-  return buildRunLogs({
-    runId: input.runId,
-    runNumber: input.runNumber,
+  return buildSessionLogs({
+    sessionId: input.sessionId,
+    sessionNumber: input.sessionNumber,
     ...(input.attemptId ? { attemptId: input.attemptId } : {}),
     ...(input.attemptNumber !== undefined ? { attemptNumber: input.attemptNumber } : {}),
     ...(input.instanceType ? { instanceType: input.instanceType } : {}),
@@ -312,7 +312,7 @@ async function consumeStreamedRunnerResponse(input: {
   repositoryId: string;
   sessionId: string;
   attemptId: string;
-  runNumber: number;
+  sessionNumber: number;
   attemptNumber: number;
   instanceType: ActionContainerInstanceType;
   agentType: "codex" | "claude_code";
@@ -350,8 +350,8 @@ async function consumeStreamedRunnerResponse(input: {
     const now = Date.now();
     if (
       !force &&
-      pendingCharsSinceFlush < RUN_LOG_FLUSH_MIN_CHARS &&
-      now - lastFlushAt < RUN_LOG_FLUSH_INTERVAL_MS
+      pendingCharsSinceFlush < SESSION_LOG_FLUSH_MIN_CHARS &&
+      now - lastFlushAt < SESSION_LOG_FLUSH_INTERVAL_MS
     ) {
       return;
     }
@@ -366,9 +366,9 @@ async function consumeStreamedRunnerResponse(input: {
       pendingEvents = [];
     }
 
-    const logs = buildLiveRunLogs({
-      runId: input.sessionId,
-      runNumber: input.runNumber,
+    const logs = buildLiveSessionLogs({
+      sessionId: input.sessionId,
+      sessionNumber: input.sessionNumber,
       attemptId: input.attemptId,
       attemptNumber: input.attemptNumber,
       instanceType: input.instanceType,
@@ -389,8 +389,13 @@ async function consumeStreamedRunnerResponse(input: {
       sessionStatus: "running",
       activeAttemptId: input.attemptId,
       latestAttemptId: input.attemptId,
-      logs: buildLogExcerpt(logs),
       updatedAt: now
+    });
+    await input.agentSessionService.recordSessionObservability({
+      repositoryId: input.repositoryId,
+      sessionId: input.sessionId,
+      logs,
+      recordedAt: now
     });
     lastFlushAt = now;
     pendingCharsSinceFlush = 0;
@@ -775,7 +780,7 @@ export async function executeActionRun(input: {
       completed_at: input.session.completed_at,
       updated_at: input.session.updated_at
     } satisfies AgentSessionAttemptRecord);
-  const runNumber = input.session.session_number;
+  const sessionNumber = input.session.session_number;
   const containerInstance = buildContainerInstanceName(sessionId, attempt);
   const claimedAt = await agentSessionService.claimQueuedAttempt({
     repositoryId: input.repository.id,
@@ -833,7 +838,7 @@ export async function executeActionRun(input: {
       return logs;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown log storage error";
-      return appendRunLogSection(logs, "log_storage_warning", message);
+      return appendSessionLogSection(logs, "log_storage_warning", message);
     }
   };
 
@@ -848,7 +853,7 @@ export async function executeActionRun(input: {
     let finalLogs = args.logs;
     const warning = await reconcileSourceTaskStatus();
     finalLogs = warning
-      ? appendRunLogSection(finalLogs, "status_reconciliation_warning", warning)
+      ? appendSessionLogSection(finalLogs, "status_reconciliation_warning", warning)
       : finalLogs;
     reconcileWarning = warning;
     await agentSessionService.syncSessionForAttempt({
@@ -857,7 +862,6 @@ export async function executeActionRun(input: {
       sessionStatus: args.status,
       activeAttemptId: null,
       latestAttemptId: attempt.id,
-      logs: buildLogExcerpt(finalLogs),
       exitCode: args.exitCode ?? null,
       containerInstance: null,
       failureReason: args.failureReason ?? null,
@@ -865,6 +869,11 @@ export async function executeActionRun(input: {
       completedAt: args.completedAt,
       updatedAt: args.completedAt
     });
+  };
+
+  const wasCancelledExternally = async (): Promise<boolean> => {
+    const latestAttempt = await agentSessionService.findAttemptById(input.repository.id, attempt.id);
+    return latestAttempt?.status === "cancelled";
   };
 
   const scheduleRetry = async (
@@ -904,7 +913,6 @@ export async function executeActionRun(input: {
       sessionStatus: "queued",
       activeAttemptId: nextAttempt.id,
       latestAttemptId: nextAttempt.id,
-      logs: buildLogExcerpt(logs),
       exitCode: null,
       containerInstance: null,
       failureReason: null,
@@ -922,9 +930,9 @@ export async function executeActionRun(input: {
 
   if (!actionsRunner) {
     const logs = await persistObservability(
-      buildRunLogs({
-        runId: sessionId,
-        runNumber,
+      buildSessionLogs({
+        sessionId,
+        sessionNumber,
         attemptId: attempt.id,
         attemptNumber: attempt.attempt_number,
         instanceType: attemptInstanceType,
@@ -936,6 +944,9 @@ export async function executeActionRun(input: {
       })
     );
     const completedAt = Date.now();
+    if (await wasCancelledExternally()) {
+      return;
+    }
     const classification = classifyAttemptFailure({
       errorMessage: `Actions runner binding is not configured for instance type '${attemptInstanceType}'`
     });
@@ -981,7 +992,7 @@ export async function executeActionRun(input: {
 
     const envVars: Record<string, string> = {
       GITS_ACTION_RUN_ID: sessionId,
-      GITS_ACTION_RUN_NUMBER: String(runNumber),
+      GITS_ACTION_RUN_NUMBER: String(sessionNumber),
       GITS_ACTION_ATTEMPT_ID: attempt.id,
       GITS_ACTION_ATTEMPT_NUMBER: String(attempt.attempt_number),
       GITS_REPOSITORY: `${input.repository.owner_username}/${input.repository.name}`,
@@ -1022,7 +1033,7 @@ export async function executeActionRun(input: {
         repositoryUrl: `${repositoryOrigin}/${input.repository.owner_username}/${input.repository.name}.git`,
         ref: input.session.trigger_ref ?? undefined,
         sha: input.session.trigger_sha ?? undefined,
-        runNumber,
+        runNumber: sessionNumber,
         attemptNumber: attempt.attempt_number,
         triggeredByUserId: input.triggeredByUser?.id,
         triggeredByUsername: input.triggeredByUser?.username,
@@ -1057,21 +1068,24 @@ export async function executeActionRun(input: {
         latestAttemptId: attempt.id,
         containerInstance,
         startedAt,
-        logs: buildLogExcerpt(
-          buildRunLogs({
-            runId: sessionId,
-            runNumber,
-            attemptId: attempt.id,
-            attemptNumber: attempt.attempt_number,
-            instanceType: attemptInstanceType,
-            agentType: input.session.agent_type,
-            prompt: input.session.prompt,
-            claimedAt,
-            startedAt,
-            redactText: redactLogs
-          })
-        ),
         updatedAt: startedAt
+      });
+      await agentSessionService.recordSessionObservability({
+        repositoryId: input.repository.id,
+        sessionId,
+        logs: buildSessionLogs({
+          sessionId,
+          sessionNumber,
+          attemptId: attempt.id,
+          attemptNumber: attempt.attempt_number,
+          instanceType: attemptInstanceType,
+          agentType: input.session.agent_type,
+          prompt: input.session.prompt,
+          claimedAt,
+          startedAt,
+          redactText: redactLogs
+        }),
+        recordedAt: startedAt
       });
     }
 
@@ -1081,7 +1095,7 @@ export async function executeActionRun(input: {
         repositoryId: input.repository.id,
         sessionId,
         attemptId: attempt.id,
-        runNumber,
+        sessionNumber,
         attemptNumber: attempt.attempt_number,
         instanceType: attemptInstanceType,
         agentType: input.session.agent_type,
@@ -1104,9 +1118,9 @@ export async function executeActionRun(input: {
     runnerResult = extractValidationReport(runnerResult);
     const responseFailure =
       !runnerResponse.ok ? `Container runner responded with HTTP ${runnerResponse.status}` : undefined;
-    let logs = buildRunLogs({
-      runId: sessionId,
-      runNumber,
+    let logs = buildSessionLogs({
+      sessionId,
+      sessionNumber,
       attemptId: attempt.id,
       attemptNumber: attempt.attempt_number,
       instanceType: attemptInstanceType,
@@ -1119,6 +1133,9 @@ export async function executeActionRun(input: {
       redactText: redactLogs
     });
     logs = await persistObservability(logs);
+    if (await wasCancelledExternally()) {
+      return;
+    }
 
     const exitCode = runnerResult.exitCode ?? -1;
     if (runnerResponse.ok && exitCode === 0) {
@@ -1169,9 +1186,9 @@ export async function executeActionRun(input: {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown runner error";
-    let logs = buildRunLogs({
-      runId: sessionId,
-      runNumber,
+    let logs = buildSessionLogs({
+      sessionId,
+      sessionNumber,
       attemptId: attempt.id,
       attemptNumber: attempt.attempt_number,
       instanceType: attemptInstanceType,
@@ -1184,6 +1201,9 @@ export async function executeActionRun(input: {
       redactText: redactLogs
     });
     logs = await persistObservability(logs);
+    if (await wasCancelledExternally()) {
+      return;
+    }
     const classification = classifyAttemptFailure({
       result: runnerResult,
       errorMessage: message

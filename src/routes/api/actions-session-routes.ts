@@ -1,5 +1,6 @@
 import {
   AgentSessionService,
+  getActionRunnerNamespace,
   HTTPException,
   RepositoryService,
   mustSessionUser,
@@ -9,10 +10,10 @@ import {
 } from "./deps";
 
 import {
-  ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS,
-  ACTION_RUN_LOG_STREAM_MAX_DURATION_MS,
-  ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS,
-  TERMINAL_ACTION_RUN_STATUSES,
+  SESSION_LOG_STREAM_HEARTBEAT_INTERVAL_MS,
+  SESSION_LOG_STREAM_MAX_DURATION_MS,
+  SESSION_LOG_STREAM_POLL_INTERVAL_MS,
+  TERMINAL_SESSION_STATUSES,
   assertAgentSessionSourceType,
   assertPositiveInteger,
   assertString,
@@ -24,8 +25,8 @@ import {
   executionCtxArg,
   findReadableRepositoryOr404,
   hydrateSessionWithFullLogs,
-  parseActionRunCommentIds,
-  parseActionRunSourceNumbers,
+  parseAgentSessionCommentIds,
+  parseAgentSessionSourceNumbers,
   parseLimit,
   withAgentSessionApiMetadata,
   type ApiRouter,
@@ -76,7 +77,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
         message: "Query 'sourceType' cannot be manual for latest source lookups"
       });
     }
-    const sourceNumbers = parseActionRunSourceNumbers(c.req.query("numbers"));
+    const sourceNumbers = parseAgentSessionSourceNumbers(c.req.query("numbers"));
     const repositoryService = new RepositoryService(c.env.DB);
     const sessionUser = c.get("sessionUser");
     const repository = await findReadableRepositoryOr404({
@@ -120,7 +121,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
     async (c) => {
       const owner = c.req.param("owner");
       const repo = c.req.param("repo");
-      const commentIds = parseActionRunCommentIds(c.req.query("commentIds"));
+      const commentIds = parseAgentSessionCommentIds(c.req.query("commentIds"));
       const repositoryService = new RepositoryService(c.env.DB);
       const sessionUser = c.get("sessionUser");
       const repository = await findReadableRepositoryOr404({
@@ -216,7 +217,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
       }
 
       return c.json({
-        logs: (await agentSessionService.readSessionLogs(repository.id, session.id)) ?? session.logs
+        logs: (await agentSessionService.readSessionLogs(repository.id, session.id)) ?? ""
       });
     }
   );
@@ -277,10 +278,10 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
           let currentSession = await hydrateSessionWithFullLogs({
             logStorage,
             repositoryId: repository.id,
-            run: existingSession
+            session: existingSession
           });
           let previousSession: typeof currentSession | null = null;
-          const deadline = Date.now() + ACTION_RUN_LOG_STREAM_MAX_DURATION_MS;
+          const deadline = Date.now() + SESSION_LOG_STREAM_MAX_DURATION_MS;
           let lastHeartbeatAt = 0;
 
           if (!closed) {
@@ -300,7 +301,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
               currentSession = await hydrateSessionWithFullLogs({
                 logStorage,
                 repositoryId: repository.id,
-                run: currentSession
+                session: currentSession
               });
 
               for (const payload of buildSessionLogStreamEvents(previousSession, currentSession)) {
@@ -313,7 +314,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
               }
               previousSession = currentSession;
 
-              if (TERMINAL_ACTION_RUN_STATUSES.has(currentSession.status)) {
+              if (TERMINAL_SESSION_STATUSES.has(currentSession.status)) {
                 enqueue({
                   event: "done",
                   data: {
@@ -332,7 +333,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
                 break;
               }
 
-              if (now - lastHeartbeatAt >= ACTION_RUN_LOG_STREAM_HEARTBEAT_INTERVAL_MS) {
+              if (now - lastHeartbeatAt >= SESSION_LOG_STREAM_HEARTBEAT_INTERVAL_MS) {
                 enqueue({
                   event: "heartbeat",
                   data: {
@@ -342,7 +343,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
                 lastHeartbeatAt = now;
               }
 
-              await delay(ACTION_RUN_LOG_STREAM_POLL_INTERVAL_MS, cancelController.signal);
+              await delay(SESSION_LOG_STREAM_POLL_INTERVAL_MS, cancelController.signal);
               if (cancelController.signal.aborted) {
                 break;
               }
@@ -360,7 +361,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
               currentSession = await hydrateSessionWithFullLogs({
                 logStorage,
                 repositoryId: repository.id,
-                run: nextSession
+                session: nextSession
               });
             }
           } catch (error) {
@@ -535,19 +536,38 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
       if (!session) {
         throw new HTTPException(404, { message: "Agent session not found" });
       }
-      if (session.status !== "queued") {
+      if (session.status !== "queued" && session.status !== "running") {
         throw new HTTPException(409, {
-          message: "Only queued agent sessions can be cancelled"
+          message: "Only queued or running agent sessions can be cancelled"
         });
       }
 
-      const cancelResult = await agentSessionService.cancelQueuedSession({
+      const cancelResult = await agentSessionService.cancelActiveSession({
         repositoryId: repository.id,
         sessionId: session.id,
         cancelledBy: sessionUser.id
       });
       if (!cancelResult.cancelled) {
-        throw new HTTPException(409, { message: "Agent session is no longer queued" });
+        throw new HTTPException(409, { message: "Agent session is no longer active" });
+      }
+
+      if (
+        cancelResult.attemptStatus !== "queued" &&
+        cancelResult.containerInstance &&
+        cancelResult.instanceType
+      ) {
+        const runnerNamespace = getActionRunnerNamespace(c.env, cancelResult.instanceType);
+        if (runnerNamespace) {
+          try {
+            await runnerNamespace
+              .getByName(cancelResult.containerInstance)
+              .fetch("https://actions-container.internal/stop", {
+                method: "POST"
+              });
+          } catch {
+            // Cancellation state is already persisted; container stop is best-effort.
+          }
+        }
       }
 
       const updatedSession = await agentSessionService.findSessionById(repository.id, session.id);

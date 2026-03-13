@@ -19,13 +19,9 @@ function buildSession(overrides?: Partial<AgentSessionRecord>): AgentSessionReco
     id: "session-1",
     repository_id: "repo-1",
     session_number: 1,
-    run_number: 1,
     source_type: "manual",
     source_number: null,
     source_comment_id: null,
-    trigger_source_type: null,
-    trigger_source_number: null,
-    trigger_source_comment_id: null,
     origin: "manual",
     status: "queued",
     agent_type: "codex",
@@ -37,16 +33,12 @@ function buildSession(overrides?: Partial<AgentSessionRecord>): AgentSessionReco
     workflow_id: null,
     workflow_name: null,
     parent_session_id: null,
-    linked_run_id: null,
     created_by: null,
     created_by_username: null,
     delegated_from_user_id: null,
     delegated_from_username: null,
     active_attempt_id: "attempt-1",
     latest_attempt_id: "attempt-1",
-    triggered_by: null,
-    triggered_by_username: null,
-    logs: "",
     exit_code: null,
     container_instance: null,
     failure_reason: null,
@@ -85,6 +77,7 @@ function buildAttempt(overrides?: Partial<AgentSessionAttemptRecord>): AgentSess
 describe("executeActionRun", () => {
   beforeEach(() => {
     vi.spyOn(AgentSessionService.prototype, "claimQueuedAttempt").mockResolvedValue(1);
+    vi.spyOn(AgentSessionService.prototype, "findAttemptById").mockResolvedValue(null);
     vi.spyOn(AgentSessionService.prototype, "markAttemptRunning").mockResolvedValue(2);
     vi.spyOn(AgentSessionService.prototype, "syncSessionForAttempt").mockResolvedValue();
     vi.spyOn(AgentSessionService.prototype, "recordSessionObservability").mockResolvedValue();
@@ -163,7 +156,7 @@ describe("executeActionRun", () => {
 
     expect(runnerFetch).toHaveBeenCalledTimes(1);
     expect(stopFetch).toHaveBeenCalledTimes(1);
-    expect(AgentSessionService.prototype.recordSessionObservability).toHaveBeenCalledTimes(1);
+    expect(AgentSessionService.prototype.recordSessionObservability).toHaveBeenCalledTimes(2);
   });
 
   it("uses the runner binding that matches the attempt instance type", async () => {
@@ -258,8 +251,6 @@ describe("executeActionRun", () => {
       session: buildSession({
         source_type: "issue",
         source_number: 42,
-        trigger_source_type: "issue",
-        trigger_source_number: 42,
         prompt: "请回复 issue 并创建 PR。"
       }),
       attempt: buildAttempt(),
@@ -409,6 +400,61 @@ describe("executeActionRun", () => {
         status: "retryable_failed",
         failureReason: "container_error",
         failureStage: "boot"
+      })
+    );
+  });
+
+  it("does not overwrite an externally cancelled attempt with a failed terminal state", async () => {
+    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+    vi.spyOn(AgentSessionService.prototype, "findAttemptById").mockResolvedValue(
+      buildAttempt({
+        id: "attempt-1",
+        status: "cancelled",
+        completed_at: 3,
+        updated_at: 3
+      })
+    );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
+        REPOSITORY_OBJECTS: {} as DurableObjectNamespace,
+        JWT_SECRET: "test-secret",
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: (url: string) =>
+              url.endsWith("/stop")
+                ? stopFetch()
+                : createStartedRunnerResponse({ exitCode: 143, durationMs: 25, stderr: "killed" })
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      session: buildSession(),
+      attempt: buildAttempt(),
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(stopFetch).toHaveBeenCalledTimes(1);
+    expect(AgentSessionService.prototype.completeAttempt).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptId: "attempt-1",
+        status: "failed"
+      })
+    );
+    expect(AgentSessionService.prototype.completeAttempt).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptId: "attempt-1",
+        status: "retryable_failed"
       })
     );
   });

@@ -1,7 +1,6 @@
 import type {
   ActionContainerInstanceType,
-  ActionRunLogStreamEvent,
-  ActionRunRecord,
+  AgentSessionLogStreamEvent,
   AgentSessionRecord
 } from "@/lib/api";
 
@@ -18,19 +17,19 @@ export const ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS: Array<{
   { value: "standard-4", label: "standard-4", spec: "4 vCPU · 12 GiB · 20 GB" }
 ];
 
-export function isPendingRun(run: ActionRunRecord): boolean {
-  return run.status === "queued" || run.status === "running";
+export function isPendingAgentSession(
+  session: Pick<AgentSessionRecord, "status"> | null | undefined
+): boolean {
+  return session?.status === "queued" || session?.status === "running";
 }
 
-export function isPendingAgentSession(session: AgentSessionRecord): boolean {
-  return session.status === "queued" || session.status === "running";
+export function canCancelAgentSession(
+  session: Pick<AgentSessionRecord, "status"> | null | undefined
+): boolean {
+  return session?.status === "queued" || session?.status === "running";
 }
 
-export function canCancelAgentSession(session: AgentSessionRecord): boolean {
-  return session.status === "queued";
-}
-
-export function formatDuration(
+export function formatSessionDuration(
   startedAt: number | null,
   completedAt: number | null
 ): string {
@@ -47,28 +46,36 @@ export function formatDuration(
   return `${minutes}m ${seconds}s`;
 }
 
-export function runSourceLabel(run: ActionRunRecord): string {
-  if (run.trigger_source_type && run.trigger_source_number) {
-    return `${run.trigger_source_type} #${run.trigger_source_number}`;
-  }
-  if (run.source_number !== null) {
-    return `${run.source_type} #${run.source_number}`;
-  }
-  return run.workflow_name ?? run.origin;
-}
-
-export function runGroupLabel(run: ActionRunRecord): string {
-  return run.workflow_name ?? run.origin ?? "session";
-}
-
-export function sessionSourceLabel(session: AgentSessionRecord): string {
+export function sessionSourceLabel(
+  session: Pick<AgentSessionRecord, "source_type" | "source_number">
+): string {
   if (session.source_number !== null) {
     return `${session.source_type} #${session.source_number}`;
   }
   return session.source_type;
 }
 
-function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
+export function sessionWorkflowLabel(
+  session: Pick<AgentSessionRecord, "workflow_name" | "origin">
+): string {
+  return session.workflow_name?.trim() || session.origin;
+}
+
+export function insertOrReplaceSession(
+  currentSessions: AgentSessionRecord[],
+  nextSession: AgentSessionRecord
+): AgentSessionRecord[] {
+  const existingIndex = currentSessions.findIndex((session) => session.id === nextSession.id);
+  if (existingIndex === -1) {
+    return [...currentSessions, nextSession].sort((left, right) => right.created_at - left.created_at);
+  }
+
+  return currentSessions.map((session) =>
+    session.id === nextSession.id ? { ...session, ...nextSession } : session
+  );
+}
+
+function isAgentSessionStatus(value: unknown): value is AgentSessionRecord["status"] {
   return (
     value === "queued" ||
     value === "running" ||
@@ -78,97 +85,26 @@ function isActionRunStatus(value: unknown): value is ActionRunRecord["status"] {
   );
 }
 
-export function insertOrReplaceRun(
-  currentRuns: ActionRunRecord[],
-  nextRun: ActionRunRecord
-): ActionRunRecord[] {
-  const existingIndex = currentRuns.findIndex((run) => run.id === nextRun.id);
-  if (existingIndex === -1) {
-    return [...currentRuns, nextRun].sort(
-      (left, right) =>
-        (right.run_number ?? right.session_number) -
-        (left.run_number ?? left.session_number)
-    );
-  }
-
-  return currentRuns.map((run) => (run.id === nextRun.id ? nextRun : run));
-}
-
-export function insertOrReplaceSession(
-  currentSessions: AgentSessionRecord[],
-  nextSession: AgentSessionRecord
-): AgentSessionRecord[] {
-  const existingIndex = currentSessions.findIndex(
-    (session) => session.id === nextSession.id
-  );
-  if (existingIndex === -1) {
-    return [...currentSessions, nextSession].sort(
-      (left, right) => right.created_at - left.created_at
-    );
-  }
-
-  return currentSessions.map((session) =>
-    session.id === nextSession.id ? nextSession : session
-  );
-}
-
-function shouldPreferCurrentRun(
-  currentRun: ActionRunRecord,
-  nextRun: ActionRunRecord
-): boolean {
-  if (currentRun.updated_at !== nextRun.updated_at) {
-    return currentRun.updated_at > nextRun.updated_at;
-  }
-  if (currentRun.status !== nextRun.status) {
-    return false;
-  }
-  return currentRun.logs.length > nextRun.logs.length;
-}
-
-export function mergeRuns(
-  currentRuns: ActionRunRecord[],
-  nextRuns: ActionRunRecord[]
-): ActionRunRecord[] {
-  const mergedRuns = new Map(nextRuns.map((run) => [run.id, run] as const));
-
-  for (const currentRun of currentRuns) {
-    const nextRun = mergedRuns.get(currentRun.id);
-    if (!nextRun) {
-      mergedRuns.set(currentRun.id, currentRun);
-      continue;
-    }
-    if (shouldPreferCurrentRun(currentRun, nextRun)) {
-      mergedRuns.set(currentRun.id, currentRun);
-    }
-  }
-
-  return Array.from(mergedRuns.values()).sort(
-    (left, right) =>
-      (right.run_number ?? right.session_number) -
-      (left.run_number ?? left.session_number)
-  );
-}
-
-function isActionRunRecord(value: unknown): value is ActionRunRecord {
+function isAgentSessionRecord(value: unknown): value is AgentSessionRecord {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const run = value as Partial<ActionRunRecord>;
+  const session = value as Partial<AgentSessionRecord>;
   return (
-    typeof run.id === "string" &&
-    typeof run.run_number === "number" &&
-    typeof run.status === "string" &&
-    typeof run.logs === "string" &&
-    typeof run.updated_at === "number"
+    typeof session.id === "string" &&
+    typeof session.session_number === "number" &&
+    typeof session.status === "string" &&
+    typeof session.logs === "string" &&
+    typeof session.updated_at === "number"
   );
 }
 
-export function parseActionRunLogStreamEvent(
-  eventName: ActionRunLogStreamEvent["event"],
+export function parseAgentSessionLogStreamEvent(
+  eventName: AgentSessionLogStreamEvent["event"],
   rawData: string
-): ActionRunLogStreamEvent | null {
+): AgentSessionLogStreamEvent | null {
   type StreamStatusData = {
-    runId?: unknown;
+    sessionId?: unknown;
     status?: unknown;
     exitCode?: unknown;
     completedAt?: unknown;
@@ -181,12 +117,12 @@ export function parseActionRunLogStreamEvent(
   }
 
   if (eventName === "snapshot" || eventName === "replace") {
-    const data = parsed as { run?: unknown };
-    return isActionRunRecord(data.run)
+    const data = parsed as { session?: unknown };
+    return isAgentSessionRecord(data.session)
       ? {
           event: eventName,
           data: {
-            run: data.run
+            session: data.session
           }
         }
       : null;
@@ -194,16 +130,16 @@ export function parseActionRunLogStreamEvent(
 
   if (eventName === "append") {
     const data = parsed as StreamStatusData & { chunk?: unknown };
-    return typeof data.runId === "string" &&
+    return typeof data.sessionId === "string" &&
       typeof data.chunk === "string" &&
-      isActionRunStatus(data.status) &&
+      isAgentSessionStatus(data.status) &&
       (typeof data.exitCode === "number" || data.exitCode === null) &&
       (typeof data.completedAt === "number" || data.completedAt === null) &&
       typeof data.updatedAt === "number"
       ? {
           event: "append",
           data: {
-            runId: data.runId,
+            sessionId: data.sessionId,
             chunk: data.chunk,
             status: data.status,
             exitCode: data.exitCode,
@@ -216,15 +152,15 @@ export function parseActionRunLogStreamEvent(
 
   if (eventName === "status" || eventName === "done") {
     const data = parsed as StreamStatusData;
-    return typeof data.runId === "string" &&
-      isActionRunStatus(data.status) &&
+    return typeof data.sessionId === "string" &&
+      isAgentSessionStatus(data.status) &&
       (typeof data.exitCode === "number" || data.exitCode === null) &&
       (typeof data.completedAt === "number" || data.completedAt === null) &&
       typeof data.updatedAt === "number"
       ? {
           event: eventName,
           data: {
-            runId: data.runId,
+            sessionId: data.sessionId,
             status: data.status,
             exitCode: data.exitCode,
             completedAt: data.completedAt,
@@ -261,46 +197,46 @@ export function parseActionRunLogStreamEvent(
   return null;
 }
 
-export function applyRunStreamEvent(
-  currentRuns: ActionRunRecord[],
-  streamEvent: ActionRunLogStreamEvent
-): ActionRunRecord[] {
+export function applyAgentSessionStreamEvent(
+  currentSessions: AgentSessionRecord[],
+  streamEvent: AgentSessionLogStreamEvent
+): AgentSessionRecord[] {
   if (streamEvent.event === "heartbeat" || streamEvent.event === "stream-error") {
-    return currentRuns;
+    return currentSessions;
   }
 
   if (streamEvent.event === "snapshot" || streamEvent.event === "replace") {
-    return insertOrReplaceRun(currentRuns, streamEvent.data.run);
+    return insertOrReplaceSession(currentSessions, streamEvent.data.session);
   }
 
   if (streamEvent.event === "append") {
-    return currentRuns.map((run) =>
-      run.id === streamEvent.data.runId
+    return currentSessions.map((session) =>
+      session.id === streamEvent.data.sessionId
         ? {
-            ...run,
-            logs: `${run.logs ?? ""}${streamEvent.data.chunk}`,
+            ...session,
+            logs: `${session.logs ?? ""}${streamEvent.data.chunk}`,
             status: streamEvent.data.status,
             exit_code: streamEvent.data.exitCode,
             completed_at: streamEvent.data.completedAt,
             updated_at: streamEvent.data.updatedAt
           }
-        : run
+        : session
     );
   }
 
   if (streamEvent.event === "status" || streamEvent.event === "done") {
-    return currentRuns.map((run) =>
-      run.id === streamEvent.data.runId
+    return currentSessions.map((session) =>
+      session.id === streamEvent.data.sessionId
         ? {
-            ...run,
+            ...session,
             status: streamEvent.data.status,
             exit_code: streamEvent.data.exitCode,
             completed_at: streamEvent.data.completedAt,
             updated_at: streamEvent.data.updatedAt
           }
-        : run
+        : session
     );
   }
 
-  return currentRuns;
+  return currentSessions;
 }

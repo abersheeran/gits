@@ -1,5 +1,5 @@
 import { Container } from "@cloudflare/containers";
-import type { AppBindings, ActionRunSourceType } from "../types";
+import type { AgentSessionExecutionSourceType, AppBindings } from "../types";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
@@ -20,7 +20,7 @@ type ExecuteRequest = {
   runNumber?: number;
   triggeredByUserId?: string;
   triggeredByUsername?: string;
-  triggerSourceType?: ActionRunSourceType | null;
+  triggerSourceType?: AgentSessionExecutionSourceType | null;
   enableIssueReplyToken?: boolean;
   enablePrCreateToken?: boolean;
   allowGitPush?: boolean;

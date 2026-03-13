@@ -1,72 +1,14 @@
-import { Hono } from "hono";
-import { deleteCookie, setCookie } from "hono/cookie";
-import { HTTPException } from "hono/http-exception";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { mustSessionUser, optionalSession, requireSession } from "../../middleware/auth";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
-} from "../../services/action-runner-prompt-tokens";
-import {
-  containsActionsMention,
-  createLinkedAgentSessionForRun,
-  scheduleActionRunExecution,
-  triggerInteractiveAgentSession,
-  triggerActionWorkflows,
-  triggerMentionActionRun
-} from "../../services/action-trigger-service";
-import { ACTION_CONTAINER_INSTANCE_TYPES } from "../../services/action-container-instance-types";
-import { ActionLogStorageService } from "../../services/action-log-storage-service";
-import { AgentSessionService } from "../../services/agent-session-service";
-import { buildAgentSessionValidationSummary } from "../../services/agent-session-validation-summary";
-import { ActionsService } from "../../services/actions-service";
-import { AuthService } from "../../services/auth-service";
-import { RepositoryMetadataService } from "../../services/repository-metadata-service";
-import {
-  collectPlatformMcpForwardHeaders,
-  createPlatformMcpServer
-} from "../../services/platform-mcp-service";
-import {
-  RepositoryBrowseInvalidPathError,
-  RepositoryBrowsePathNotFoundError,
-  type RepositoryCompareResult,
-  type RepositoryDiffHunk
-} from "../../services/repository-browser-service";
-import { IssueService, type IssueListState } from "../../services/issue-service";
-import {
-  PullRequestMergeBranchNotFoundError,
-  PullRequestMergeConflictError,
-  PullRequestMergeNotSupportedError
-} from "../../services/pull-request-merge-service";
-import {
-  DuplicateOpenPullRequestError,
-  PullRequestService,
-  type PullRequestListState
-} from "../../services/pull-request-service";
-import { enrichPullRequestReviewThreads } from "../../services/pull-request-review-thread-anchor-service";
-import { createRepositoryObjectClient } from "../../services/repository-object";
-import { RepositoryService } from "../../services/repository-service";
-import { WorkflowTaskFlowService } from "../../services/workflow-task-flow-service";
+} from "./action-runner-prompt-tokens";
+import { createRepositoryObjectClient } from "./repository-object";
 import type {
-  ActionAgentType,
-  ActionContainerInstanceType,
-  ActionRunRecord,
-  ActionRunSourceType,
-  ActionWorkflowTrigger,
-  AgentSessionRecord,
-  AgentSessionSourceType,
-  AppEnv,
   IssueCommentRecord,
-  IssueRecord,
-  IssueState,
-  IssueTaskStatus,
   PullRequestReviewDecision,
   PullRequestReviewThreadRecord,
-  PullRequestReviewThreadSide,
-  PullRequestState,
   RepositoryRecord
-} from "../../types";
-
+} from "../types";
 
 export function buildMentionPrompt(input: { title: string; body: string }): string {
   if (!input.body.trim()) {

@@ -36,38 +36,6 @@ export function buildRepositoryRow(overrides?: Partial<Record<string, unknown>>)
   };
 }
 
-export function buildActionRunRow(overrides?: Partial<Record<string, unknown>>) {
-  const now = Date.now();
-  return {
-    id: "run-1",
-    repository_id: "repo-1",
-    run_number: 1,
-    workflow_id: "workflow-1",
-    workflow_name: "CI",
-    trigger_event: "pull_request_created",
-    trigger_ref: "refs/heads/feature",
-    trigger_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    trigger_source_type: "pull_request",
-    trigger_source_number: 1,
-    trigger_source_comment_id: null,
-    triggered_by: "user-2",
-    triggered_by_username: "bob",
-    status: "queued",
-    agent_type: "codex",
-    instance_type: "lite",
-    prompt: "请执行测试并修复失败。",
-    logs: "",
-    exit_code: null,
-    container_instance: null,
-    created_at: now,
-    claimed_at: null,
-    started_at: null,
-    completed_at: null,
-    updated_at: now,
-    ...(overrides ?? {})
-  };
-}
-
 export function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>>) {
   const now = Date.now();
   return {
@@ -88,14 +56,12 @@ export function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>
     workflow_id: "workflow-1",
     workflow_name: "CI",
     parent_session_id: null,
-    linked_run_id: "run-2",
     created_by: "user-2",
     created_by_username: "bob",
     delegated_from_user_id: "user-2",
     delegated_from_username: "bob",
     active_attempt_id: "attempt-1",
     latest_attempt_id: "attempt-1",
-    logs: "",
     exit_code: null,
     container_instance: null,
     failure_reason: null,

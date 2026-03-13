@@ -1,181 +1,175 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { RepositoryActionsConfigPanel } from "@/components/repository/repository-actions-config-panel";
-import { RepositoryActionsLogView } from "@/components/repository/repository-actions-log-view";
+import { RepositoryActionsSessionWorkspace } from "@/components/repository/repository-actions-session-workspace";
+import { RepositoryActionsSessionsPanel } from "@/components/repository/repository-actions-sessions-panel";
+import { RepositoryActionsWorkflowSheet } from "@/components/repository/repository-actions-workflow-sheet";
+import { RepositoryActionsWorkflowsPanel } from "@/components/repository/repository-actions-workflows-panel";
+import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
   cancelRepositoryAgentSession,
+  createActionWorkflow,
+  dispatchActionWorkflow,
   formatApiError,
-  getActionRun,
-  getActionRunLogStreamPath,
-  getActionRunLogs,
+  getAgentSessionLogStreamPath,
   getRepositoryAgentSession,
+  getRepositoryAgentSessionArtifactContent,
+  getRepositoryAgentSessionDetail,
   getRepositoryActionsConfig,
   getRepositoryDetail,
-  listActionRuns,
+  listActionWorkflows,
   listRepositoryAgentSessions,
-  rerunActionRun,
+  rerunRepositoryAgentSession,
+  updateActionWorkflow,
   updateRepositoryActionsConfig,
   type ActionContainerInstanceType,
-  type ActionRunLogStreamEvent,
-  type ActionRunRecord,
+  type ActionWorkflowRecord,
+  type AgentSessionDetail,
   type AgentSessionRecord,
   type AuthUser,
   type RepositoryActionsConfig,
   type RepositoryDetailResponse
 } from "@/lib/api";
 import {
-  applyRunStreamEvent,
-  insertOrReplaceRun,
+  ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS,
+  applyAgentSessionStreamEvent,
   insertOrReplaceSession,
   isPendingAgentSession,
-  isPendingRun,
-  mergeRuns,
-  parseActionRunLogStreamEvent,
-  runGroupLabel
-} from "@/lib/action-run-utils";
-import { useParams, useSearchParams } from "react-router-dom";
+  parseAgentSessionLogStreamEvent
+} from "@/lib/agent-session-utils";
+import { formatDateTime } from "@/lib/format";
 
 type RepositoryActionsPageProps = {
   user: AuthUser | null;
 };
 
-const INITIAL_SESSION_LIMIT = 8;
-const SESSION_LIMIT_STEP = 8;
-const INITIAL_RUN_LIMIT = 10;
-const RUN_LIMIT_STEP = 10;
+type ActionsTab = "sessions" | "workflows" | "runtime";
 
-function ensureSelectedItemVisible(
-  selectedId: string | null,
-  items: Array<{ id: string }>,
-  currentLimit: number
-): number {
-  const selectedIndex = selectedId ? items.findIndex((item) => item.id === selectedId) : -1;
-  if (selectedIndex === -1) {
-    return Math.min(currentLimit, items.length);
+type WorkflowSheetState =
+  | { mode: "create"; workflow: null }
+  | { mode: "edit"; workflow: ActionWorkflowRecord };
+
+function dispatchRefForRepository(detail: RepositoryDetailResponse | null): string | null {
+  if (!detail) {
+    return null;
   }
-  return Math.min(Math.max(currentLimit, selectedIndex + 1), items.length);
+  if (detail.selectedRef) {
+    return detail.selectedRef;
+  }
+  if (detail.defaultBranch) {
+    return `refs/heads/${detail.defaultBranch}`;
+  }
+  return null;
 }
 
 export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const owner = params.owner ?? "";
   const repo = params.repo ?? "";
-  const selectedRunId = searchParams.get("runId")?.trim() || null;
-  const selectedSessionId = searchParams.get("sessionId")?.trim() || null;
-  const selectedExecutionId = selectedSessionId ?? selectedRunId;
+  const requestedSessionId = searchParams.get("sessionId")?.trim() || null;
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [runs, setRuns] = useState<ActionRunRecord[]>([]);
-  const [agentSessions, setAgentSessions] = useState<AgentSessionRecord[]>([]);
+  const [sessions, setSessions] = useState<AgentSessionRecord[]>([]);
+  const [selectedSessionDetail, setSelectedSessionDetail] = useState<AgentSessionDetail | null>(null);
+  const [workflows, setWorkflows] = useState<ActionWorkflowRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingSessionDetail, setLoadingSessionDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ActionsTab>("sessions");
 
-  const [rerunningRunId, setRerunningRunId] = useState<string | null>(null);
   const [pendingSessionAction, setPendingSessionAction] = useState<{
     sessionId: string;
-    action: "cancel";
+    action: "cancel" | "rerun";
   } | null>(null);
-  const [fullRunLogsById, setFullRunLogsById] = useState<Record<string, string>>({});
-  const [loadingRunLogsById, setLoadingRunLogsById] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<"logs" | "config">("logs");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [eventFilter, setEventFilter] = useState<string>("all");
-  const [refFilter, setRefFilter] = useState<string>("all");
-  const [actorFilter, setActorFilter] = useState("");
+  const [workflowSheetState, setWorkflowSheetState] = useState<WorkflowSheetState | null>(null);
+  const [savingWorkflowId, setSavingWorkflowId] = useState<string | null>(null);
+  const [savingWorkflowSheet, setSavingWorkflowSheet] = useState(false);
+  const [dispatchingWorkflowId, setDispatchingWorkflowId] = useState<string | null>(null);
+  const [artifactContentById, setArtifactContentById] = useState<Record<string, string>>({});
+  const [loadingArtifactId, setLoadingArtifactId] = useState<string | null>(null);
+
   const [runnerConfig, setRunnerConfig] = useState<RepositoryActionsConfig | null>(null);
   const [loadingRunnerConfig, setLoadingRunnerConfig] = useState(false);
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
   const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
-  const [runnerConfigSuccess, setRunnerConfigSuccess] = useState<string | null>(null);
   const [runnerConfigEditing, setRunnerConfigEditing] = useState(false);
   const [runnerInstanceType, setRunnerInstanceType] =
-    useState<ActionContainerInstanceType>("lite");
+    useState<ActionContainerInstanceType>(ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS[0].value);
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
   const [claudeCodeConfigFileContent, setClaudeCodeConfigFileContent] = useState("");
-  const [visibleSessionLimit, setVisibleSessionLimit] = useState(INITIAL_SESSION_LIMIT);
-  const [visibleRunLimit, setVisibleRunLimit] = useState(INITIAL_RUN_LIMIT);
 
-  const backgroundRefreshInFlightRef = useRef(false);
   const mountedRef = useRef(true);
-  const loadDataRef = useRef<((options?: { background?: boolean }) => Promise<void>) | null>(null);
-  const runsRef = useRef<ActionRunRecord[]>([]);
+  const sessionsRef = useRef<AgentSessionRecord[]>([]);
 
   const canManageActions = Boolean(user) && Boolean(detail?.permissions.canManageActions);
+  const dispatchRef = useMemo(() => dispatchRefForRepository(detail), [detail]);
+  const selectedSessionId = requestedSessionId ?? sessions[0]?.id ?? null;
+  const visibleWorkflows = useMemo(
+    () => workflows.filter((workflow) => workflow.trigger_event !== "mention_actions"),
+    [workflows]
+  );
+  const hasPendingSession = useMemo(
+    () => sessions.some((session) => isPendingAgentSession(session)),
+    [sessions]
+  );
+  const selectedSessionStreamId = selectedSessionDetail?.session.id ?? null;
+  const selectedSessionIsPending = isPendingAgentSession(selectedSessionDetail?.session);
 
-  function resetRunnerConfigDraft(nextConfig: RepositoryActionsConfig) {
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const resetRunnerConfigDraft = useCallback((nextConfig: RepositoryActionsConfig) => {
     setRunnerInstanceType(nextConfig.instanceType);
     setCodexConfigFileContent(nextConfig.codexConfigFileContent);
     setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
-  }
+  }, []);
 
-  const loadData = useCallback(
+  const loadOverview = useCallback(
     async (options?: { background?: boolean }) => {
       if (!owner || !repo) {
         return;
       }
-
       if (!options?.background) {
         setLoading(true);
       }
       setError(null);
       try {
-        const [nextDetail, nextRuns, nextAgentSessions] = await Promise.all([
+        const [nextDetail, nextSessions, nextWorkflows] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listActionRuns(owner, repo, { limit: 50 }),
-          listRepositoryAgentSessions(owner, repo, { limit: 30 })
+          listRepositoryAgentSessions(owner, repo, { limit: 60 }),
+          listActionWorkflows(owner, repo)
         ]);
 
-        let mergedRuns = nextRuns;
-        let mergedSessions = nextAgentSessions;
-
-        if (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId)) {
+        let mergedSessions = nextSessions;
+        if (requestedSessionId && !nextSessions.some((session) => session.id === requestedSessionId)) {
           try {
-            const selectedRun = await getActionRun(owner, repo, selectedRunId);
-            mergedRuns = [selectedRun, ...nextRuns]
-              .filter(
-                (run, index, array) => array.findIndex((item) => item.id === run.id) === index
-              )
-              .sort(
-                (left, right) =>
-                  (right.run_number ?? right.session_number) -
-                  (left.run_number ?? left.session_number)
-              );
+            const requestedSession = await getRepositoryAgentSession(owner, repo, requestedSessionId);
+            mergedSessions = insertOrReplaceSession(nextSessions, requestedSession);
           } catch {
-            // Ignore missing run and keep default list.
-          }
-        }
-
-        if (
-          selectedExecutionId &&
-          !nextAgentSessions.some((session) => session.id === selectedExecutionId)
-        ) {
-          try {
-            const selectedSession = await getRepositoryAgentSession(
-              owner,
-              repo,
-              selectedExecutionId
-            );
-            mergedSessions = [selectedSession, ...nextAgentSessions]
-              .filter(
-                (session, index, array) =>
-                  array.findIndex((item) => item.id === session.id) === index
-              )
-              .sort((left, right) => right.created_at - left.created_at);
-          } catch {
-            // Ignore missing session and keep default list.
+            mergedSessions = nextSessions;
           }
         }
 
         if (!mountedRef.current) {
           return;
         }
-
         setDetail(nextDetail);
-        setRuns((currentRuns) => mergeRuns(currentRuns, mergedRuns));
-        setAgentSessions(mergedSessions);
+        setSessions(mergedSessions);
+        setWorkflows(nextWorkflows);
       } catch (loadError) {
         if (mountedRef.current) {
           setError(formatApiError(loadError));
@@ -186,43 +180,39 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         }
       }
     },
-    [owner, repo, selectedExecutionId, selectedRunId]
+    [owner, repo, requestedSessionId]
   );
 
-  const refreshDataInBackground = useCallback(() => {
-    if (backgroundRefreshInFlightRef.current) {
+  const loadSessionDetail = useCallback(async () => {
+    if (!owner || !repo || !selectedSessionId) {
+      if (mountedRef.current) {
+        setSelectedSessionDetail(null);
+      }
       return;
     }
-    backgroundRefreshInFlightRef.current = true;
-    void loadDataRef.current?.({ background: true }).finally(() => {
-      backgroundRefreshInFlightRef.current = false;
-    });
-  }, []);
-
-  useEffect(() => {
-    runsRef.current = runs;
-  }, [runs]);
-
-  useEffect(() => {
-    loadDataRef.current = loadData;
-  }, [loadData]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    setLoadingSessionDetail(true);
+    try {
+      const nextDetail = await getRepositoryAgentSessionDetail(owner, repo, selectedSessionId);
+      if (!mountedRef.current) {
+        return;
+      }
+      setSelectedSessionDetail(nextDetail);
+      setSessions((currentSessions) => insertOrReplaceSession(currentSessions, nextDetail.session));
+    } catch (loadError) {
+      if (mountedRef.current) {
+        setError(formatApiError(loadError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingSessionDetail(false);
+      }
+    }
+  }, [owner, repo, selectedSessionId]);
 
   const loadRunnerConfig = useCallback(async () => {
     if (!owner || !repo || !canManageActions) {
       return;
     }
-
     setLoadingRunnerConfig(true);
     try {
       const nextConfig = await getRepositoryActionsConfig(owner, repo);
@@ -240,14 +230,20 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         setLoadingRunnerConfig(false);
       }
     }
-  }, [canManageActions, owner, repo]);
+  }, [canManageActions, owner, repo, resetRunnerConfigDraft]);
+
+  useEffect(() => {
+    void loadOverview();
+  }, [loadOverview]);
+
+  useEffect(() => {
+    void loadSessionDetail();
+  }, [loadSessionDetail]);
 
   useEffect(() => {
     if (!canManageActions) {
       setRunnerConfig(null);
-      setRunnerConfigSuccess(null);
       setRunnerConfigEditing(false);
-      setRunnerInstanceType("lite");
       setCodexConfigFileContent("");
       setClaudeCodeConfigFileContent("");
       return;
@@ -255,197 +251,85 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     void loadRunnerConfig();
   }, [canManageActions, loadRunnerConfig]);
 
-  const focusedExecutionId = useMemo(
-    () => selectedExecutionId ?? agentSessions[0]?.id ?? runs[0]?.id ?? null,
-    [agentSessions, runs, selectedExecutionId]
-  );
-
-  const selectedRun = useMemo(
-    () => runs.find((run) => run.id === focusedExecutionId) ?? null,
-    [focusedExecutionId, runs]
-  );
-  const selectedAgentSession = useMemo(
-    () =>
-      agentSessions.find((session) => session.id === focusedExecutionId) ??
-      (selectedRun ? selectedRun : null),
-    [agentSessions, focusedExecutionId, selectedRun]
-  );
-
-  const liveRunId = selectedRun && isPendingRun(selectedRun) ? selectedRun.id : null;
-  const hasPendingRunsWithoutLiveStream = useMemo(
-    () => runs.some((run) => isPendingRun(run) && run.id !== liveRunId),
-    [liveRunId, runs]
-  );
-  const hasPendingAgentSessions = useMemo(
-    () => agentSessions.some((session) => isPendingAgentSession(session)),
-    [agentSessions]
-  );
-
-  const statusOptions = useMemo(
-    () => ["all", ...Array.from(new Set(runs.map((run) => run.status))).sort()],
-    [runs]
-  );
-  const eventOptions = useMemo(
-    () => ["all", ...Array.from(new Set(runs.map((run) => runGroupLabel(run)))).sort()],
-    [runs]
-  );
-  const refOptions = useMemo(
-    () => [
-      "all",
-      ...Array.from(
-        new Set(runs.map((run) => run.trigger_ref).filter((value): value is string => Boolean(value)))
-      ).sort()
-    ],
-    [runs]
-  );
-
-  const filteredRuns = useMemo(
-    () =>
-      runs.filter((run) => {
-        if (statusFilter !== "all" && run.status !== statusFilter) {
-          return false;
-        }
-        if (eventFilter !== "all" && runGroupLabel(run) !== eventFilter) {
-          return false;
-        }
-        if (refFilter !== "all" && run.trigger_ref !== refFilter) {
-          return false;
-        }
-        if (
-          actorFilter.trim() &&
-          !(run.triggered_by_username ?? "")
-            .toLowerCase()
-            .includes(actorFilter.trim().toLowerCase())
-        ) {
-          return false;
-        }
-        return true;
-      }),
-    [actorFilter, eventFilter, refFilter, runs, statusFilter]
-  );
-
-  const runSummary = useMemo(
-    () => ({
-      total: filteredRuns.length,
-      running: filteredRuns.filter((run) => run.status === "running" || run.status === "queued")
-        .length,
-      success: filteredRuns.filter((run) => run.status === "success").length,
-      failed: filteredRuns.filter(
-        (run) => run.status === "failed" || run.status === "cancelled"
-      ).length
-    }),
-    [filteredRuns]
-  );
-  const sessionSummary = useMemo(
-    () => ({
-      total: agentSessions.length,
-      running: agentSessions.filter((session) => isPendingAgentSession(session)).length,
-      success: agentSessions.filter((session) => session.status === "success").length,
-      failed: agentSessions.filter(
-        (session) => session.status === "failed" || session.status === "cancelled"
-      ).length
-    }),
-    [agentSessions]
-  );
-
-  const visibleSessionCount = useMemo(
-    () => ensureSelectedItemVisible(focusedExecutionId, agentSessions, visibleSessionLimit),
-    [agentSessions, focusedExecutionId, visibleSessionLimit]
-  );
-  const visibleRunCount = useMemo(
-    () => ensureSelectedItemVisible(focusedExecutionId, filteredRuns, visibleRunLimit),
-    [filteredRuns, focusedExecutionId, visibleRunLimit]
-  );
-  const visibleAgentSessions = useMemo(
-    () => agentSessions.slice(0, visibleSessionCount),
-    [agentSessions, visibleSessionCount]
-  );
-  const visibleRuns = useMemo(
-    () => filteredRuns.slice(0, visibleRunCount),
-    [filteredRuns, visibleRunCount]
-  );
-
   useEffect(() => {
-    setVisibleSessionLimit(INITIAL_SESSION_LIMIT);
-  }, [owner, repo]);
-
-  useEffect(() => {
-    setVisibleRunLimit(INITIAL_RUN_LIMIT);
-  }, [owner, repo, statusFilter, eventFilter, refFilter, actorFilter]);
-
-  useEffect(() => {
-    if (!hasPendingRunsWithoutLiveStream && !hasPendingAgentSessions) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      refreshDataInBackground();
-    }, 3500);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [hasPendingAgentSessions, hasPendingRunsWithoutLiveStream, refreshDataInBackground]);
-
-  useEffect(() => {
-    if (!focusedExecutionId) {
+    if (!selectedSessionId || !owner || !repo) {
       return;
     }
     const timer = window.setTimeout(() => {
-      const sessionElement = document.getElementById(`actions-session-nav-${focusedExecutionId}`);
-      sessionElement?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      const runElement = document.getElementById(`actions-run-row-${focusedExecutionId}`);
-      runElement?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const element = document.getElementById(`actions-session-nav-${selectedSessionId}`);
+      element?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 80);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [focusedExecutionId, visibleRunCount, visibleSessionCount]);
+  }, [owner, repo, selectedSessionId, sessions.length]);
 
   useEffect(() => {
-    if (!owner || !repo || !liveRunId) {
+    if (!hasPendingSession) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadOverview({ background: true });
+      if (selectedSessionId) {
+        void loadSessionDetail();
+      }
+    }, 3500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasPendingSession, loadOverview, loadSessionDetail, selectedSessionId]);
+
+  useEffect(() => {
+    if (!owner || !repo || !selectedSessionStreamId || !selectedSessionIsPending) {
       return;
     }
 
-    const source = new EventSource(getActionRunLogStreamPath(owner, repo, liveRunId));
-    const handleEvent = (streamEvent: ActionRunLogStreamEvent) => {
-      if (!mountedRef.current) {
-        source.close();
+    const sessionId = selectedSessionStreamId;
+    const source = new EventSource(getAgentSessionLogStreamPath(owner, repo, sessionId));
+
+    const applyEvent = (event: ReturnType<typeof parseAgentSessionLogStreamEvent>) => {
+      if (!event || !mountedRef.current) {
         return;
       }
-      if (streamEvent.event === "stream-error") {
+      if (event.event === "stream-error") {
         source.close();
-        refreshDataInBackground();
+        void loadOverview({ background: true });
+        void loadSessionDetail();
         return;
       }
-      if (
-        (streamEvent.event === "append" ||
-          streamEvent.event === "status" ||
-          streamEvent.event === "done") &&
-        !runsRef.current.some((run) => run.id === streamEvent.data.runId)
-      ) {
-        refreshDataInBackground();
-        return;
-      }
-      setRuns((currentRuns) => applyRunStreamEvent(currentRuns, streamEvent));
-      if (streamEvent.event === "done") {
+
+      setSessions((currentSessions) => applyAgentSessionStreamEvent(currentSessions, event));
+      setSelectedSessionDetail((currentDetail) => {
+        if (!currentDetail || currentDetail.session.id !== sessionId) {
+          return currentDetail;
+        }
+        const [updatedSession] = applyAgentSessionStreamEvent([currentDetail.session], event);
+        return updatedSession
+          ? {
+              ...currentDetail,
+              session: updatedSession
+            }
+          : currentDetail;
+      });
+
+      if (event.event === "done") {
         source.close();
+        void loadOverview({ background: true });
+        void loadSessionDetail();
       }
     };
 
-    const bind = (eventName: ActionRunLogStreamEvent["event"]) => {
+    const bind = (eventName: Parameters<typeof parseAgentSessionLogStreamEvent>[0]) => {
       source.addEventListener(eventName, (message) => {
         try {
-          const event = parseActionRunLogStreamEvent(
-            eventName,
-            (message as MessageEvent<string>).data
+          applyEvent(
+            parseAgentSessionLogStreamEvent(eventName, (message as MessageEvent<string>).data)
           );
-          if (!event) {
-            throw new Error(`Invalid ${eventName} event payload`);
-          }
-          handleEvent(event);
         } catch (streamError) {
-          console.error("Failed to parse action run stream event", streamError);
+          console.error("Failed to parse agent session stream event", streamError);
           source.close();
-          refreshDataInBackground();
+          void loadOverview({ background: true });
+          void loadSessionDetail();
         }
       });
     };
@@ -459,63 +343,42 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     bind("stream-error");
 
     source.addEventListener("error", () => {
-      if (!mountedRef.current) {
-        source.close();
-        return;
-      }
       if (source.readyState === EventSource.CLOSED) {
         source.close();
-        refreshDataInBackground();
-        return;
+        void loadOverview({ background: true });
+        void loadSessionDetail();
       }
-      console.warn("Action run log stream error", { runId: liveRunId, readyState: source.readyState });
     });
 
     return () => {
       source.close();
     };
-  }, [liveRunId, owner, refreshDataInBackground, repo]);
+  }, [loadOverview, loadSessionDetail, owner, repo, selectedSessionIsPending, selectedSessionStreamId]);
 
-  async function handleRerunRun(run: ActionRunRecord) {
-    if (!canManageActions || rerunningRunId) {
-      return;
-    }
-
-    setRerunningRunId(run.id);
-    setError(null);
-    try {
-      await rerunActionRun(owner, repo, run.id);
-      await loadData();
-    } catch (rerunError) {
-      setError(formatApiError(rerunError));
-    } finally {
-      setRerunningRunId(null);
-    }
+  function handleSelectSession(sessionId: string) {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("sessionId", sessionId);
+    setSearchParams(nextParams);
   }
 
-  async function handleAgentSessionAction(session: AgentSessionRecord) {
+  async function handleCancelSession(session: AgentSessionRecord) {
     if (!canManageActions || pendingSessionAction) {
       return;
     }
-
     setPendingSessionAction({ sessionId: session.id, action: "cancel" });
     setError(null);
+    setSuccessMessage(null);
     try {
       const response = await cancelRepositoryAgentSession(owner, repo, session.id);
-      if (!mountedRef.current) {
+      if (!mountedRef.current || !response.session) {
         return;
       }
-      setAgentSessions((currentSessions) =>
-        insertOrReplaceSession(currentSessions, response.session)
-      );
-      const nextRun = response.run;
-      if (nextRun) {
-        setRuns((currentRuns) => insertOrReplaceRun(currentRuns, nextRun));
-      }
-      await loadData();
-    } catch (sessionActionError) {
+      setSessions((currentSessions) => insertOrReplaceSession(currentSessions, response.session));
+      await loadOverview({ background: true });
+      await loadSessionDetail();
+    } catch (cancelError) {
       if (mountedRef.current) {
-        setError(formatApiError(sessionActionError));
+        setError(formatApiError(cancelError));
       }
     } finally {
       if (mountedRef.current) {
@@ -524,15 +387,169 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
+  async function handleRerunSession(session: AgentSessionRecord) {
+    if (!canManageActions || pendingSessionAction) {
+      return;
+    }
+    setPendingSessionAction({ sessionId: session.id, action: "rerun" });
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const nextSession = await rerunRepositoryAgentSession(owner, repo, session.id);
+      if (!mountedRef.current) {
+        return;
+      }
+      setSessions((currentSessions) => insertOrReplaceSession(currentSessions, nextSession));
+      setSuccessMessage("已创建新的重新执行会话。");
+      handleSelectSession(nextSession.id);
+      await loadOverview({ background: true });
+    } catch (rerunError) {
+      if (mountedRef.current) {
+        setError(formatApiError(rerunError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setPendingSessionAction(null);
+      }
+    }
+  }
+
+  async function handleLoadArtifactContent(sessionId: string, artifactId: string) {
+    if (!owner || !repo || loadingArtifactId === artifactId) {
+      return;
+    }
+    setLoadingArtifactId(artifactId);
+    try {
+      const response = await getRepositoryAgentSessionArtifactContent(owner, repo, sessionId, artifactId);
+      if (!mountedRef.current) {
+        return;
+      }
+      setArtifactContentById((current) => ({
+        ...current,
+        [artifactId]: response.content
+      }));
+    } catch (loadError) {
+      if (mountedRef.current) {
+        setError(formatApiError(loadError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingArtifactId(null);
+      }
+    }
+  }
+
+  async function handleSubmitWorkflow(input: {
+    name: string;
+    triggerEvent: ActionWorkflowRecord["trigger_event"];
+    agentType: ActionWorkflowRecord["agent_type"];
+    prompt: string;
+    pushBranchRegex: string | null;
+    pushTagRegex: string | null;
+    enabled: boolean;
+  }) {
+    if (!workflowSheetState) {
+      return;
+    }
+    setSavingWorkflowSheet(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const nextWorkflow =
+        workflowSheetState.mode === "create"
+          ? await createActionWorkflow(owner, repo, input)
+          : await updateActionWorkflow(owner, repo, workflowSheetState.workflow.id, input);
+      if (!mountedRef.current) {
+        return;
+      }
+      setWorkflows((currentWorkflows) => {
+        const existingIndex = currentWorkflows.findIndex((workflow) => workflow.id === nextWorkflow.id);
+        if (existingIndex === -1) {
+          return [nextWorkflow, ...currentWorkflows];
+        }
+        return currentWorkflows.map((workflow) =>
+          workflow.id === nextWorkflow.id ? nextWorkflow : workflow
+        );
+      });
+      setWorkflowSheetState(null);
+      setSuccessMessage(
+        workflowSheetState.mode === "create" ? "工作流已创建。" : "工作流已更新。"
+      );
+    } catch (workflowError) {
+      if (mountedRef.current) {
+        setError(formatApiError(workflowError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSavingWorkflowSheet(false);
+      }
+    }
+  }
+
+  async function handleToggleWorkflowEnabled(workflow: ActionWorkflowRecord) {
+    if (!canManageActions || savingWorkflowId) {
+      return;
+    }
+    setSavingWorkflowId(workflow.id);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const nextWorkflow = await updateActionWorkflow(owner, repo, workflow.id, {
+        enabled: workflow.enabled !== 1
+      });
+      if (!mountedRef.current) {
+        return;
+      }
+      setWorkflows((currentWorkflows) =>
+        currentWorkflows.map((item) => (item.id === nextWorkflow.id ? nextWorkflow : item))
+      );
+    } catch (workflowError) {
+      if (mountedRef.current) {
+        setError(formatApiError(workflowError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSavingWorkflowId(null);
+      }
+    }
+  }
+
+  async function handleDispatchWorkflow(workflow: ActionWorkflowRecord) {
+    if (!canManageActions || dispatchingWorkflowId) {
+      return;
+    }
+    setDispatchingWorkflowId(workflow.id);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const nextSession = await dispatchActionWorkflow(owner, repo, workflow.id, dispatchRef ? { ref: dispatchRef } : undefined);
+      if (!mountedRef.current) {
+        return;
+      }
+      setSessions((currentSessions) => insertOrReplaceSession(currentSessions, nextSession));
+      setSuccessMessage("已创建新的手动执行会话。");
+      handleSelectSession(nextSession.id);
+      setActiveTab("sessions");
+      await loadOverview({ background: true });
+    } catch (dispatchError) {
+      if (mountedRef.current) {
+        setError(formatApiError(dispatchError));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDispatchingWorkflowId(null);
+      }
+    }
+  }
+
   async function handleSaveRunnerConfig() {
     if (!canManageActions || savingRunnerConfig) {
       return;
     }
-
     setSavingRunnerConfig(true);
     setRunnerConfigAction("save");
     setError(null);
-    setRunnerConfigSuccess(null);
+    setSuccessMessage(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
         instanceType: runnerInstanceType,
@@ -545,7 +562,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setRunnerConfig(nextConfig);
       resetRunnerConfigDraft(nextConfig);
       setRunnerConfigEditing(false);
-      setRunnerConfigSuccess("容器配置已保存。新的 Actions session 会使用当前仓库配置。");
+      setSuccessMessage("仓库运行时配置已保存。");
     } catch (saveError) {
       if (mountedRef.current) {
         setError(formatApiError(saveError));
@@ -562,11 +579,10 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     if (!canManageActions || savingRunnerConfig) {
       return;
     }
-
     setSavingRunnerConfig(true);
     setRunnerConfigAction("reset");
     setError(null);
-    setRunnerConfigSuccess(null);
+    setSuccessMessage(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
         instanceType: null,
@@ -579,7 +595,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setRunnerConfig(nextConfig);
       resetRunnerConfigDraft(nextConfig);
       setRunnerConfigEditing(false);
-      setRunnerConfigSuccess("已恢复为继承全局默认容器配置。");
+      setSuccessMessage("仓库已恢复为继承全局运行时配置。");
     } catch (resetError) {
       if (mountedRef.current) {
         setError(formatApiError(resetError));
@@ -592,40 +608,22 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
   }
 
-  async function loadFullRunLogs(runId: string) {
-    if (!owner || !repo || loadingRunLogsById[runId] || fullRunLogsById[runId] !== undefined) {
-      return;
-    }
-    setLoadingRunLogsById((current) => ({ ...current, [runId]: true }));
-    try {
-      const response = await getActionRunLogs(owner, repo, runId);
-      if (!mountedRef.current) {
-        return;
-      }
-      setFullRunLogsById((current) => ({ ...current, [runId]: response.logs }));
-    } catch (loadError) {
-      if (mountedRef.current) {
-        setError(formatApiError(loadError));
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoadingRunLogsById((current) => ({ ...current, [runId]: false }));
-      }
-    }
-  }
-
-  function clearFilters() {
-    setStatusFilter("all");
-    setEventFilter("all");
-    setRefFilter("all");
-    setActorFilter("");
-  }
-
   const runnerConfigDirty =
     !!runnerConfig &&
     (runnerInstanceType !== runnerConfig.instanceType ||
       codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
       claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
+
+  const sessionSummary = useMemo(
+    () => ({
+      total: sessions.length,
+      pending: sessions.filter((session) => isPendingAgentSession(session)).length,
+      failed: sessions.filter(
+        (session) => session.status === "failed" || session.status === "cancelled"
+      ).length
+    }),
+    [sessions]
+  );
 
   if (!owner || !repo) {
     return (
@@ -648,8 +646,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   if (!detail) {
     return (
       <PageLoadingState
-        title="Loading actions"
-        description={`Fetching workflows, sessions, and config for ${owner}/${repo}.`}
+        title="正在加载 Actions"
+        description={`正在同步 ${owner}/${repo} 的执行记录、工作流规则和运行时配置。`}
       />
     );
   }
@@ -665,94 +663,151 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </Alert>
       ) : null}
 
-      {runnerConfigSuccess ? (
+      {successMessage ? (
         <Alert>
-          <AlertTitle>已保存</AlertTitle>
-          <AlertDescription>{runnerConfigSuccess}</AlertDescription>
+          <AlertTitle>已完成</AlertTitle>
+          <AlertDescription>{successMessage}</AlertDescription>
         </Alert>
       ) : null}
 
       {loading ? (
         <InlineLoadingState
-          title="Refreshing actions"
-          description="Updating sessions, logs, and repository-level runtime config."
+          title="正在刷新 Actions"
+          description="正在更新执行记录、工作流规则和运行时配置。"
         />
       ) : null}
 
-      {canManageActions ? (
-        <div className="segmented-control w-fit" role="tablist" aria-label="Actions 内容切换">
+      <section className="page-hero">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
+                Actions
+              </h1>
+              <p className="max-w-3xl text-body-sm text-text-secondary">
+                用会话回看任务执行，用工作流决定何时触发，用运行时控制仓库级运行策略。
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="bg-surface-focus">
+                {sessionSummary.total} 个会话
+              </Badge>
+              <Badge variant="outline" className="bg-surface-focus">
+                {visibleWorkflows.length} 条工作流规则
+              </Badge>
+              <Badge variant="outline" className="bg-surface-focus">
+                {sessionSummary.pending} 个进行中
+              </Badge>
+              <Badge variant="outline" className="bg-surface-focus">
+                {sessionSummary.failed} 个待处理
+              </Badge>
+            </div>
+          </div>
+
+          <div className="panel-inset space-y-3">
+            <p className="text-label-xs text-text-supporting">当前焦点</p>
+            {selectedSessionDetail ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <ActionStatusBadge status={selectedSessionDetail.session.status} />
+                  <Badge variant="outline">{selectedSessionDetail.session.agent_type}</Badge>
+                  <Badge variant="outline">
+                    {selectedSessionDetail.session.workflow_name ?? selectedSessionDetail.session.origin}
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-body-sm font-medium text-text-primary">
+                    会话 #{selectedSessionDetail.session.session_number}
+                  </p>
+                  <p className="text-body-xs text-text-secondary">
+                    {selectedSessionDetail.sourceContext.title ?? "当前会话"} · 更新于{" "}
+                    {formatDateTime(selectedSessionDetail.session.updated_at)}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="text-body-sm text-text-secondary">当前仓库还没有可聚焦的会话。</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <div className="segmented-control w-fit" role="tablist" aria-label="Actions 标签">
+        <button
+          type="button"
+          className="segmented-control__item"
+          data-active={activeTab === "sessions"}
+          onClick={() => setActiveTab("sessions")}
+        >
+          会话
+        </button>
+        <button
+          type="button"
+          className="segmented-control__item"
+          data-active={activeTab === "workflows"}
+          onClick={() => setActiveTab("workflows")}
+        >
+          工作流
+        </button>
+        {canManageActions ? (
           <button
-            id="actions-logs-tab"
             type="button"
-            role="tab"
-            aria-selected={activeTab === "logs"}
-            aria-controls="actions-logs-panel"
             className="segmented-control__item"
-            data-active={activeTab === "logs"}
-            onClick={() => setActiveTab("logs")}
+            data-active={activeTab === "runtime"}
+            onClick={() => setActiveTab("runtime")}
           >
-            查看
+            运行时
           </button>
-          <button
-            id="actions-config-tab"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "config"}
-            aria-controls="actions-config-panel"
-            className="segmented-control__item"
-            data-active={activeTab === "config"}
-            onClick={() => setActiveTab("config")}
-          >
-            配置
-          </button>
+        ) : null}
+      </div>
+
+      {activeTab === "sessions" ? (
+        <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <RepositoryActionsSessionsPanel
+            owner={owner}
+            repo={repo}
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            loading={loading}
+            canManageActions={canManageActions}
+            pendingSessionAction={pendingSessionAction}
+            onSelectSession={handleSelectSession}
+            onCancelSession={handleCancelSession}
+          />
+
+          <RepositoryActionsSessionWorkspace
+            owner={owner}
+            repo={repo}
+            detail={selectedSessionDetail}
+            loading={loadingSessionDetail}
+            canManageActions={canManageActions}
+            pendingSessionAction={pendingSessionAction}
+            artifactContentById={artifactContentById}
+            loadingArtifactId={loadingArtifactId}
+            onCancelSession={handleCancelSession}
+            onRerunSession={handleRerunSession}
+            onLoadArtifactContent={handleLoadArtifactContent}
+          />
         </div>
       ) : null}
 
-      {!canManageActions || activeTab === "logs" ? (
-        <section id="actions-logs-panel" role="tabpanel" aria-labelledby="actions-logs-tab">
-          <RepositoryActionsLogView
-            owner={owner}
-            repo={repo}
-            selectedExecutionId={focusedExecutionId}
-            selectedAgentSession={selectedAgentSession}
-            selectedRun={selectedRun}
-            sessionSummary={sessionSummary}
-            runSummary={runSummary}
-            agentSessions={agentSessions}
-            visibleAgentSessions={visibleAgentSessions}
-            filteredRuns={filteredRuns}
-            visibleRuns={visibleRuns}
-            canShowMoreSessions={visibleSessionCount < agentSessions.length}
-            canShowMoreRuns={visibleRunCount < filteredRuns.length}
-            canManageActions={canManageActions}
-            pendingSessionAction={pendingSessionAction}
-            rerunningRunId={rerunningRunId}
-            loadingRunLogsById={loadingRunLogsById}
-            fullRunLogsById={fullRunLogsById}
-            statusFilter={statusFilter}
-            eventFilter={eventFilter}
-            refFilter={refFilter}
-            actorFilter={actorFilter}
-            statusOptions={statusOptions}
-            eventOptions={eventOptions}
-            refOptions={refOptions}
-            onStatusFilterChange={setStatusFilter}
-            onEventFilterChange={setEventFilter}
-            onRefFilterChange={setRefFilter}
-            onActorFilterChange={setActorFilter}
-            onClearFilters={clearFilters}
-            onShowMoreSessions={() =>
-              setVisibleSessionLimit((current) => current + SESSION_LIMIT_STEP)
-            }
-            onShowMoreRuns={() => setVisibleRunLimit((current) => current + RUN_LIMIT_STEP)}
-            onCancelSession={handleAgentSessionAction}
-            onRerunRun={handleRerunRun}
-            onLoadFullRunLogs={loadFullRunLogs}
-          />
-        </section>
+      {activeTab === "workflows" ? (
+        <RepositoryActionsWorkflowsPanel
+          workflows={visibleWorkflows}
+          canManageActions={canManageActions}
+          loading={loading}
+          savingWorkflowId={savingWorkflowId}
+          dispatchingWorkflowId={dispatchingWorkflowId}
+          dispatchRef={dispatchRef}
+          onCreate={() => setWorkflowSheetState({ mode: "create", workflow: null })}
+          onEdit={(workflow) => setWorkflowSheetState({ mode: "edit", workflow })}
+          onToggleEnabled={handleToggleWorkflowEnabled}
+          onDispatch={handleDispatchWorkflow}
+        />
       ) : null}
 
-      {canManageActions && activeTab === "config" ? (
+      {canManageActions && activeTab === "runtime" ? (
         <RepositoryActionsConfigPanel
           loading={loadingRunnerConfig}
           config={runnerConfig}
@@ -786,6 +841,19 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           }}
         />
       ) : null}
+
+      <RepositoryActionsWorkflowSheet
+        open={workflowSheetState !== null}
+        mode={workflowSheetState?.mode ?? "create"}
+        workflow={workflowSheetState?.workflow ?? null}
+        saving={savingWorkflowSheet}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWorkflowSheetState(null);
+          }
+        }}
+        onSubmit={handleSubmitWorkflow}
+      />
     </div>
   );
 }

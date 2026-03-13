@@ -3,7 +3,6 @@ import type {
   AgentSessionExecutionSourceType,
   AgentSessionOrigin,
   AgentSessionRecord,
-  ActionRunRecord,
   ActionWorkflowRecord,
   AppBindings,
   AuthUser,
@@ -64,34 +63,6 @@ function resolveSessionSourceType(
   sourceType: AgentSessionExecutionSourceType | null | undefined
 ): AgentSessionRecord["source_type"] {
   return sourceType ?? "manual";
-}
-
-export async function createLinkedAgentSessionForRun(input: {
-  db: D1Database;
-  repositoryId: string;
-  run: ActionRunRecord;
-  origin: AgentSessionOrigin;
-  createdBy?: string | null;
-  delegatedFromUserId?: string | null;
-}): Promise<AgentSessionRecord> {
-  const agentSessionService = new AgentSessionService(input.db);
-  return agentSessionService.createSessionExecution({
-    repositoryId: input.repositoryId,
-    sourceType: resolveSessionSourceType(input.run.trigger_source_type ?? null),
-    sourceNumber: input.run.trigger_source_number ?? null,
-    sourceCommentId: input.run.trigger_source_comment_id ?? null,
-    origin: input.origin,
-    agentType: input.run.agent_type,
-    instanceType: input.run.instance_type,
-    prompt: input.run.prompt,
-    triggerRef: input.run.trigger_ref ?? null,
-    triggerSha: input.run.trigger_sha ?? null,
-    workflowId: input.run.workflow_id ?? null,
-    parentSessionId: input.run.parent_session_id ?? null,
-    createdBy: input.createdBy ?? input.run.created_by ?? null,
-    delegatedFromUserId:
-      input.delegatedFromUserId ?? input.run.delegated_from_user_id ?? null
-  });
 }
 
 export function containsActionsMention(input: { title?: string; body?: string }): boolean {

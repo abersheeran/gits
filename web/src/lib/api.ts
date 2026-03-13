@@ -436,8 +436,6 @@ export type ActionContainerInstanceType =
   | "standard-4";
 
 export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
-export type ActionRunStatus = AgentSessionStatus;
-export type ActionRunSourceType = Exclude<AgentSessionSourceType, "manual">;
 
 export type ActionWorkflowRecord = {
   id: string;
@@ -454,19 +452,19 @@ export type ActionWorkflowRecord = {
   updated_at: number;
 };
 
-export type ActionRunLogStreamEvent =
+export type AgentSessionLogStreamEvent =
   | {
       event: "snapshot" | "replace";
       data: {
-        run: ActionRunRecord;
+        session: AgentSessionRecord;
       };
     }
   | {
       event: "append";
       data: {
-        runId: string;
+        sessionId: string;
         chunk: string;
-        status: ActionRunStatus;
+        status: AgentSessionStatus;
         exitCode: number | null;
         completedAt: number | null;
         updatedAt: number;
@@ -475,8 +473,8 @@ export type ActionRunLogStreamEvent =
   | {
       event: "status" | "done";
       data: {
-        runId: string;
-        status: ActionRunStatus;
+        sessionId: string;
+        status: AgentSessionStatus;
         exitCode: number | null;
         completedAt: number | null;
         updatedAt: number;
@@ -495,14 +493,9 @@ export type ActionRunLogStreamEvent =
       };
     };
 
-export type ActionRunLatestBySourceItem = {
-  sourceNumber: number;
-  run: ActionRunRecord | null;
-};
-
-export type ActionRunLatestByCommentItem = {
+export type AgentSessionLatestByCommentItem = {
   commentId: string;
-  run: ActionRunRecord | null;
+  session: AgentSessionRecord | null;
 };
 
 export type ActionsGlobalConfig = {
@@ -524,13 +517,9 @@ export type AgentSessionRecord = {
   id: string;
   repository_id: string;
   session_number: number;
-  run_number?: number;
   source_type: AgentSessionSourceType;
   source_number: number | null;
   source_comment_id: string | null;
-  trigger_source_type?: ActionRunSourceType | null;
-  trigger_source_number?: number | null;
-  trigger_source_comment_id?: string | null;
   origin: AgentSessionOrigin;
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
@@ -542,15 +531,12 @@ export type AgentSessionRecord = {
   workflow_id: string | null;
   workflow_name: string | null;
   parent_session_id: string | null;
-  linked_run_id?: string | null;
   created_by: string | null;
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
   active_attempt_id?: string | null;
   latest_attempt_id?: string | null;
-  triggered_by?: string | null;
-  triggered_by_username?: string | null;
   logs: string;
   has_full_logs?: boolean;
   logs_url?: string | null;
@@ -586,8 +572,6 @@ export type AgentSessionRecord = {
   completed_at: number | null;
   updated_at: number;
 };
-
-export type ActionRunRecord = AgentSessionRecord;
 
 export type AgentSessionAttemptStatus =
   | "queued"
@@ -655,7 +639,7 @@ export type AgentSessionArtifactRecord = {
   updated_at: number;
 };
 
-export type ActionRunLogsResponse = {
+export type AgentSessionLogsResponse = {
   logs: string;
 };
 
@@ -705,7 +689,6 @@ export type AgentSessionSourceContext = {
 
 export type AgentSessionDetail = {
   session: AgentSessionRecord;
-  linkedRun?: ActionRunRecord | null;
   sourceContext: AgentSessionSourceContext;
   attempts: AgentSessionAttemptRecord[];
   activeAttempt: AgentSessionAttemptRecord | null;
@@ -745,14 +728,12 @@ export type TriggerRepositoryAgentInput = {
 };
 
 export type TriggerRepositoryAgentResponse = {
-  run?: ActionRunRecord;
   session: AgentSessionRecord;
   issue?: IssueRecord;
 };
 
 export type AgentSessionLifecycleResponse = {
   session: AgentSessionRecord;
-  run?: ActionRunRecord | null;
 };
 
 type ApiRequestInit = RequestInit & {
@@ -1408,111 +1389,49 @@ export async function updateActionWorkflow(
   return response.workflow;
 }
 
-function normalizeActionRunRecord(session: AgentSessionRecord): ActionRunRecord {
-  return {
-    ...session,
-    run_number: session.run_number ?? session.session_number,
-    trigger_source_type:
-      session.trigger_source_type ??
-      (session.source_type === "manual" ? null : session.source_type),
-    trigger_source_number: session.trigger_source_number ?? session.source_number,
-    trigger_source_comment_id:
-      session.trigger_source_comment_id ?? session.source_comment_id,
-    linked_run_id: session.linked_run_id ?? null,
-    triggered_by: session.triggered_by ?? session.created_by,
-    triggered_by_username:
-      session.triggered_by_username ?? session.created_by_username
-  };
-}
-
-function normalizeAgentSessionDetail(detail: AgentSessionDetail): AgentSessionDetail {
-  return {
-    ...detail,
-    session: normalizeActionRunRecord(detail.session),
-    linkedRun: detail.linkedRun ?? null
-  };
-}
-
-function normalizeTriggerRepositoryAgentResponse(
-  response: TriggerRepositoryAgentResponse
-): TriggerRepositoryAgentResponse {
-  return {
-    ...response,
-    run: response.run ?? normalizeActionRunRecord(response.session)
-  };
-}
-
-export async function listActionRuns(
-  owner: string,
-  repo: string,
-  input?: { limit?: number }
-): Promise<ActionRunRecord[]> {
-  return (await listRepositoryAgentSessions(owner, repo, { limit: input?.limit })).map(
-    (session) => normalizeActionRunRecord(session)
-  );
-}
-
-export async function listLatestActionRunsBySource(
-  owner: string,
-  repo: string,
-  input: { sourceType: ActionRunSourceType; numbers: number[] }
-): Promise<ActionRunLatestBySourceItem[]> {
-  const items = await listLatestAgentSessionsBySource(owner, repo, input);
-  return items.map((item) => ({
-    sourceNumber: item.sourceNumber,
-    run: item.session ? normalizeActionRunRecord(item.session) : null
-  }));
-}
-
-export async function listLatestActionRunsByCommentIds(
+export async function listLatestAgentSessionsByCommentIds(
   owner: string,
   repo: string,
   commentIds: string[]
-): Promise<ActionRunLatestByCommentItem[]> {
+): Promise<AgentSessionLatestByCommentItem[]> {
   const query = new URLSearchParams();
   query.set("commentIds", commentIds.join(","));
   const response = await requestJson<{ items: AgentSessionLatestByCommentItem[] }>(
     `/api/repos/${owner}/${repo}/agent-sessions/latest-by-comments?${query.toString()}`
   );
-  return response.items.map((item) => ({
-    commentId: item.commentId,
-    run: item.session ? normalizeActionRunRecord(item.session) : null
-  }));
+  return response.items;
 }
 
-export async function getActionRun(
+export function getAgentSessionLogStreamPath(
   owner: string,
   repo: string,
-  runId: string
-): Promise<ActionRunRecord> {
-  const detail = await getRepositoryAgentSessionDetail(owner, repo, runId);
-  return normalizeActionRunRecord(detail.session);
+  sessionId: string
+): string {
+  return `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/logs/stream`;
 }
 
-export function getActionRunLogStreamPath(owner: string, repo: string, runId: string): string {
-  return `/api/repos/${owner}/${repo}/agent-sessions/${runId}/logs/stream`;
-}
-
-export async function getActionRunLogs(
+export async function getRepositoryAgentSessionLogs(
   owner: string,
   repo: string,
-  runId: string
-): Promise<ActionRunLogsResponse> {
-  return requestJson<ActionRunLogsResponse>(`/api/repos/${owner}/${repo}/agent-sessions/${runId}/logs`);
+  sessionId: string
+): Promise<AgentSessionLogsResponse> {
+  return requestJson<AgentSessionLogsResponse>(
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/logs`
+  );
 }
 
-export async function rerunActionRun(
+export async function rerunRepositoryAgentSession(
   owner: string,
   repo: string,
-  runId: string
-): Promise<ActionRunRecord> {
+  sessionId: string
+): Promise<AgentSessionRecord> {
   const response = await requestJson<{ session: AgentSessionRecord }>(
-    `/api/repos/${owner}/${repo}/agent-sessions/${runId}/rerun`,
+    `/api/repos/${owner}/${repo}/agent-sessions/${sessionId}/rerun`,
     {
       method: "POST"
     }
   );
-  return normalizeActionRunRecord(response.session);
+  return response.session;
 }
 
 export async function dispatchActionWorkflow(
@@ -1520,7 +1439,7 @@ export async function dispatchActionWorkflow(
   repo: string,
   workflowId: string,
   input?: { ref?: string; sha?: string }
-): Promise<ActionRunRecord> {
+): Promise<AgentSessionRecord> {
   const response = await requestJson<{ session: AgentSessionRecord }>(
     `/api/repos/${owner}/${repo}/actions/workflows/${workflowId}/dispatch`,
     {
@@ -1528,7 +1447,7 @@ export async function dispatchActionWorkflow(
       bodyJson: input ?? {}
     }
   );
-  return normalizeActionRunRecord(response.session);
+  return response.session;
 }
 
 export async function listRepositoryAgentSessions(
@@ -1567,11 +1486,6 @@ export async function listLatestAgentSessionsBySource(
   return response.items;
 }
 
-export type AgentSessionLatestByCommentItem = {
-  commentId: string;
-  session: AgentSessionRecord | null;
-};
-
 export async function getRepositoryAgentSession(
   owner: string,
   repo: string,
@@ -1586,9 +1500,7 @@ export async function getRepositoryAgentSessionDetail(
   repo: string,
   sessionId: string
 ): Promise<AgentSessionDetail> {
-  return normalizeAgentSessionDetail(
-    await requestJson<AgentSessionDetail>(`/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`)
-  );
+  return requestJson<AgentSessionDetail>(`/api/repos/${owner}/${repo}/agent-sessions/${sessionId}`);
 }
 
 export async function getRepositoryAgentSessionTimeline(
@@ -1643,14 +1555,12 @@ export async function assignIssueAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return normalizeTriggerRepositoryAgentResponse(
-    await requestJson<TriggerRepositoryAgentResponse>(
-      `/api/repos/${owner}/${repo}/issues/${number}/assign-agent`,
-      {
-        method: "POST",
-        bodyJson: input ?? {}
-      }
-    )
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/issues/${number}/assign-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
   );
 }
 
@@ -1660,14 +1570,12 @@ export async function resumeIssueAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return normalizeTriggerRepositoryAgentResponse(
-    await requestJson<TriggerRepositoryAgentResponse>(
-      `/api/repos/${owner}/${repo}/issues/${number}/resume-agent`,
-      {
-        method: "POST",
-        bodyJson: input ?? {}
-      }
-    )
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/issues/${number}/resume-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
   );
 }
 
@@ -1677,14 +1585,12 @@ export async function resumePullRequestAgent(
   number: number,
   input?: TriggerRepositoryAgentInput
 ): Promise<TriggerRepositoryAgentResponse> {
-  return normalizeTriggerRepositoryAgentResponse(
-    await requestJson<TriggerRepositoryAgentResponse>(
-      `/api/repos/${owner}/${repo}/pulls/${number}/resume-agent`,
-      {
-        method: "POST",
-        bodyJson: input ?? {}
-      }
-    )
+  return requestJson<TriggerRepositoryAgentResponse>(
+    `/api/repos/${owner}/${repo}/pulls/${number}/resume-agent`,
+    {
+      method: "POST",
+      bodyJson: input ?? {}
+    }
   );
 }
 

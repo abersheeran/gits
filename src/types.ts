@@ -85,8 +85,6 @@ export type ActionContainerInstanceType =
 
 export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type AgentSessionExecutionSourceType = "issue" | "pull_request";
-export type ActionRunStatus = AgentSessionStatus;
-export type ActionRunSourceType = AgentSessionExecutionSourceType;
 
 export type AgentSessionAttemptStatus =
   | "queued"
@@ -350,13 +348,9 @@ export type AgentSessionRecord = {
   id: string;
   repository_id: string;
   session_number: number;
-  run_number?: number;
   source_type: AgentSessionSourceType;
   source_number: number | null;
   source_comment_id: string | null;
-  trigger_source_type?: ActionRunSourceType | null;
-  trigger_source_number?: number | null;
-  trigger_source_comment_id?: string | null;
   origin: AgentSessionOrigin;
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
@@ -368,18 +362,12 @@ export type AgentSessionRecord = {
   workflow_id: string | null;
   workflow_name: string | null;
   parent_session_id: string | null;
-  linked_run_id?: string | null;
   created_by: string | null;
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
   active_attempt_id?: string | null;
   latest_attempt_id?: string | null;
-  triggered_by?: string | null;
-  triggered_by_username?: string | null;
-  logs: string;
-  has_full_logs?: boolean;
-  logs_url?: string | null;
   exit_code: number | null;
   container_instance: string | null;
   failure_reason?: AgentSessionAttemptFailureReason | null;
@@ -391,7 +379,11 @@ export type AgentSessionRecord = {
   updated_at: number;
 };
 
-export type ActionRunRecord = AgentSessionRecord;
+export type AgentSessionApiRecord = AgentSessionRecord & {
+  logs: string;
+  has_full_logs?: boolean;
+  logs_url?: string | null;
+};
 
 export type AgentSessionAttemptRecord = {
   id: string;
@@ -454,8 +446,6 @@ export type AgentSessionArtifactRecord = {
 export type AgentSessionLogsResponse = {
   logs: string;
 };
-
-export type ActionRunLogsResponse = AgentSessionLogsResponse;
 
 export type AgentSessionArtifactContentResponse = {
   artifact: AgentSessionArtifactRecord;

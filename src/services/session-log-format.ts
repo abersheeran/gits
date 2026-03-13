@@ -8,7 +8,7 @@ function formatTimestamp(value: number): string {
   return `${new Date(value).toISOString()} (${value})`;
 }
 
-export function buildActionRunLifecycleLines(
+export function buildSessionLifecycleLines(
   input: ActionRunLifecycleTimestamps,
   options?: { includeMissing?: boolean }
 ): string[] {

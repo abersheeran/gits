@@ -25,7 +25,7 @@
 - 前端是 React SPA，核心页面包括首页、Dashboard、仓库页、Issue、PR、Actions 和 Session detail。
 - 元数据存储在 D1。
 - Git 对象与引用存储在 `GIT_BUCKET` R2。
-- run/session 全量日志与全文 artifact 存储在 `ACTION_LOGS_BUCKET` R2；D1 只保留 excerpt 与元数据。
+- run/session 日志与 artifact 全部存储在 `ACTION_LOGS_BUCKET` R2；D1 只保留状态与元数据索引，不存日志内容。
 - 每个仓库由一个 `RepositoryObject` Durable Object 负责 hydrate、Git 协议处理、浏览缓存和 squash merge。
 - Agent 执行通过 Queue + Cloudflare Containers 调度，支持多种容器实例规格。
 
@@ -39,7 +39,7 @@
 | `Pull Request` | 代码交付中心，承载 compare、review、validation、merge |
 | `Review Thread` | 围绕 diff 行区间的反馈单元，可随 patch set 尝试重锚 |
 | `Action Workflow` | 自动化触发规则，决定何时创建 run |
-| `Action Run` | 一次实际执行任务，承载状态、日志 excerpt、配置与来源事件 |
+| `Action Run` | 一次实际执行任务，承载状态、配置与来源事件 |
 | `Agent Session` | 一次可追踪的 Agent 执行上下文，沉淀 timeline、artifact、usage、intervention |
 
 ## 4. 当前主工作流
@@ -70,7 +70,7 @@
 - Git 读写、代码浏览和 merge 统一通过 `RepositoryObject`，避免同仓库并发请求重复从 R2 hydrate。
 - 主流程状态不是独立工作流引擎；当前主要通过 `issues.task_status` 和 `taskFlow` 计算结果表达。
 - Session/run 不只是 observability 对象，也是 Issue/PR 状态回流的触发点。
-- 全量日志与全文 artifact 不留在 D1，D1 只保留摘要层和索引层数据。
+- 日志与 artifact 只存 R2，D1 只保留索引与状态元数据，不存任何日志内容。
 
 ## 6. 模块划分
 

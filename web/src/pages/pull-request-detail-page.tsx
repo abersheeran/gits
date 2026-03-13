@@ -28,7 +28,6 @@ import {
   createPullRequestReviewThread,
   createPullRequestReviewThreadComment,
   listLatestAgentSessionsBySource,
-  listLatestActionRunsBySource,
   createPullRequestReview,
   formatApiError,
   getPullRequest,
@@ -41,7 +40,6 @@ import {
   resolvePullRequestReviewThread,
   updatePullRequest,
   type ActionAgentType,
-  type ActionRunRecord,
   type AgentSessionDetail,
   type AgentSessionRecord,
   type AuthUser,
@@ -364,8 +362,9 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
   const [draft, setDraft] = useState(false);
-  const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
-  const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [latestPullRequestSession, setLatestPullRequestSession] = useState<AgentSessionRecord | null>(
+    null
+  );
   const [provenanceDetail, setProvenanceDetail] = useState<AgentSessionDetail | null>(null);
   const [taskFlow, setTaskFlow] = useState<PullRequestTaskFlowRecord | null>(null);
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
@@ -453,16 +452,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           baseRef: nextPullRequestDetail.pullRequest.base_ref,
           headRef: nextPullRequestDetail.pullRequest.head_ref
         }).catch(() => null);
-        const [latestRunItems, latestSessionItems] = await Promise.all([
-          listLatestActionRunsBySource(owner, repo, {
-            sourceType: "pull_request",
-            numbers: [number]
-          }),
-          listLatestAgentSessionsBySource(owner, repo, {
-            sourceType: "pull_request",
-            numbers: [number]
-          })
-        ]);
+        const latestSessionItems = await listLatestAgentSessionsBySource(owner, repo, {
+          sourceType: "pull_request",
+          numbers: [number]
+        });
         if (canceled) {
           return;
         }
@@ -476,8 +469,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         setReviewThreads(nextReviewThreads);
         setParticipants(nextParticipants);
         setComparison(nextComparison);
-        setLatestActionRun(latestRunItems[0]?.run ?? null);
-        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
+        setLatestPullRequestSession(latestSessionItems[0]?.session ?? null);
       } catch (loadError) {
         if (!canceled) {
           setError(formatApiError(loadError));
@@ -524,14 +516,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setReviewThreadSuggestedCode("");
   }
 
-  const hasPendingRun =
-    latestActionRun !== null &&
-    (latestActionRun.status === "queued" || latestActionRun.status === "running");
-  const hasPendingAgentSession = isPendingAgentSession(latestAgentSession);
+  const hasPendingPullRequestSession = isPendingAgentSession(latestPullRequestSession);
 
   useEffect(() => {
     if (
-      (!hasPendingRun && !hasPendingAgentSession) ||
+      !hasPendingPullRequestSession ||
       !owner ||
       !repo ||
       !Number.isInteger(number) ||
@@ -541,11 +530,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
     const timer = window.setInterval(async () => {
       try {
-        const [latestRunItems, latestSessionItems, nextProvenance] = await Promise.all([
-          listLatestActionRunsBySource(owner, repo, {
-            sourceType: "pull_request",
-            numbers: [number]
-          }),
+        const [latestSessionItems, nextProvenance] = await Promise.all([
           listLatestAgentSessionsBySource(owner, repo, {
             sourceType: "pull_request",
             numbers: [number]
@@ -553,8 +538,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           getPullRequestProvenance(owner, repo, number).catch(() => null)
         ]);
         await refreshPullRequestDetail();
-        setLatestActionRun(latestRunItems[0]?.run ?? null);
-        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
+        setLatestPullRequestSession(latestSessionItems[0]?.session ?? null);
         setProvenanceDetail(nextProvenance?.latestSession ?? null);
       } catch {
         // Ignore transient polling errors.
@@ -563,7 +547,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingAgentSession, hasPendingRun, number, owner, refreshPullRequestDetail, repo]);
+  }, [hasPendingPullRequestSession, number, owner, refreshPullRequestDetail, repo]);
 
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return (
@@ -863,8 +847,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
       });
       const nextProvenance = await getPullRequestProvenance(owner, repo, number).catch(() => null);
-      setLatestAgentSession(response.session);
-      setLatestActionRun(response.session);
+      setLatestPullRequestSession(response.session);
       if (nextProvenance) {
         setProvenanceDetail(nextProvenance.latestSession);
       }
@@ -881,10 +864,10 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const openReviewThreadCount = reviewThreads.filter((thread) => thread.status === "open").length;
   const resolvedReviewThreadCount = reviewThreads.length - openReviewThreadCount;
   const selectedRangeSupportsSuggestion = selectedReviewRange?.side === "head";
-  const latestValidationSession = provenanceDetail?.session ?? latestAgentSession;
+  const latestValidationSession = provenanceDetail?.session ?? latestPullRequestSession;
   const latestValidationState = latestValidationStatus(
     provenanceDetail,
-    latestAgentSession
+    latestPullRequestSession
   );
   const validationSummary = provenanceDetail?.validationSummary ?? null;
   const validationPassed = latestValidationState === "success";
@@ -947,12 +930,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <span>{pullRequest.author_username}</span>
           <span>opened {formatRelativeTime(pullRequest.created_at)}</span>
           <span>updated {formatDateTime(pullRequest.updated_at)}</span>
-          {latestActionRun ? (
+          {latestPullRequestSession ? (
             <Link
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-              to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}
+              to={`/repo/${owner}/${repo}/actions?sessionId=${latestPullRequestSession.id}`}
             >
-              <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
+              <ActionStatusBadge status={latestPullRequestSession.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
           ) : null}
         </div>
@@ -1729,32 +1712,32 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             description="查看最近交付、验证摘要并继续 Agent。"
           >
 
-            {provenanceDetail || latestAgentSession ? (
+            {provenanceDetail || latestPullRequestSession ? (
               <div className="panel-inset-compact space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge
-                    status={(provenanceDetail?.session ?? latestAgentSession)?.status ?? "queued"}
+                    status={(provenanceDetail?.session ?? latestPullRequestSession)?.status ?? "queued"}
                   />
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {(provenanceDetail?.session ?? latestAgentSession)?.agent_type}
+                    {(provenanceDetail?.session ?? latestPullRequestSession)?.agent_type}
                   </span>
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {(provenanceDetail?.session ?? latestAgentSession)?.origin}
+                    {(provenanceDetail?.session ?? latestPullRequestSession)?.origin}
                   </span>
                   <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>Session: {(provenanceDetail?.session ?? latestAgentSession)?.id ?? "-"}</p>
-                  <p>Branch: {(provenanceDetail?.session ?? latestAgentSession)?.branch_ref ?? "-"}</p>
+                  <p>Session: {(provenanceDetail?.session ?? latestPullRequestSession)?.id ?? "-"}</p>
+                  <p>Branch: {(provenanceDetail?.session ?? latestPullRequestSession)?.branch_ref ?? "-"}</p>
                   <p>Source: {provenanceDetail?.sourceContext.title ?? "Current pull request"}</p>
                   <p>
                     Triggered by:{" "}
-                    {(provenanceDetail?.session ?? latestAgentSession)?.created_by_username ?? "system"}
+                    {(provenanceDetail?.session ?? latestPullRequestSession)?.created_by_username ?? "system"}
                   </p>
                   <p>
                     Updated:{" "}
                     {formatDateTime(
-                      (provenanceDetail?.session ?? latestAgentSession)?.updated_at ?? null
+                      (provenanceDetail?.session ?? latestPullRequestSession)?.updated_at ?? null
                     )}
                   </p>
                 </div>
@@ -1791,7 +1774,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" asChild>
                     <Link
-                      to={`/repo/${owner}/${repo}/agent-sessions/${(provenanceDetail?.session ?? latestAgentSession)?.id}`}
+                      to={`/repo/${owner}/${repo}/agent-sessions/${(provenanceDetail?.session ?? latestPullRequestSession)?.id}`}
                     >
                       查看 session
                     </Link>

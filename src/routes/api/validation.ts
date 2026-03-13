@@ -9,7 +9,6 @@ import {
 } from "../../services/action-runner-prompt-tokens";
 import {
   containsActionsMention,
-  createLinkedAgentSessionForRun,
   scheduleActionRunExecution,
   triggerInteractiveAgentSession,
   triggerActionWorkflows,
@@ -50,9 +49,8 @@ import { WorkflowTaskFlowService } from "../../services/workflow-task-flow-servi
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
-  ActionRunRecord,
-  ActionRunSourceType,
   ActionWorkflowTrigger,
+  AgentSessionExecutionSourceType,
   AgentSessionRecord,
   AgentSessionSourceType,
   AppEnv,
@@ -482,15 +480,6 @@ export function assertActionContainerInstanceType(
   return value as ActionContainerInstanceType;
 }
 
-export function assertActionRunSourceType(value: string | undefined): ActionRunSourceType {
-  if (value === "issue" || value === "pull_request") {
-    return value;
-  }
-  throw new HTTPException(400, {
-    message: "Query 'sourceType' must be one of: issue, pull_request"
-  });
-}
-
 export function assertAgentSessionSourceType(value: string | undefined): AgentSessionSourceType {
   if (value === "issue" || value === "pull_request" || value === "manual") {
     return value;
@@ -500,7 +489,7 @@ export function assertAgentSessionSourceType(value: string | undefined): AgentSe
   });
 }
 
-export function parseActionRunSourceNumbers(value: string | undefined): number[] {
+export function parseAgentSessionSourceNumbers(value: string | undefined): number[] {
   if (!value) {
     throw new HTTPException(400, { message: "Query 'numbers' is required" });
   }
@@ -524,7 +513,7 @@ export function parseActionRunSourceNumbers(value: string | undefined): number[]
   return Array.from(new Set(numbers)).slice(0, 100).sort((a, b) => a - b);
 }
 
-export function parseActionRunCommentIds(value: string | undefined): string[] {
+export function parseAgentSessionCommentIds(value: string | undefined): string[] {
   if (!value) {
     throw new HTTPException(400, { message: "Query 'commentIds' is required" });
   }

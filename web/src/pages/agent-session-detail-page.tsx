@@ -35,7 +35,7 @@ function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
 }
 
 function canCancelAgentSession(session: AgentSessionRecord | null): boolean {
-  return session?.status === "queued";
+  return session?.status === "queued" || session?.status === "running";
 }
 
 function formatDuration(startedAt: number | null, completedAt: number | null): string {
@@ -296,12 +296,12 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
             variant="outline"
             pending={pendingAction === "cancel"}
             disabled={pendingAction !== null}
-            pendingText="Cancelling..."
+            pendingText="正在取消..."
             onClick={() => {
               void handleCancel();
             }}
           >
-            Cancel session
+            取消 session
           </PendingButton>
         ) : null}
       </div>

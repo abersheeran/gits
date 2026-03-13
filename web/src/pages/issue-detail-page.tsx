@@ -19,9 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   assignIssueAgent,
   type AgentSessionDetail,
+  listLatestAgentSessionsByCommentIds,
   listLatestAgentSessionsBySource,
-  listLatestActionRunsByCommentIds,
-  listLatestActionRunsBySource,
   listLatestPullRequestProvenance,
   createIssueComment,
   formatApiError,
@@ -32,7 +31,6 @@ import {
   resumeIssueAgent,
   updateIssue,
   type ActionAgentType,
-  type ActionRunRecord,
   type AgentSessionRecord,
   type AuthUser,
   type IssueCommentRecord,
@@ -106,14 +104,15 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [comments, setComments] = useState<IssueCommentRecord[]>([]);
   const [participants, setParticipants] = useState<RepositoryUserSummary[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
-  const [latestActionRun, setLatestActionRun] = useState<ActionRunRecord | null>(null);
-  const [latestAgentSession, setLatestAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [latestIssueSession, setLatestIssueSession] = useState<AgentSessionRecord | null>(null);
   const [latestPullRequestProvenanceByNumber, setLatestPullRequestProvenanceByNumber] =
     useState<Record<number, AgentSessionDetail | null>>({});
   const [selectedAgentType, setSelectedAgentType] = useState<ActionAgentType>("codex");
   const [agentInstruction, setAgentInstruction] = useState("");
   const [agentSubmitAction, setAgentSubmitAction] = useState<"assign" | "resume" | null>(null);
-  const [latestRunByCommentId, setLatestRunByCommentId] = useState<Record<string, ActionRunRecord>>({});
+  const [latestSessionByCommentId, setLatestSessionByCommentId] = useState<
+    Record<string, AgentSessionRecord>
+  >({});
   const [taskStatusDraft, setTaskStatusDraft] = useState<IssueTaskStatus>("open");
   const [acceptanceCriteriaDraft, setAcceptanceCriteriaDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -127,18 +126,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentEditorExpanded, setCommentEditorExpanded] = useState(false);
 
-  const refreshLatestRunStatus = useCallback(async (): Promise<void> => {
-    if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
-      return;
-    }
-    const latestRunItems = await listLatestActionRunsBySource(owner, repo, {
-      sourceType: "issue",
-      numbers: [number]
-    });
-    setLatestActionRun(latestRunItems[0]?.run ?? null);
-  }, [number, owner, repo]);
-
-  const refreshLatestAgentSessionStatus = useCallback(async (): Promise<void> => {
+  const refreshLatestIssueSession = useCallback(async (): Promise<void> => {
     if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
       return;
     }
@@ -146,7 +134,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       sourceType: "issue",
       numbers: [number]
     });
-    setLatestAgentSession(latestSessionItems[0]?.session ?? null);
+    setLatestIssueSession(latestSessionItems[0]?.session ?? null);
   }, [number, owner, repo]);
 
   const refreshIssueDetail = useCallback(async (): Promise<IssueDetailResponse | null> => {
@@ -160,26 +148,26 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     return nextIssueDetail;
   }, [number, owner, repo]);
 
-  const refreshCommentRunStatuses = useCallback(async (
+  const refreshCommentSessionStatuses = useCallback(async (
     nextCommentsInput?: IssueCommentRecord[]
   ): Promise<void> => {
     const nextComments = nextCommentsInput ?? comments;
     if (!owner || !repo || nextComments.length === 0) {
-      setLatestRunByCommentId({});
+      setLatestSessionByCommentId({});
       return;
     }
-    const latestRunItems = await listLatestActionRunsByCommentIds(
+    const latestSessionItems = await listLatestAgentSessionsByCommentIds(
       owner,
       repo,
       nextComments.map((comment) => comment.id)
     );
-    const nextRunByCommentId: Record<string, ActionRunRecord> = {};
-    for (const item of latestRunItems) {
-      if (item.run) {
-        nextRunByCommentId[item.commentId] = item.run;
+    const nextSessionByCommentId: Record<string, AgentSessionRecord> = {};
+    for (const item of latestSessionItems) {
+      if (item.session) {
+        nextSessionByCommentId[item.commentId] = item.session;
       }
     }
-    setLatestRunByCommentId(nextRunByCommentId);
+    setLatestSessionByCommentId(nextSessionByCommentId);
   }, [comments, owner, repo]);
 
   const refreshLinkedPullRequestProvenance = useCallback(async (
@@ -217,26 +205,21 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           nextDetail,
           nextIssueDetail,
           nextComments,
-          latestRunItems,
           latestSessionItems,
           nextParticipants
         ] = await Promise.all([
           getRepositoryDetail(owner, repo),
           getIssue(owner, repo, number),
           listIssueComments(owner, repo, number),
-          listLatestActionRunsBySource(owner, repo, {
-            sourceType: "issue",
-            numbers: [number]
-          }),
           listLatestAgentSessionsBySource(owner, repo, {
             sourceType: "issue",
             numbers: [number]
           }),
           user ? listRepositoryParticipants(owner, repo) : Promise.resolve([])
         ]);
-        const latestCommentRunItemsPromise =
+        const latestCommentSessionItemsPromise =
           nextComments.length > 0
-            ? listLatestActionRunsByCommentIds(
+            ? listLatestAgentSessionsByCommentIds(
                 owner,
                 repo,
                 nextComments.map((comment) => comment.id)
@@ -245,8 +228,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         const linkedPullRequestNumbers = nextIssueDetail.linkedPullRequests.map(
           (pullRequest) => pullRequest.number
         );
-        const [latestCommentRunItems, latestPullRequestProvenanceItems] = await Promise.all([
-          latestCommentRunItemsPromise,
+        const [latestCommentSessionItems, latestPullRequestProvenanceItems] = await Promise.all([
+          latestCommentSessionItemsPromise,
           linkedPullRequestNumbers.length > 0
             ? listLatestPullRequestProvenance(owner, repo, linkedPullRequestNumbers)
             : Promise.resolve([])
@@ -254,11 +237,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         if (canceled) {
           return;
         }
-        const nextRunByCommentId: Record<string, ActionRunRecord> = {};
+        const nextSessionByCommentId: Record<string, AgentSessionRecord> = {};
         const nextPullRequestProvenanceByNumber: Record<number, AgentSessionDetail | null> = {};
-        for (const item of latestCommentRunItems) {
-          if (item.run) {
-            nextRunByCommentId[item.commentId] = item.run;
+        for (const item of latestCommentSessionItems) {
+          if (item.session) {
+            nextSessionByCommentId[item.commentId] = item.session;
           }
         }
         for (const item of latestPullRequestProvenanceItems) {
@@ -272,9 +255,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         setTaskFlow(nextIssueDetail.taskFlow);
         setComments(nextComments);
         setParticipants(nextParticipants);
-        setLatestActionRun(latestRunItems[0]?.run ?? null);
-        setLatestAgentSession(latestSessionItems[0]?.session ?? null);
-        setLatestRunByCommentId(nextRunByCommentId);
+        setLatestIssueSession(latestSessionItems[0]?.session ?? null);
+        setLatestSessionByCommentId(nextSessionByCommentId);
         setLatestPullRequestProvenanceByNumber(nextPullRequestProvenanceByNumber);
       } catch (loadError) {
         if (!canceled) {
@@ -301,13 +283,10 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     setAcceptanceCriteriaDraft(issue.acceptance_criteria);
   }, [issue]);
 
-  const hasPendingRun =
-    latestActionRun !== null &&
-    (latestActionRun.status === "queued" || latestActionRun.status === "running");
-  const hasPendingAgentSession = isPendingAgentSession(latestAgentSession);
-  const hasPendingCommentRun = comments.some((comment) => {
-    const run = latestRunByCommentId[comment.id];
-    return run ? run.status === "queued" || run.status === "running" : false;
+  const hasPendingIssueSession = isPendingAgentSession(latestIssueSession);
+  const hasPendingCommentSession = comments.some((comment) => {
+    const session = latestSessionByCommentId[comment.id];
+    return session ? session.status === "queued" || session.status === "running" : false;
   });
   const hasPendingPullRequestValidation = linkedPullRequests.some((pullRequest) => {
     const status = latestValidationStatus(
@@ -321,9 +300,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
   useEffect(() => {
     if (
-      (!hasPendingRun &&
-        !hasPendingAgentSession &&
-        !hasPendingCommentRun &&
+      (!hasPendingIssueSession &&
+        !hasPendingCommentSession &&
         !hasPendingPullRequestValidation) ||
       !owner ||
       !repo ||
@@ -336,9 +314,8 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       try {
         const nextIssueDetail = await refreshIssueDetail();
         await Promise.all([
-          refreshLatestRunStatus(),
-          refreshLatestAgentSessionStatus(),
-          refreshCommentRunStatuses(),
+          refreshLatestIssueSession(),
+          refreshCommentSessionStatuses(),
           refreshLinkedPullRequestProvenance(nextIssueDetail?.linkedPullRequests)
         ]);
       } catch {
@@ -349,16 +326,14 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       window.clearInterval(timer);
     };
   }, [
-    hasPendingAgentSession,
-    hasPendingCommentRun,
+    hasPendingCommentSession,
+    hasPendingIssueSession,
     hasPendingPullRequestValidation,
-    hasPendingRun,
     number,
     owner,
-    refreshCommentRunStatuses,
+    refreshCommentSessionStatuses,
     refreshIssueDetail,
-    refreshLatestAgentSessionStatus,
-    refreshLatestRunStatus,
+    refreshLatestIssueSession,
     refreshLinkedPullRequestProvenance,
     repo
   ]);
@@ -496,7 +471,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
       );
       setCommentBody("");
       setCommentEditorExpanded(false);
-      await Promise.all([refreshLatestRunStatus(), refreshCommentRunStatuses(nextComments)]);
+      await Promise.all([refreshLatestIssueSession(), refreshCommentSessionStatuses(nextComments)]);
     } catch (submitError) {
       setActionError(formatApiError(submitError));
     } finally {
@@ -522,8 +497,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               agentType: selectedAgentType,
               ...(agentInstruction.trim() ? { prompt: agentInstruction.trim() } : {})
             });
-      setLatestAgentSession(response.session);
-      setLatestActionRun(response.session);
+      setLatestIssueSession(response.session);
       if (response.issue) {
         setIssue(response.issue);
       }
@@ -555,12 +529,12 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           <span>{issue.author_username}</span>
           <span>opened {formatRelativeTime(issue.created_at)}</span>
           <span>updated {formatDateTime(issue.updated_at)}</span>
-          {latestActionRun ? (
+          {latestIssueSession ? (
             <Link
               className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-              to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}
+              to={`/repo/${owner}/${repo}/actions?sessionId=${latestIssueSession.id}`}
             >
-              <ActionStatusBadge status={latestActionRun.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
+              <ActionStatusBadge status={latestIssueSession.status} withDot className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none" />
             </Link>
           ) : null}
         </div>
@@ -614,13 +588,13 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                       <span className="font-medium text-foreground">{comment.author_username}</span>
                       <span>commented {formatRelativeTime(comment.created_at)}</span>
                       <span>{formatDateTime(comment.created_at)}</span>
-                      {latestRunByCommentId[comment.id] ? (
+                      {latestSessionByCommentId[comment.id] ? (
                         <Link
                           className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                          to={`/repo/${owner}/${repo}/actions?sessionId=${latestRunByCommentId[comment.id].id}`}
+                          to={`/repo/${owner}/${repo}/actions?sessionId=${latestSessionByCommentId[comment.id].id}`}
                         >
                           <ActionStatusBadge
-                            status={latestRunByCommentId[comment.id].status}
+                            status={latestSessionByCommentId[comment.id].status}
                             withDot
                             className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
                           />
@@ -708,11 +682,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   </p>
                 ) : null}
               </div>
-              {latestActionRun ? (
+              {latestIssueSession ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <ActionStatusBadge status={latestActionRun.status} />
+                  <ActionStatusBadge status={latestIssueSession.status} />
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={`/repo/${owner}/${repo}/actions?sessionId=${latestActionRun.id}`}>
+                    <Link to={`/repo/${owner}/${repo}/actions?sessionId=${latestIssueSession.id}`}>
                       查看最新 issue session
                     </Link>
                   </Button>
@@ -907,26 +881,26 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             description="将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。"
           >
 
-            {latestAgentSession ? (
+            {latestIssueSession ? (
               <div className="panel-inset-compact space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <ActionStatusBadge status={latestAgentSession.status} />
+                  <ActionStatusBadge status={latestIssueSession.status} />
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {latestAgentSession.agent_type}
+                    {latestIssueSession.agent_type}
                   </span>
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
-                    {latestAgentSession.origin}
+                    {latestIssueSession.origin}
                   </span>
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>Session: {latestAgentSession.id}</p>
-                  <p>Branch: {latestAgentSession.branch_ref ?? "-"}</p>
-                  <p>Triggered by: {latestAgentSession.created_by_username ?? "system"}</p>
-                  <p>Updated: {formatDateTime(latestAgentSession.updated_at)}</p>
+                  <p>Session: {latestIssueSession.id}</p>
+                  <p>Branch: {latestIssueSession.branch_ref ?? "-"}</p>
+                  <p>Triggered by: {latestIssueSession.created_by_username ?? "system"}</p>
+                  <p>Updated: {formatDateTime(latestIssueSession.updated_at)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" asChild>
-                    <Link to={`/repo/${owner}/${repo}/agent-sessions/${latestAgentSession.id}`}>
+                    <Link to={`/repo/${owner}/${repo}/agent-sessions/${latestIssueSession.id}`}>
                       查看 session
                     </Link>
                   </Button>

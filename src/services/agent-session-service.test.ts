@@ -27,7 +27,6 @@ function buildSessionRow(overrides?: Partial<Record<string, unknown>>) {
     created_by_username: "alice",
     delegated_from_user_id: "user-1",
     delegated_from_username: "alice",
-    logs: "",
     exit_code: null,
     container_instance: null,
     active_attempt_id: "attempt-1",
@@ -266,10 +265,10 @@ describe("AgentSessionService", () => {
     expect(buildLogExcerpt(stdout)).not.toBe(stdout);
   });
 
-  it("reads attempt artifact content from storage and falls back to legacy session artifact paths", async () => {
+  it("reads attempt artifact content from attempt-scoped storage", async () => {
     const bucket = new MockR2Bucket();
     await bucket.put(
-      "repositories/repo-1/sessions/session-1/artifacts/stdout.log",
+      "repositories/repo-1/sessions/session-1/attempts/attempt-1/artifacts/stdout.log",
       "full stdout"
     );
 

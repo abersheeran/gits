@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
 import type { ActionContainerInstanceType, RepositoryActionsConfig } from "@/lib/api";
+import { ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS } from "@/lib/agent-session-utils";
 import { formatDateTime } from "@/lib/format";
-import { ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS } from "@/lib/action-run-utils";
 
 type RepositoryActionsConfigPanelProps = {
   loading: boolean;
@@ -123,7 +123,7 @@ export function RepositoryActionsConfigPanel({
               <div className="space-y-1">
                 <h3 className="text-body-sm font-medium text-text-primary">Instance type</h3>
                 <p className="text-body-sm text-text-secondary">
-                  为当前仓库选择执行规格。
+                  为当前仓库默认创建的 session 选择执行规格。
                 </p>
               </div>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,240px)_1fr]">

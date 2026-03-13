@@ -2,7 +2,7 @@
 
 ## 1. 模块定位
 
-Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可追踪执行”：
+Actions 模块把"任务触发"转换成"可追踪执行"。整个模块完全运行在 Cloudflare 生态内，不依赖任何外部计算、存储或队列服务。
 
 - workflow 决定何时创建 session。
 - session 决定何时调用 runtime。
@@ -10,23 +10,49 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 当前产品视角里，session 是核心对象，workflow 是触发机制。
 
-## 2. 当前架构
+当前实现已经去掉旧的 action run 兼容层：
 
-### 2.1 配置层
+- 前后端接口统一返回 `session`，不再额外包装 `run` 字段。
+- 日志流事件统一使用 `session` / `sessionId`。
+- Issue、PR、评论和 workflow dispatch 全部直接关联 agent session。
+- `action_workflows` 只保留 workflow 定义本身，不再保留旧的 `command` 列。
 
-- 全局 Actions 配置
-- 仓库级 Actions 配置
-- 全局与仓库配置页默认展示只读预览；只有显式进入编辑状态后才显示配置编辑器，并沿用页面内标准卡片圆角与间距
-- 仓库级实例规格选择：
-  - `lite`
-  - `basic`
-  - `standard-1`
-  - `standard-2`
-  - `standard-3`
-  - `standard-4`
+## 2. Cloudflare 基础设施映射
+
+整个 Actions 模块的每一层职责都由特定的 Cloudflare 原语承担，不允许引入 Cloudflare 生态外的计算或存储依赖。
+
+| Cloudflare 原语 | 模块内职责 | 绑定名 |
+| --- | --- | --- |
+| Worker | API 层、触发编排、执行协调、MCP endpoint | 主 Worker |
+| D1 | workflow 配置、session / attempt / event 元数据 | `DB` |
+| R2 | 全量日志、全文 artifact | `ACTION_LOGS_BUCKET` |
+| Queue | session 执行调度，解耦触发与执行 | `ACTIONS_QUEUE` |
+| Durable Object (Container) | agent runtime 容器，按实例规格绑定不同 DO namespace | `ACTIONS_RUNNER*` |
+| Durable Object | 仓库级 Git 状态（非 Actions 专属，但 Actions 依赖其 clone/checkout） | `REPOSITORY_OBJECTS` |
+| Observability | Worker 级日志与 trace | 全局启用 |
+
+### 2.1 基础设施约束
+
+- **无外部数据库**：所有结构化数据必须存 D1。D1 单行 1MB、单次查询 5ms 目标、无 JOIN 性能保障。
+- **日志只存 R2**：所有日志（包括 excerpt 和全量）只允许存 R2，不允许存 D1。D1 只保留 session/attempt 的状态与元数据索引，不保留任何日志内容。
+- **无外部对象存储**：日志和 artifact 全文存 R2。R2 无列表性能保障——因此必须在 D1 维护索引。
+- **无外部队列**：调度完全依赖 Cloudflare Queues。Queue 消息至少投递一次——因此 consumer 必须幂等（用 attempt claim 机制去重）。
+- **无外部容器编排**：agent runtime 由 Cloudflare Containers 承担，每个实例规格对应独立的 DO class 和 binding。不使用 Kubernetes、ECS 或任何外部容器服务。
+- **无长连接服务器**：Worker 不支持持久 TCP/WebSocket 服务端。日志流使用 SSE（Server-Sent Events）或轮询，不依赖 WebSocket 推送。
+- **无 SSH 协议**：Worker 无法监听 SSH。Git 接入和 agent clone 均走 HTTP。
+
+## 3. 架构分层
+
+### 3.1 配置层
+
+- 全局 Actions 配置（`global_settings`）
+- 仓库级 Actions 配置（`repository_actions_configs`）
+- 仓库级配置覆盖全局配置；缺省时回退全局值
+- 实例规格选择：`lite` / `basic` / `standard-1` / `standard-2` / `standard-3` / `standard-4`
+- 每个实例规格对应 `wrangler.jsonc` 中独立的 Container 定义和 DO binding
 - 支持注入 `codex` 和 `claude_code` 的配置文件内容
 
-### 2.2 触发层
+### 3.2 触发层
 
 用户可配置的 workflow trigger：
 
@@ -34,11 +60,15 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `pull_request_created`
 - `push`
 
-系统内部也会使用：
+系统内部 trigger：
 
 - `mention_actions`
 
-当前支持的 session 入口包括：
+补充约束：
+
+- `mention_actions` 只允许由系统内部创建，不出现在用户可配置的 workflow trigger 选择器中。
+
+Session 入口（均创建新 session，不附着旧 session）：
 
 - workflow 自动触发
 - `@actions` mention
@@ -48,133 +78,176 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - session rerun
 - workflow dispatch
 
-### 2.3 执行层
+### 3.3 调度层（Queue）
 
-- Queue 优先调度，无法入队时可直接执行
-- Cloudflare Containers 承担 agent runtime
-- actions container 的运行状态通过 Cloudflare Containers 生命周期钩子同步：
-  - `onStart` 将 session 推进到 `running`
-  - `onStop` / `onError` 会在 session 尚未完成时补写失败结果
-  - 不再依赖容器内状态服务对外暴露状态供平台轮询
-- 平台 Worker 直接暴露 HTTP MCP endpoint，供 actions runtime 与本地 agent 共用
-- 不同实例规格使用不同 DO 绑定
-- runtime 会：
-  - clone 仓库
+```
+触发 → 创建 session + 首个 queued attempt → enqueue 到 ACTIONS_QUEUE
+                                                    ↓
+                                          Queue consumer 拉取消息
+                                                    ↓
+                                          claim attempt（幂等去重）
+                                                    ↓
+                                          按 instance_type 选择 DO namespace
+                                                    ↓
+                                          调用 Container DO.fetch(/execute)
+```
+
+- 消息格式：`{ repositoryId, sessionId, attemptId, requestOrigin }`
+- consumer 以 batch 消费（`max_batch_size: 10`，`max_batch_timeout: 5s`）
+- 成功处理后 ack；异常时依赖 Queue 自动重投递
+- claim 机制保证同一 attempt 不被重复执行
+
+### 3.4 执行层（Containers）
+
+Container 是 Cloudflare Containers（基于 Durable Object 的容器原语），不是独立的容器编排系统。
+
+**Container 生命周期与 session 状态协同：**
+
+- Container `onStart` → attempt 推进到 `running`，session 推进到 `running`
+- Container `onStop` / `onError` → 若 attempt 尚未完成，补写失败结果
+- 不依赖容器内状态服务对外暴露状态供平台轮询
+
+**Container 内部（`containers/actions-runner/server.ts`）：**
+
+- HTTP 服务暴露 `/execute`、`/stop`、`/healthz`
+- `/execute` 接收 RunRequest 后：
+  - clone 仓库（HTTP Git，使用平台签发的临时 clone token）
   - checkout 指定 ref/sha
-  - 注入内部 token
-  - 注入 agent 配置文件
-  - 为 actions runtime 自动接入平台 MCP endpoint
-  - 运行 agent 命令
-  - 流式回传 stdout/stderr/result，并在静默执行阶段发送 keepalive，避免平台把长时间无输出误判为断流
+  - 写入 agent 配置文件（codex → `.codex/config.toml`，claude_code → `.claude/settings.json`）
+  - 注册平台 MCP server（`gits-platform`）
+  - 注入环境变量和 token
+  - spawn agent 进程
+  - 以 NDJSON 流式回传 stdout / stderr / result
+  - 静默阶段每 5 秒发送 keepalive，避免平台误判断流
+  - 输出缓冲区上限 256k chars/stream
+- 执行完成后 container 保持 10 分钟待命，然后释放
 
-### 2.4 记录层
+**实例规格与 DO namespace 映射：**
 
-- `agent_sessions` 记录 source、origin、branch、workflow、执行状态和日志 excerpt
-- `agent_session_attempts`、`agent_session_attempt_events`、`agent_session_attempt_artifacts` 用于沉淀执行过程
-- 全量日志和全文 artifact 存在 `ACTION_LOGS_BUCKET`，D1 只保留 excerpt
+| 实例规格 | DO class | binding |
+| --- | --- | --- |
+| `lite` | `ActionsContainer` | `ACTIONS_RUNNER` |
+| `basic` | `ActionsContainerBasic` | `ACTIONS_RUNNER_BASIC` |
+| `standard-1` | `ActionsContainerStandard1` | `ACTIONS_RUNNER_STANDARD_1` |
+| `standard-2` | `ActionsContainerStandard2` | `ACTIONS_RUNNER_STANDARD_2` |
+| `standard-3` | `ActionsContainerStandard3` | `ACTIONS_RUNNER_STANDARD_3` |
+| `standard-4` | `ActionsContainerStandard4` | `ACTIONS_RUNNER_STANDARD_4` |
 
-### 2.5 平台 MCP 能力
+Container DO 实例命名：`agent-session-{sessionId}-attempt-{attemptNumber}`
 
-- 平台直接提供 MCP tools：
-  - `gits_issue_reply`
-  - `gits_create_pull_request`
-- actions runtime 通过平台签发的临时 token 接入这些工具
-- 本地 agent 不再依赖 actions container 内嵌 MCP server，而是直接连接平台 MCP endpoint
-- 本地 agent 使用用户自己在账号下创建的 token 接入；平台不为本地 agent 代发临时 token
+### 3.5 记录层（D1 + R2）
 
-## 3. 当前已实现能力
+**D1 存储（元数据，不存日志）：**
 
-### 3.1 Session 执行模型
+| 表 | 职责 |
+| --- | --- |
+| `agent_sessions` | session 级状态、来源、分支、workflow、failure reason/stage（不含 `logs` 列） |
+| `agent_session_attempts` | attempt 级生命周期（queued → running → 终态）、实例规格、升配来源 |
+| `agent_session_attempt_events` | attempt 事件流（warning、retry_scheduled 等结构化事件，不存日志 chunk） |
+| `agent_session_attempt_artifacts` | attempt 级 artifact 索引（session_logs、stdout、stderr 的 R2 key，按 attempt + kind 唯一） |
 
-- session 状态：
-  - `queued`
-  - `running`
-  - `success`
-  - `failed`
-  - `cancelled`
-- session 的状态推进由平台与 Cloudflare container 生命周期协同完成，而不是由容器内 HTTP 状态接口回传
-- `session = 一次面向某个 Issue / PR / manual 入口的 Agent 任务轮次`
-- assign / resume / rerun / dispatch 都会创建新的 session，而不是附着到旧 run
-- boot 阶段的 container / Durable Object internal error 会归类为可重试的 attempt 失败；没有拿到 started 信号时不写入 `started_at`
-- Session detail 已支持：
-  - hero summary
-  - source / handoff
-  - validation
-  - execution logs
-  - timeline
-  - prompt（默认折叠）
-- Actions 页的筛选、日志浏览、rerun 与来自 Issue / PR 的跳转统一围绕 `sessionId`
-- Actions 页查看态改为 session-first workspace：左侧展示最近 session 导航，右侧收敛当前 session 的摘要、prompt、日志与 rerun
-- Actions 页长列表改为渐进展开，避免把 session、workflow 和日志内容一次性平铺在同一屏
+**R2 存储（所有日志与 artifact 内容）：**
 
-### 3.2 运行时输入
+- 所有日志（含摘要和全量）和 artifact 全文按 session/attempt 组织存入 `ACTION_LOGS_BUCKET`
+- 前端从 R2 拉取日志内容，D1 只提供索引和状态查询
 
-- runtime 可接收仓库 URL、ref、sha、Git 凭证、commit 身份
-- 可注入 codex / claude_code 配置文件
-- 会注入面向平台的环境变量和 token，用于回写 Issue / PR
+### 3.6 平台 MCP 层
 
-### 3.3 运行时输出
+平台 Worker 直接承载 MCP endpoint（`/api/mcp`），不在 container 镜像内打包独立 MCP server。
 
-- stdout / stderr / session logs excerpt
-- artifacts excerpt
-- attempt event stream
-- structured warning / result report
-- structured validation report
+**当前 MCP tools：**
 
-### 3.4 平台 MCP
+- `gits_issue_reply` — 回复 Issue 评论
+- `gits_create_pull_request` — 创建 PR（支持关联 closing issues）
 
-- 平台已能直接承载 MCP server，不再要求在 actions container 镜像内打包 `gits-platform-mcp`
-- actions runtime 会把平台 MCP endpoint 作为 HTTP MCP server 注入给 codex / claude_code
-- 本地 agent 也可直接连接同一个平台 MCP endpoint
-- 对 actions runtime：
-  - 继续使用平台临时 token
-  - 评论与建 PR 仍可按 actions 身份回写
-- 对本地 agent：
-  - 使用用户自建 token
-  - 不复用平台给 actions 生成的临时 token
+**接入方式：**
 
-### 3.5 摘要回流
+| 调用方 | 认证方式 | 说明 |
+| --- | --- | --- |
+| actions runtime（容器内 agent） | 平台签发的临时 token | 评论与建 PR 以 actions 身份回写 |
+| 本地 agent（用户机器） | 用户自建 token | 不复用平台临时 token |
 
-- Issue 与 PR 页面会直接消费最近 session 的摘要
-- validation summary 优先消费 structured validation report
-- 若缺失 structured report，则回退到日志中对 tests/build/lint 的命令识别
-- 当前支持：
-  - `skipped`
-  - `partial`
-  - scoped multi-step checks
-  - highlighted artifacts 优先级排序
+MCP server 在 container 内注册为 `gits-platform`，agent 通过 HTTP 调用平台 `/api/mcp`。
 
-### 3.6 主流程状态协调
+## 4. 执行模型
 
-- 若 session 来源是 `issue` 或 `pull_request`，完成后会自动触发 Issue task status 回流
-- 回流失败不会覆盖 session 原始结果，但会留下 warning 供排障
+### 4.1 Session 状态
 
-## 4. 当前关键流程
+`queued` → `running` → `success` / `failed` / `cancelled`
 
-### 4.1 自动 workflow
+Session 状态由平台 Worker 与 Container 生命周期协同推进，不由容器内 HTTP 状态接口回传。
 
-1. issue 创建、PR 创建或 push 发生。
-2. 系统匹配启用的 workflow。
-3. 创建 session，并立即创建首个 queued attempt。
-4. queue 驱动 orchestrator 拉起 runtime，按 attempt 执行并回写结果。
+- 用户主动 cancel 支持 `queued` 和 `running` session；对 `running` session，平台先锁定 session/attempt 为 `cancelled`，再向对应 container 发送 `/stop`。
 
-### 4.2 交互式继续
+### 4.2 Attempt 模型
 
-1. 用户从 Issue、PR 或 review thread 点击继续 Agent。
-2. 系统创建内部 workflow 对应的 session 和首个 attempt。
-3. prompt 会带入 Issue/PR/Review 上下文、验收标准和必要 token。
-4. 执行结果以 handoff 摘要形式回流到 Issue / PR。
+每个 session 可包含多个 attempt（当前最多 2 次）。
 
-### 4.3 观测与回看
+**Attempt 状态：**
 
-1. Actions 页以 session 为主视图，支持筛选、查看日志、rerun。
-2. Issue / PR 跳到 Actions 页时，前端使用 `sessionId` 锚定对应任务轮次，而不是单独的 run 入口。
-3. 未展开日志的 pending session 走后台轮询；已展开且仍在运行的 session 直接建立日志流，流关闭或报错后再回退后台 refresh。
-4. 当流式日志里的本地 session 状态与后台 refresh 拉回的服务端状态冲突时，前端必须优先以服务端终态收敛，避免容器已停止但界面仍停留在 `running`。
-5. Session detail 负责查看 attempts、attempt events、artifacts、timeline 与 prompt。
-6. 全文日志与全文 artifact 按需从对象存储读取，并按最新 attempt 组织。
+`queued` → `booting` → `running` → `success` / `failed` / `retryable_failed` / `cancelled`
 
-## 5. 当前接口
+**重试与升配：**
+
+- boot 阶段的 container / DO internal error 归类为可重试失败
+- 重试时可自动升配实例规格（`lite → basic → standard-1 → ...`）
+- `promoted_from_instance_type` 记录升配来源
+- 没有拿到 started 信号时不写入 `started_at`
+
+**失败分类：**
+
+| 维度 | 枚举值 |
+| --- | --- |
+| failure_reason | `boot_timeout`、`container_error`、`dockerd_bootstrap_failed`、`stream_disconnected`、`missing_result`、`workspace_preparation_failed`、`git_clone_failed`、`git_checkout_failed`、`agent_exit_non_zero`、`storage_write_failed`、`cancel_requested`、`unknown_infra_failure`、`unknown_task_failure` |
+| failure_stage | `boot`、`workspace`、`runtime`、`result`、`logs`、`side_effects`、`unknown` |
+
+### 4.3 日志流
+
+- 未展开日志的 pending session：后台轮询 session 状态（D1），需要日志时从 R2 拉取
+- 已展开且仍在运行的 session：建立 SSE 日志流，流关闭或报错后回退后台 refresh
+- 流式日志的本地状态与服务端状态冲突时，前端优先以服务端终态收敛
+
+## 5. 关键流程
+
+### 5.1 自动 workflow
+
+1. issue 创建、PR 创建或 push 发生
+2. Worker 匹配启用的 workflow（push 支持 branch/tag regex）
+3. 创建 session + 首个 queued attempt
+4. enqueue 到 `ACTIONS_QUEUE`
+5. Queue consumer claim attempt → 选择 DO namespace → 调用 Container `/execute`
+6. Container 流式回传 → Worker 写入 attempt events（D1）+ 定期 flush 日志到 R2
+7. 执行完成 → complete attempt → sync terminal session → 触发 source 状态回流
+
+### 5.2 交互式继续
+
+1. 用户从 Issue、PR 或 review thread 触发继续
+2. 创建内部 workflow 对应的 session 和首个 attempt
+3. prompt 带入 Issue/PR/Review 上下文、验收标准和 token
+4. 执行结果以 handoff 摘要回流到 Issue / PR
+
+### 5.3 观测与回看
+
+1. Actions 页以 session 为主视图，支持筛选、查看日志、rerun
+2. Issue / PR 跳到 Actions 页时用 `sessionId` 锚定
+3. Session detail 展示 attempts、attempt events、artifacts、timeline、prompt
+4. 全文日志和全文 artifact 按需从 R2 读取，按最新 attempt 组织
+
+当前仓库内的 Actions 页面已经重写为三段结构：
+
+- `sessions`：左侧列表 + 右侧 session workspace，用于查看日志、attempt、artifact、cancel、rerun。
+- `workflows`：workflow 列表 + sheet 编辑器，用于创建、编辑、启停、dispatch；仅暴露 `issue_created` / `pull_request_created` / `push`。
+- `runtime`：仓库级实例规格与 agent 配置覆盖。
+
+### 5.4 摘要回流
+
+- Issue 与 PR 页面消费最近 session 的摘要
+- validation summary 优先消费 structured validation report（从 attempt events 提取）
+- 缺失 structured report 时回退到日志中的 tests/build/lint 命令模式识别
+- 支持 `skipped`、`partial`、scoped multi-step checks、highlighted artifacts 优先级排序
+- 回流失败不覆盖 session 原始结果，留 warning 供排障
+
+## 6. 接口
 
 - `ALL /api/mcp`
 - `GET /api/settings/actions`
@@ -199,10 +272,10 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 
 其中：
 
-- `GET /api/repos/:owner/:repo/agent-sessions/:sessionId` 返回 `attempts`、`activeAttempt`、`latestAttempt`、`events`、`artifacts` 与 `validationSummary`。
-- `GET /api/repos/:owner/:repo/pulls/:number/provenance` 和 `GET /api/repos/:owner/:repo/pulls/provenance/latest` 复用同一套 session detail 结构。
+- `GET .../:sessionId` 返回 `attempts`、`activeAttempt`、`latestAttempt`、`events`、`artifacts`、`validationSummary`
+- `GET .../pulls/:number/provenance` 和 `GET .../pulls/provenance/latest` 复用同一套 session detail 结构
 
-## 6. 当前数据模型
+## 7. 数据模型
 
 - `global_settings`
 - `repository_actions_configs`
@@ -212,9 +285,10 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `agent_session_attempt_events`
 - `agent_session_attempt_artifacts`
 
-## 7. 关键代码文件
+## 8. 关键代码文件
 
 - `src/services/actions-service.ts`
+- `src/services/action-prompt-builders.ts`
 - `src/services/action-trigger-service.ts`
 - `src/services/action-runner-service.ts`
 - `src/services/action-run-queue-service.ts`
@@ -233,43 +307,45 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - `docs/MCP.zh-CN.md`
 - `web/src/pages/repository-actions-page.tsx`
 - `web/src/pages/agent-session-detail-page.tsx`
+- `web/src/components/repository/repository-actions-sessions-panel.tsx`
+- `web/src/components/repository/repository-actions-session-workspace.tsx`
+- `web/src/components/repository/repository-actions-workflows-panel.tsx`
+- `web/src/components/repository/repository-actions-workflow-sheet.tsx`
+- `web/src/lib/agent-session-utils.ts`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/ui/monaco-text-viewer.tsx`
 - `web/src/lib/monaco.ts`
 
-## 8. 当前边界与缺口
+## 9. 边界与缺口
 
-### 8.1 runtime 已切到 queue-first 的 attempt 模型
+### 9.1 Cloudflare 生态边界已明确
 
-- session 负责归档、筛选、跳转和 rerun 入口，不再直接兼做单次执行实体。
-- 真正执行、重试、升配、日志事件与 artifact 都以 attempt 为单位组织。
-- 不再保留 enqueue 失败后的本地 fallback，也不再保留 usage / intervention 旁路结构。
+- 计算：Worker + Containers，不引入外部 FaaS 或 VM。
+- 存储：D1 + R2，不引入外部数据库或对象存储。
+- 调度：Queues，不引入外部消息队列。
+- 容器：Cloudflare Containers（DO-based），不引入外部容器编排。
 
-### 8.2 workflow 仍是触发层，不应喧宾夺主
-
-- 当前 workflow 很重要，但产品主视角应继续围绕 session 和 handoff，而不是 workflow 配置本身。
-
-### 8.3 validation summary 仍需更面向评审
+### 9.2 validation summary 仍需更面向评审
 
 - 已有 structured report、fallback 规则、highlighted artifacts。
-- 但对“这次到底测了什么、该先看什么、为什么还需要人类判断”的表达仍可继续增强。
+- 对"这次到底测了什么、该先看什么、为什么还需要人类判断"的表达仍可继续增强。
 
-### 8.4 session 连续性表达仍不足
+### 9.3 session 连续性表达仍不足
 
 - 已有 issue assign/resume、PR resume、thread-focused resume、rerun、dispatch。
-- 但还缺更清晰的“这次 session 在延续哪条反馈、完成了什么”的压缩摘要。
+- 还缺更清晰的"这次 session 在延续哪条反馈、完成了什么"的压缩摘要。
 
-### 8.5 输入上下文仍偏弱
+### 9.4 输入上下文仍偏弱
 
 - runtime 已能执行。
-- 但 session 开始前仍缺代码搜索、相关文件候选、review thread 摘要和更稳定的上下文 bundle。
+- session 开始前仍缺代码搜索、相关文件候选、review thread 摘要和更稳定的上下文 bundle。
 
-### 8.6 本地 agent 接入仍缺更明确的产品化入口
+### 9.5 本地 agent 接入仍缺产品化入口
 
 - 平台 MCP endpoint 已可复用给本地 agent。
-- 但用户如何发现 endpoint、如何选择自己的 token、如何管理 token 粒度，仍需要后续产品入口承接。
+- 用户如何发现 endpoint、如何选择 token、如何管理 token 粒度，仍需后续产品入口承接。
 
-## 9. 下一步优先级
+## 10. 下一步优先级
 
 1. 继续沉淀更面向评审的 validation 和 artifact 摘要。
 2. 增强 session 的 resume / continue / handoff 语义，而不是增加更多分散入口。

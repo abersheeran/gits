@@ -64,7 +64,6 @@ type SessionRow = {
   created_by_username: string | null;
   delegated_from_user_id: string | null;
   delegated_from_username: string | null;
-  logs: string;
   exit_code: number | null;
   container_instance: string | null;
   active_attempt_id: string | null;
@@ -235,7 +234,6 @@ export class AgentSessionService {
       created_by_user.username AS created_by_username,
       s.delegated_from_user_id,
       delegated_user.username AS delegated_from_username,
-      s.logs,
       s.exit_code,
       s.container_instance,
       s.active_attempt_id,
@@ -310,18 +308,13 @@ export class AgentSessionService {
   }
 
   private mapSessionRow(row: SessionRow): AgentSessionRecord {
-    const triggerSourceType = row.source_type === "manual" ? null : row.source_type;
     return {
       id: row.id,
       repository_id: row.repository_id,
       session_number: row.session_number,
-      run_number: row.session_number,
       source_type: row.source_type,
       source_number: row.source_number,
       source_comment_id: row.source_comment_id,
-      trigger_source_type: triggerSourceType,
-      trigger_source_number: row.source_number,
-      trigger_source_comment_id: row.source_comment_id,
       origin: row.origin,
       status: row.status,
       agent_type: row.agent_type,
@@ -333,18 +326,12 @@ export class AgentSessionService {
       workflow_id: row.workflow_id,
       workflow_name: row.workflow_name,
       parent_session_id: row.parent_session_id,
-      linked_run_id: null,
       created_by: row.created_by,
       created_by_username: row.created_by_username,
       delegated_from_user_id: row.delegated_from_user_id,
       delegated_from_username: row.delegated_from_username,
-      triggered_by: row.created_by,
-      triggered_by_username: row.created_by_username,
       active_attempt_id: row.active_attempt_id,
       latest_attempt_id: row.latest_attempt_id,
-      logs: row.logs,
-      has_full_logs: true,
-      logs_url: null,
       exit_code: row.exit_code,
       container_instance: row.container_instance,
       failure_reason: row.failure_reason,
@@ -438,7 +425,6 @@ export class AgentSessionService {
           parent_session_id,
           created_by,
           delegated_from_user_id,
-          logs,
           exit_code,
           container_instance,
           active_attempt_id,
@@ -471,7 +457,6 @@ export class AgentSessionService {
         input.parentSessionId ?? null,
         input.createdBy ?? null,
         input.delegatedFromUserId ?? null,
-        "",
         null,
         null,
         attemptId,
@@ -996,33 +981,6 @@ export class AgentSessionService {
     return rows.results.map((row) => this.mapEventRow(row));
   }
 
-  async replaceSessionLogs(repositoryId: string, sessionId: string, logs: string): Promise<void> {
-    await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET logs = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ?`
-      )
-      .bind(logs, Date.now(), repositoryId, sessionId)
-      .run();
-  }
-
-  async updateRunningSessionLogs(
-    repositoryId: string,
-    sessionId: string,
-    logs: string
-  ): Promise<boolean> {
-    const result = await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET logs = ?, updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status = 'running'`
-      )
-      .bind(logs, Date.now(), repositoryId, sessionId)
-      .run();
-    return ((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
-  }
-
   async upsertAttemptArtifact(input: {
     attemptId: string;
     sessionId: string;
@@ -1140,13 +1098,7 @@ export class AgentSessionService {
       return null;
     }
     if (!attemptId) {
-      if (this.logStorage) {
-        const legacyLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
-        if (legacyLogs !== null) {
-          return legacyLogs;
-        }
-      }
-      return session.logs;
+      return "";
     }
     if (this.logStorage) {
       const fullLogs = await this.logStorage.readAttemptArtifactLogs(
@@ -1158,13 +1110,9 @@ export class AgentSessionService {
       if (fullLogs !== null) {
         return fullLogs;
       }
-      const legacyLogs = await this.logStorage.readSessionLogs(repositoryId, sessionId);
-      if (legacyLogs !== null) {
-        return legacyLogs;
-      }
     }
     const artifacts = await this.listArtifacts(repositoryId, sessionId);
-    return artifacts.find((artifact) => artifact.kind === "session_logs")?.content_text ?? session.logs;
+    return artifacts.find((artifact) => artifact.kind === "session_logs")?.content_text ?? "";
   }
 
   async readArtifactContent(
@@ -1186,14 +1134,6 @@ export class AgentSessionService {
       if (content !== null) {
         return { artifact, content };
       }
-      const legacyContent = await this.logStorage.readSessionArtifactLogs(
-        repositoryId,
-        sessionId,
-        artifact.kind
-      );
-      if (legacyContent !== null) {
-        return { artifact, content: legacyContent };
-      }
     }
     return { artifact, content: artifact.content_text };
   }
@@ -1204,7 +1144,6 @@ export class AgentSessionService {
     sessionStatus?: AgentSessionStatus;
     activeAttemptId?: string | null;
     latestAttemptId?: string | null;
-    logs?: string;
     exitCode?: number | null;
     containerInstance?: string | null;
     failureReason?: AgentSessionAttemptFailureReason | null;
@@ -1216,9 +1155,13 @@ export class AgentSessionService {
   }): Promise<void> {
     const updates: string[] = [];
     const bindings: unknown[] = [];
+    const whereClauses = ["repository_id = ?", "id = ?"];
     if (input.sessionStatus !== undefined) {
       updates.push("status = ?");
       bindings.push(input.sessionStatus);
+      if (input.sessionStatus !== "cancelled") {
+        whereClauses.push("status <> 'cancelled'");
+      }
     }
     if (input.activeAttemptId !== undefined) {
       updates.push("active_attempt_id = ?");
@@ -1227,10 +1170,6 @@ export class AgentSessionService {
     if (input.latestAttemptId !== undefined) {
       updates.push("latest_attempt_id = ?");
       bindings.push(input.latestAttemptId);
-    }
-    if (input.logs !== undefined) {
-      updates.push("logs = ?");
-      bindings.push(input.logs);
     }
     if (input.exitCode !== undefined) {
       updates.push("exit_code = ?");
@@ -1266,7 +1205,7 @@ export class AgentSessionService {
       .prepare(
         `UPDATE agent_sessions
          SET ${updates.join(", ")}
-         WHERE repository_id = ? AND id = ?`
+         WHERE ${whereClauses.join(" AND ")}`
       )
       .bind(...bindings, input.repositoryId, input.sessionId)
       .run();
@@ -1284,9 +1223,9 @@ export class AgentSessionService {
     failureReason?: AgentSessionAttemptFailureReason | null;
     failureStage?: AgentSessionAttemptFailureStage | null;
     completedAt?: number;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const completedAt = input.completedAt ?? Date.now();
-    await this.db
+    const result = await this.db
       .prepare(
         `UPDATE agent_session_attempts
          SET status = ?,
@@ -1295,7 +1234,8 @@ export class AgentSessionService {
              failure_stage = ?,
              completed_at = ?,
              updated_at = ?
-         WHERE repository_id = ? AND session_id = ? AND id = ?`
+         WHERE repository_id = ? AND session_id = ? AND id = ?
+           AND status IN ('queued', 'booting', 'running')`
       )
       .bind(
         input.status,
@@ -1309,6 +1249,10 @@ export class AgentSessionService {
         input.attemptId
       )
       .run();
+    const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+    if (changes === 0) {
+      return false;
+    }
 
     await this.appendAttemptEvents(input.repositoryId, input.sessionId, input.attemptId, [
       {
@@ -1331,6 +1275,7 @@ export class AgentSessionService {
         createdAt: completedAt
       }
     ]);
+    return true;
   }
 
   async listSteps(repositoryId: string, sessionId: string): Promise<AgentSessionStepRecord[]> {
@@ -1468,26 +1413,50 @@ export class AgentSessionService {
     });
   }
 
-  async cancelQueuedSession(input: {
+  async cancelActiveSession(input: {
     repositoryId: string;
     sessionId: string;
     cancelledBy?: string | null;
     completedAt?: number;
-  }): Promise<{ cancelled: boolean; completedAt: number }> {
+  }): Promise<{
+    cancelled: boolean;
+    completedAt: number;
+    containerInstance: string | null;
+    instanceType: ActionContainerInstanceType | null;
+    attemptStatus: AgentSessionAttemptStatus | null;
+  }> {
     const completedAt = input.completedAt ?? Date.now();
     const session = await this.findSessionById(input.repositoryId, input.sessionId);
     if (!session) {
-      return { cancelled: false, completedAt };
+      return {
+        cancelled: false,
+        completedAt,
+        containerInstance: null,
+        instanceType: null,
+        attemptStatus: null
+      };
     }
     const attemptId = session.active_attempt_id ?? session.latest_attempt_id;
     const attempt = attemptId
       ? await this.findAttemptById(input.repositoryId, attemptId)
       : (await this.listAttempts(input.repositoryId, input.sessionId))[0] ?? null;
-    if (!attempt || attempt.status !== "queued") {
-      return { cancelled: false, completedAt };
+    if (
+      !attempt ||
+      (attempt.status !== "queued" &&
+        attempt.status !== "booting" &&
+        attempt.status !== "running")
+    ) {
+      return {
+        cancelled: false,
+        completedAt,
+        containerInstance: attempt?.container_instance ?? session.container_instance ?? null,
+        instanceType: attempt?.instance_type ?? session.instance_type,
+        attemptStatus: attempt?.status ?? null
+      };
     }
 
-    await this.completeAttempt({
+    const attemptStatus = attempt.status;
+    const updated = await this.completeAttempt({
       repositoryId: input.repositoryId,
       sessionId: input.sessionId,
       attemptId: attempt.id,
@@ -1496,6 +1465,15 @@ export class AgentSessionService {
       failureStage: "unknown",
       completedAt
     });
+    if (!updated) {
+      return {
+        cancelled: false,
+        completedAt,
+        containerInstance: attempt.container_instance ?? session.container_instance ?? null,
+        instanceType: attempt.instance_type ?? session.instance_type,
+        attemptStatus
+      };
+    }
     await this.syncSessionForAttempt({
       repositoryId: input.repositoryId,
       sessionId: input.sessionId,
@@ -1518,13 +1496,22 @@ export class AgentSessionService {
         payload: {
           kind: "cancel_requested",
           createdBy: input.cancelledBy ?? null,
-          detail: "A user cancelled the queued session before it started."
+          detail:
+            attemptStatus === "queued"
+              ? "A user cancelled the queued session before it started."
+              : "A user cancelled the active session and asked the runner to stop."
         },
         createdAt: completedAt
       }
     ]);
 
-    return { cancelled: true, completedAt };
+    return {
+      cancelled: true,
+      completedAt,
+      containerInstance: attempt.container_instance ?? session.container_instance ?? null,
+      instanceType: attempt.instance_type ?? session.instance_type,
+      attemptStatus
+    };
   }
 
   async claimQueuedSession(
@@ -1573,55 +1560,6 @@ export class AgentSessionService {
       attemptId,
       containerInstance
     });
-  }
-
-  async completeSession(
-    repositoryId: string,
-    sessionId: string,
-    input: {
-      status: Extract<AgentSessionStatus, "success" | "failed" | "cancelled">;
-      logs: string;
-      exitCode?: number | null;
-    }
-  ): Promise<void> {
-    const completedAt = Date.now();
-    await this.syncSessionForAttempt({
-      repositoryId,
-      sessionId,
-      sessionStatus: input.status,
-      logs: input.logs,
-      exitCode: input.exitCode ?? null,
-      containerInstance: null,
-      completedAt,
-      activeAttemptId: null,
-      updatedAt: completedAt
-    });
-  }
-
-  async failPendingSessionIfStillPending(
-    repositoryId: string,
-    sessionId: string,
-    input: {
-      logs: string;
-      exitCode?: number | null;
-      completedAt?: number;
-    }
-  ): Promise<{ updated: boolean; completedAt: number }> {
-    const completedAt = input.completedAt ?? Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE agent_sessions
-         SET status = 'failed',
-             logs = ?,
-             exit_code = ?,
-             completed_at = ?,
-             updated_at = ?
-         WHERE repository_id = ? AND id = ? AND status IN ('queued', 'running')`
-      )
-      .bind(input.logs, input.exitCode ?? null, completedAt, completedAt, repositoryId, sessionId)
-      .run();
-    const updated = ((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
-    return { updated, completedAt };
   }
 
   async recordSessionObservability(input: {

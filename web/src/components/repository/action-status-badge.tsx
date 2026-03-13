@@ -1,14 +1,14 @@
 import { LoaderCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { ActionRunRecord } from "@/lib/api";
+import type { AgentSessionRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-function actionStatusDotClass(status: ActionRunRecord["status"]): string {
+function actionStatusDotClass(status: AgentSessionRecord["status"]): string {
   if (status === "success") {
     return "bg-action-primaryBg";
   }
   if (status === "failed" || status === "cancelled") {
-    return "bg-danger";
+    return "bg-danger-text";
   }
   if (status === "running") {
     return "bg-fill-secondary";
@@ -17,7 +17,7 @@ function actionStatusDotClass(status: ActionRunRecord["status"]): string {
 }
 
 function actionStatusBadgeVariant(
-  status: ActionRunRecord["status"]
+  status: AgentSessionRecord["status"]
 ): "default" | "secondary" | "destructive" | "outline" {
   if (status === "success") {
     return "default";
@@ -32,7 +32,7 @@ function actionStatusBadgeVariant(
 }
 
 type ActionStatusBadgeProps = {
-  status: ActionRunRecord["status"];
+  status: AgentSessionRecord["status"];
   withDot?: boolean;
   className?: string;
 };
