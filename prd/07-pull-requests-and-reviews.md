@@ -30,6 +30,7 @@ PR 是当前产品里的交付中心和评审中心。
 - ahead / behind
 - mergeability
 - 文件 diff
+- PR 详情页的 `Files changed` 以摘要卡进入右侧 Sheet，避免把大段 diff 与 reviews / handoff 直接平铺在主页面
 - `Files changed` 默认只显示改动行以及上下 5 行代码，允许用户按需展开更多上下文
 - `Files changed` 与 commit changes 左侧展示按目录组织的文件树，并标记新增 / 修改 / 删除文件
 - `Files changed` 中新增或删除的文本文件继续按文本 diff 展示，不会错误降级成 `Binary change`
@@ -63,6 +64,7 @@ PR 是当前产品里的交付中心和评审中心。
   - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview、suggested change 与提交动作
   - 一旦草稿正文或 suggested change 已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
   - 文件头展示该文件的 `open / resolved` thread 数量
+  - `Files changed` 也提供独立的右侧 Sheet 组件形态，选中 review range 时会把 thread composer 固定到右栏
 - 支持从单条 unresolved thread focused resume agent
 - 新 commit 后会给出锚点状态：
   - `current`
@@ -161,6 +163,7 @@ PR 页面已经直接消费 session 的验证信息：
 - `src/routes/api/pull-request-routes.test.ts`
 - `web/src/pages/pull-request-detail-page.tsx`
 - `web/src/components/repository/pull-request-inline-thread-composer.tsx`
+- `web/src/components/repository/pull-request-files-changed-sheet.tsx`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/repository-diff-view.tsx`
 - `web/src/components/repository/repository-change-diff-editor.tsx`

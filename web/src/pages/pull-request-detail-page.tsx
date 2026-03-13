@@ -4,15 +4,17 @@ import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
-import { PullRequestInlineThreadComposer } from "@/components/repository/pull-request-inline-thread-composer";
 import {
-  RepositoryDiffView,
+  PullRequestFilesChangedSheet,
+  type SelectedReviewRange,
+  type ReviewThreadPathSummary
+} from "@/components/repository/pull-request-files-changed-sheet";
+import {
   type RepositoryDiffLineDecoration,
   type RepositoryDiffLineTarget
 } from "@/components/repository/repository-diff-view";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
-import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { DetailSection } from "@/components/common/detail-section";
 import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -139,22 +141,6 @@ function taskFlowWaitingLabel(waitingOn: TaskFlowWaitingOn): string {
 function isPendingAgentSession(session: AgentSessionRecord | null): boolean {
   return session?.status === "queued" || session?.status === "running";
 }
-
-type SelectedReviewRange = {
-  path: string;
-  baseOid: string;
-  headOid: string;
-  hunkHeader: string;
-  side: PullRequestReviewThreadSide;
-  startLine: number;
-  endLine: number;
-  anchorLine: number;
-};
-
-type ReviewThreadPathSummary = {
-  open: number;
-  resolved: number;
-};
 
 function sortReviewThreads(threads: PullRequestReviewThreadRecord[]): PullRequestReviewThreadRecord[] {
   return [...threads].sort((left, right) => {
@@ -387,6 +373,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewEditorExpanded, setReviewEditorExpanded] = useState(false);
   const [selectedReviewRange, setSelectedReviewRange] = useState<SelectedReviewRange | null>(null);
+  const [filesChangedSheetOpen, setFilesChangedSheetOpen] = useState(false);
   const [reviewThreadBody, setReviewThreadBody] = useState("");
   const [reviewThreadSuggestedCode, setReviewThreadSuggestedCode] = useState("");
   const [reviewThreadSubmitting, setReviewThreadSubmitting] = useState(false);
@@ -1212,118 +1199,60 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           </DetailSection>
 
           {comparison ? (
-            <DetailSection
-              title="Files changed"
-              headerActions={
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline">{comparison.filesChanged} files</Badge>
-                  <Badge variant="outline">+{comparison.additions}</Badge>
-                  <Badge variant="outline">-{comparison.deletions}</Badge>
-                </div>
-              }
-              contentClassName="space-y-3"
-            >
-              {canReview ? (
-                <div className="panel-inset-compact">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-medium">Line comments</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Click a diff line number or code line to start a thread. Click another line on
-                        the same side and hunk to expand the range.
-                      </p>
-                      {selectedReviewRange ? (
-                        <>
-                          <p className="font-mono text-xs text-foreground">
-                            {formatSelectedReviewRange(selectedReviewRange)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Compare {shortOid(selectedReviewRange.baseOid)}..{shortOid(selectedReviewRange.headOid)} ·{" "}
-                            {selectedReviewRange.hunkHeader}
-                          </p>
-                        </>
-                      ) : null}
-                    </div>
-                    {selectedReviewRange ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={clearReviewThreadSelection}
-                      >
-                        Clear selection
-                      </Button>
-                    ) : null}
+            <>
+              <DetailSection
+                title="Files changed"
+                headerActions={
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">{comparison.filesChanged} files</Badge>
+                    <Badge variant="outline">+{comparison.additions}</Badge>
+                    <Badge variant="outline">-{comparison.deletions}</Badge>
                   </div>
-                </div>
-              ) : null}
-              <ChangesWorkspace
-                changes={comparison.changes}
-                getFileBadges={(change) =>
-                  renderReviewThreadSummaryBadges(
-                    reviewThreadSummaryByPath.get(change.path),
-                    true
-                  )
                 }
               >
-                {({ activePath, setActivePath, sectionIdForPath }) => (
-                  <RepositoryDiffView
-                    changes={comparison.changes}
-                    activePath={activePath}
-                    onChangeActivate={(change) => setActivePath(change.path)}
-                    sectionIdForPath={sectionIdForPath}
-                    onDiffLineClick={
-                      canReview
-                        ? (target) => {
-                            setActivePath(target.change.path);
-                            handleDiffLineSelection(target);
-                          }
-                        : undefined
-                    }
-                    isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
-                    lineDecorations={reviewThreadLineDecorations}
-                    renderChangeHeaderExtras={(change) =>
-                      renderReviewThreadSummaryBadges(reviewThreadSummaryByPath.get(change.path))
-                    }
-                    renderChangeTopPanel={(change) => {
-                      if (
-                        !canReview ||
-                        !selectedReviewRange ||
-                        selectedReviewRange.path !== change.path
-                      ) {
-                        return null;
-                      }
-
-                      return (
-                        <PullRequestInlineThreadComposer
-                          selectedLabel={formatSelectedReviewRange(selectedReviewRange)}
-                          compareLabel={`Compare ${shortOid(selectedReviewRange.baseOid)}..${shortOid(selectedReviewRange.headOid)}`}
-                          hunkHeader={selectedReviewRange.hunkHeader}
-                          side={selectedReviewRange.side}
-                          lineCount={countSelectedReviewRangeLines(selectedReviewRange)}
-                          supportsSuggestion={selectedRangeSupportsSuggestion}
-                          body={reviewThreadBody}
-                          onBodyChange={setReviewThreadBody}
-                          suggestedCode={reviewThreadSuggestedCode}
-                          onSuggestedCodeChange={setReviewThreadSuggestedCode}
-                          onClearSelection={clearReviewThreadSelection}
-                          onDiscardDraft={discardReviewThreadDraft}
-                          onSubmit={() => {
-                            void submitReviewThread();
-                          }}
-                          submitting={reviewThreadSubmitting}
-                          disabled={
-                            reviewThreadSubmitting ||
-                            pullRequest.state !== "open" ||
-                            !selectedReviewRange
-                          }
-                        />
-                      );
-                    }}
-                  />
-                )}
-              </ChangesWorkspace>
-            </DetailSection>
+                <Button
+                  variant="outline"
+                  onClick={() => setFilesChangedSheetOpen(true)}
+                >
+                  View files changed
+                </Button>
+              </DetailSection>
+              <PullRequestFilesChangedSheet
+                open={filesChangedSheetOpen}
+                onOpenChange={setFilesChangedSheetOpen}
+                comparison={comparison}
+                canReview={canReview}
+                selectedReviewRange={selectedReviewRange}
+                onDiffLineClick={canReview ? (target) => handleDiffLineSelection(target) : undefined}
+                isDiffLineSelected={selectedReviewRange ? isSelectedDiffLine : undefined}
+                lineDecorations={reviewThreadLineDecorations}
+                reviewThreadBody={reviewThreadBody}
+                onReviewThreadBodyChange={setReviewThreadBody}
+                reviewThreadSuggestedCode={reviewThreadSuggestedCode}
+                onReviewThreadSuggestedCodeChange={setReviewThreadSuggestedCode}
+                onClearSelection={clearReviewThreadSelection}
+                onDiscardDraft={discardReviewThreadDraft}
+                onSubmitReviewThread={() => {
+                  void submitReviewThread();
+                }}
+                reviewThreadSubmitting={reviewThreadSubmitting}
+                reviewThreadDisabled={
+                  reviewThreadSubmitting || pullRequest.state !== "open" || !selectedReviewRange
+                }
+                selectedRangeSupportsSuggestion={selectedRangeSupportsSuggestion}
+                formatSelectedRange={formatSelectedReviewRange}
+                formatCompareLabel={(range) =>
+                  `Compare ${shortOid(range.baseOid)}..${shortOid(range.headOid)}`
+                }
+                countSelectedLines={countSelectedReviewRangeLines}
+                getFileBadges={(change) =>
+                  renderReviewThreadSummaryBadges(reviewThreadSummaryByPath.get(change.path), true)
+                }
+                renderChangeHeaderExtras={(change) =>
+                  renderReviewThreadSummaryBadges(reviewThreadSummaryByPath.get(change.path))
+                }
+              />
+            </>
           ) : null}
 
           <DetailSection title="Reviews" contentClassName="space-y-3">
