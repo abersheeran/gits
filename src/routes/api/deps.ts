@@ -63,7 +63,5 @@ export type {
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,
   PullRequestState,
-  ReactionContent,
-  ReactionSubjectType,
   RepositoryRecord
 } from "../../types";

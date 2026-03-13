@@ -196,7 +196,6 @@ describe("API pull request routes", () => {
         acceptance_criteria: "- login succeeds",
         comment_count: 0,
         assignees: [],
-        reactions: [],
         created_at: now - 5_000,
         updated_at: now - 1_000,
         closed_at: null

@@ -60,8 +60,6 @@ import type {
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,
   PullRequestState,
-  ReactionContent,
-  ReactionSubjectType,
   RepositoryRecord
 } from "../../types";
 
@@ -357,36 +355,6 @@ export async function assertAssignableUserIds(args: {
     }
   }
   return args.userIds;
-}
-
-export async function assertReactionSubjectExists(args: {
-  db: D1Database;
-  repositoryId: string;
-  subjectType: ReactionSubjectType;
-  subjectId: string;
-}): Promise<void> {
-  let tableName: "issues" | "issue_comments" | "pull_requests" | "pull_request_reviews";
-  switch (args.subjectType) {
-    case "issue":
-      tableName = "issues";
-      break;
-    case "issue_comment":
-      tableName = "issue_comments";
-      break;
-    case "pull_request":
-      tableName = "pull_requests";
-      break;
-    case "pull_request_review":
-      tableName = "pull_request_reviews";
-      break;
-  }
-  const row = await args.db
-    .prepare(`SELECT id FROM ${tableName} WHERE repository_id = ? AND id = ? LIMIT 1`)
-    .bind(args.repositoryId, args.subjectId)
-    .first<{ id: string }>();
-  if (!row) {
-    throw new HTTPException(404, { message: "Reaction subject not found" });
-  }
 }
 
 export const TERMINAL_ACTION_RUN_STATUSES = new Set(["success", "failed", "cancelled"]);

@@ -181,7 +181,6 @@ describe("API issue routes", () => {
       acceptance_criteria: "- login succeeds\n- error state is visible",
       comment_count: 0,
       assignees: [],
-      reactions: [],
       created_at: now,
         updated_at: now,
         closed_at: null
@@ -860,7 +859,6 @@ describe("API issue routes", () => {
       acceptance_criteria: "- bug fixed",
       comment_count: 0,
       assignees: [],
-      reactions: [],
       created_at: Date.now(),
       updated_at: Date.now(),
       closed_at: null
@@ -1026,7 +1024,6 @@ describe("API issue routes", () => {
         acceptance_criteria: "",
         comment_count: 0,
         assignees: [],
-        reactions: [],
         created_at: Date.now(),
         updated_at: Date.now(),
         closed_at: null

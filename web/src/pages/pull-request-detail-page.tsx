@@ -5,7 +5,6 @@ import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { PullRequestInlineThreadComposer } from "@/components/repository/pull-request-inline-thread-composer";
-import { ReactionStrip } from "@/components/repository/reaction-strip";
 import {
   RepositoryDiffView,
   type RepositoryDiffLineDecoration,
@@ -25,7 +24,6 @@ import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { PendingButton } from "@/components/ui/pending-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  addReaction,
   compareRepositoryRefs,
   createPullRequestReviewThread,
   createPullRequestReviewThreadComment,
@@ -39,7 +37,6 @@ import {
   listRepositoryParticipants,
   listPullRequestReviews,
   listPullRequestReviewThreads,
-  removeReaction,
   resumePullRequestAgent,
   resolvePullRequestReviewThread,
   updatePullRequest,
@@ -57,7 +54,6 @@ import {
   type PullRequestReviewThreadSide,
   type PullRequestRecord,
   type PullRequestTaskFlowRecord,
-  type ReactionContent,
   type RepositoryCompareResponse,
   type RepositoryDetailResponse,
   type RepositoryUserSummary,
@@ -387,7 +383,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [updating, setUpdating] = useState(false);
   const [updateIntent, setUpdateIntent] = useState<"open" | "closed" | "merged" | null>(null);
   const [metadataSaving, setMetadataSaving] = useState(false);
-  const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [reviewDecision, setReviewDecision] = useState<PullRequestReviewDecision>("comment");
   const [reviewBody, setReviewBody] = useState("");
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -599,7 +594,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canReview = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
-  const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const currentTaskFlow: PullRequestTaskFlowRecord = taskFlow;
   const reviewThreadLineDecorations = buildReviewThreadLineDecorations(reviewThreads);
@@ -854,66 +848,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
   }
 
-  async function togglePullRequestReaction(content: ReactionContent, viewerReacted: boolean) {
-    if (!pullRequest || !canReact) {
-      return;
-    }
-    const reactionKey = `pull:${pullRequest.id}`;
-    setReactionPendingKey(reactionKey);
-    setError(null);
-    try {
-      const reactions = viewerReacted
-        ? await removeReaction(owner, repo, {
-            subjectType: "pull_request",
-            subjectId: pullRequest.id,
-            content
-          })
-        : await addReaction(owner, repo, {
-            subjectType: "pull_request",
-            subjectId: pullRequest.id,
-            content
-          });
-      setPullRequest((previous) => (previous ? { ...previous, reactions } : previous));
-    } catch (error) {
-      setError(formatApiError(error));
-    } finally {
-      setReactionPendingKey(null);
-    }
-  }
-
-  async function toggleReviewReaction(
-    reviewId: string,
-    content: ReactionContent,
-    viewerReacted: boolean
-  ) {
-    if (!canReact) {
-      return;
-    }
-    const reactionKey = `review:${reviewId}`;
-    setReactionPendingKey(reactionKey);
-    setError(null);
-    try {
-      const reactions = viewerReacted
-        ? await removeReaction(owner, repo, {
-            subjectType: "pull_request_review",
-            subjectId: reviewId,
-            content
-          })
-        : await addReaction(owner, repo, {
-            subjectType: "pull_request_review",
-            subjectId: reviewId,
-            content
-          });
-      setReviews((previous) =>
-        previous.map((review) => (review.id === reviewId ? { ...review, reactions } : review))
-      );
-    } catch (error) {
-      setError(formatApiError(error));
-    } finally {
-      setReactionPendingKey(null);
-    }
-  }
-
   async function handleResumeAgent(threadId?: string) {
     if (!canRunAgents || !pullRequest || pullRequest.state !== "open" || agentSubmitting) {
       return;
@@ -1097,17 +1031,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         <div className="space-y-4">
           <DetailSection contentClassName="space-y-3">
             <MarkdownBody content={pullRequest.body} emptyText="(no description)" />
-            <ReactionStrip
-              reactions={pullRequest.reactions}
-              disabled={reactionPendingKey === `pull:${pullRequest.id}`}
-              onToggle={
-                canReact
-                  ? (content, viewerReacted) => {
-                      void togglePullRequestReaction(content, viewerReacted);
-                    }
-                  : undefined
-              }
-            />
           </DetailSection>
 
           <DetailSection
@@ -1445,19 +1368,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     </div>
                     <div className="mt-2">
                       <MarkdownBody content={review.body} emptyText="(no comment)" />
-                    </div>
-                    <div className="mt-3">
-                      <ReactionStrip
-                        reactions={review.reactions}
-                        disabled={reactionPendingKey === `review:${review.id}`}
-                        onToggle={
-                          canReact
-                            ? (content, viewerReacted) => {
-                                void toggleReviewReaction(review.id, content, viewerReacted);
-                              }
-                            : undefined
-                        }
-                      />
                     </div>
                   </li>
                 ))}

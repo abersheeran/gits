@@ -37,7 +37,6 @@ function buildIssue(overrides?: Partial<IssueRecord>): IssueRecord {
     acceptance_criteria: "",
     comment_count: 0,
     assignees: [],
-    reactions: [],
     created_at: 1,
     updated_at: 1,
     closed_at: null,

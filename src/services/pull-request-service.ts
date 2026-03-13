@@ -133,13 +133,11 @@ export class PullRequestService {
 
   private async hydratePullRequests(
     repositoryId: string,
-    rows: BasePullRequestRow[],
-    viewerId?: string
+    rows: BasePullRequestRow[]
   ): Promise<PullRequestRecord[]> {
     const metadata = await this.metadataService.listPullRequestMetadata({
       repositoryId,
-      pullRequestIds: rows.map((row) => row.id),
-      ...(viewerId ? { viewerId } : {})
+      pullRequestIds: rows.map((row) => row.id)
     });
 
     return rows.map((row) => ({
@@ -158,7 +156,6 @@ export class PullRequestService {
       head_oid: row.head_oid,
       assignees: metadata.assigneesByPullRequestId[row.id] ?? [],
       requested_reviewers: metadata.requestedReviewersByPullRequestId[row.id] ?? [],
-      reactions: metadata.reactionsByPullRequestId[row.id] ?? [],
       merge_commit_oid: row.merge_commit_oid,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -168,15 +165,8 @@ export class PullRequestService {
   }
 
   private async hydratePullRequestReviews(
-    repositoryId: string,
-    rows: BasePullRequestReviewRow[],
-    viewerId?: string
+    rows: BasePullRequestReviewRow[]
   ): Promise<PullRequestReviewRecord[]> {
-    const reactionsByReviewId = await this.metadataService.listPullRequestReviewReactions(
-      repositoryId,
-      rows.map((row) => row.id),
-      viewerId
-    );
     return rows.map((row) => ({
       id: row.id,
       repository_id: row.repository_id,
@@ -186,7 +176,6 @@ export class PullRequestService {
       reviewer_username: row.reviewer_username,
       decision: row.decision,
       body: row.body,
-      reactions: reactionsByReviewId[row.id] ?? [],
       created_at: row.created_at
     }));
   }
@@ -393,7 +382,7 @@ export class PullRequestService {
             .bind(repositoryId, state, limit, offset)
             .all<BasePullRequestRow>();
 
-    const items = await this.hydratePullRequests(repositoryId, rows.results, viewerId);
+    const items = await this.hydratePullRequests(repositoryId, rows.results);
     const total = Number(countRow?.count ?? 0);
     return {
       items,
@@ -440,7 +429,7 @@ export class PullRequestService {
     if (!row) {
       return null;
     }
-    const [pullRequest] = await this.hydratePullRequests(repositoryId, [row], viewerId);
+    const [pullRequest] = await this.hydratePullRequests(repositoryId, [row]);
     return pullRequest ?? null;
   }
 
@@ -635,7 +624,7 @@ export class PullRequestService {
       .bind(repositoryId, pullRequestNumber)
       .all<BasePullRequestReviewRow>();
 
-    return this.hydratePullRequestReviews(repositoryId, rows.results, viewerId);
+    return this.hydratePullRequestReviews(rows.results);
   }
 
   async summarizePullRequestReviews(repositoryId: string, pullRequestNumber: number): Promise<{
@@ -746,7 +735,7 @@ export class PullRequestService {
     if (!row) {
       throw new Error("Created pull request review not found");
     }
-    const [created] = await this.hydratePullRequestReviews(input.repositoryId, [row]);
+    const [created] = await this.hydratePullRequestReviews([row]);
     if (!created) {
       throw new Error("Created pull request review not found");
     }

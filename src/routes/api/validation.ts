@@ -64,8 +64,6 @@ import type {
   PullRequestReviewThreadRecord,
   PullRequestReviewThreadSide,
   PullRequestState,
-  ReactionContent,
-  ReactionSubjectType,
   RepositoryRecord
 } from "../../types";
 
@@ -303,42 +301,6 @@ export function assertOptionalHexColor(value: unknown, field: string): string | 
   }
   const normalized = value.trim();
   return normalized.startsWith("#") ? normalized.toLowerCase() : `#${normalized.toLowerCase()}`;
-}
-
-export function assertReactionContent(value: unknown): ReactionContent {
-  const content = assertString(value, "content");
-  if (
-    content !== "+1" &&
-    content !== "-1" &&
-    content !== "laugh" &&
-    content !== "hooray" &&
-    content !== "confused" &&
-    content !== "heart" &&
-    content !== "rocket" &&
-    content !== "eyes"
-  ) {
-    throw new HTTPException(400, {
-      message:
-        "Field 'content' must be one of: +1, -1, laugh, hooray, confused, heart, rocket, eyes"
-    });
-  }
-  return content;
-}
-
-export function assertReactionSubjectType(value: unknown): ReactionSubjectType {
-  const subjectType = assertString(value, "subjectType");
-  if (
-    subjectType !== "issue" &&
-    subjectType !== "issue_comment" &&
-    subjectType !== "pull_request" &&
-    subjectType !== "pull_request_review"
-  ) {
-    throw new HTTPException(400, {
-      message:
-        "Field 'subjectType' must be one of: issue, issue_comment, pull_request, pull_request_review"
-    });
-  }
-  return subjectType;
 }
 
 export function assertUsername(value: string): void {

@@ -5,7 +5,6 @@ import { IssueAcceptanceCriteriaPanel } from "@/components/repository/issue-acce
 import { IssueTaskStatusBadge } from "@/components/repository/issue-task-status-badge";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
-import { ReactionStrip } from "@/components/repository/reaction-strip";
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { DetailSection } from "@/components/common/detail-section";
@@ -18,7 +17,6 @@ import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  addReaction,
   assignIssueAgent,
   type AgentSessionDetail,
   listLatestAgentSessionsBySource,
@@ -31,7 +29,6 @@ import {
   getRepositoryDetail,
   listRepositoryParticipants,
   listIssueComments,
-  removeReaction,
   resumeIssueAgent,
   updateIssue,
   type ActionAgentType,
@@ -44,7 +41,6 @@ import {
   type IssueRecord,
   type IssueTaskFlowRecord,
   type IssueTaskStatus,
-  type ReactionContent,
   type RepositoryDetailResponse,
   type RepositoryUserSummary,
   type TaskFlowWaitingOn
@@ -127,7 +123,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
   const [taskStatusSaving, setTaskStatusSaving] = useState(false);
   const [acceptanceCriteriaSaving, setAcceptanceCriteriaSaving] = useState(false);
   const [metadataSaving, setMetadataSaving] = useState(false);
-  const [reactionPendingKey, setReactionPendingKey] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentEditorExpanded, setCommentEditorExpanded] = useState(false);
@@ -397,7 +392,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
   const canUpdate = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
   const canComment = detail.permissions.canCreateIssueOrPullRequest && Boolean(user);
-  const canReact = Boolean(user);
   const canRunAgents = detail.permissions.canRunAgents && Boolean(user);
   const currentTaskFlow: IssueTaskFlowRecord = taskFlow;
 
@@ -510,66 +504,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
     }
   }
 
-  async function toggleIssueReaction(content: ReactionContent, viewerReacted: boolean) {
-    if (!issue || !canReact) {
-      return;
-    }
-    const reactionKey = `issue:${issue.id}`;
-    setReactionPendingKey(reactionKey);
-    setActionError(null);
-    try {
-      const reactions = viewerReacted
-        ? await removeReaction(owner, repo, {
-            subjectType: "issue",
-            subjectId: issue.id,
-            content
-          })
-        : await addReaction(owner, repo, {
-            subjectType: "issue",
-            subjectId: issue.id,
-            content
-          });
-      setIssue((previous) => (previous ? { ...previous, reactions } : previous));
-    } catch (error) {
-      setActionError(formatApiError(error));
-    } finally {
-      setReactionPendingKey(null);
-    }
-  }
-
-  async function toggleCommentReaction(
-    commentId: string,
-    content: ReactionContent,
-    viewerReacted: boolean
-  ) {
-    if (!canReact) {
-      return;
-    }
-    const reactionKey = `comment:${commentId}`;
-    setReactionPendingKey(reactionKey);
-    setActionError(null);
-    try {
-      const reactions = viewerReacted
-        ? await removeReaction(owner, repo, {
-            subjectType: "issue_comment",
-            subjectId: commentId,
-            content
-          })
-        : await addReaction(owner, repo, {
-            subjectType: "issue_comment",
-            subjectId: commentId,
-            content
-          });
-      setComments((previous) =>
-        previous.map((comment) => (comment.id === commentId ? { ...comment, reactions } : comment))
-      );
-    } catch (error) {
-      setActionError(formatApiError(error));
-    } finally {
-      setReactionPendingKey(null);
-    }
-  }
-
   async function triggerAgentSession(intent: "assign" | "resume") {
     if (!canRunAgents || !issue || issue.state !== "open" || agentSubmitAction) {
       return;
@@ -653,17 +587,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
         <div className="space-y-4">
           <DetailSection contentClassName="space-y-3">
             <MarkdownBody content={issue.body} emptyText="(no description)" />
-            <ReactionStrip
-              reactions={issue.reactions}
-              disabled={reactionPendingKey === `issue:${issue.id}`}
-              onToggle={
-                canReact
-                  ? (content, viewerReacted) => {
-                      void toggleIssueReaction(content, viewerReacted);
-                    }
-                  : undefined
-              }
-            />
           </DetailSection>
 
           <IssueAcceptanceCriteriaPanel
@@ -706,19 +629,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                     </div>
                     <div className="mt-2">
                       <MarkdownBody content={comment.body} emptyText="(empty comment)" />
-                    </div>
-                    <div className="mt-3">
-                      <ReactionStrip
-                        reactions={comment.reactions}
-                        disabled={reactionPendingKey === `comment:${comment.id}`}
-                        onToggle={
-                          canReact
-                            ? (content, viewerReacted) => {
-                                void toggleCommentReaction(comment.id, content, viewerReacted);
-                              }
-                            : undefined
-                        }
-                      />
                     </div>
                   </li>
                 ))}

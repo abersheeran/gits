@@ -144,7 +144,6 @@ PR 页面已经直接消费 session 的验证信息：
 - `pull_request_closing_issues`
 - `pull_request_assignees`
 - `pull_request_review_requests`
-- `reactions`
 
 ## 8. 关键代码文件
 
@@ -168,6 +167,11 @@ PR 页面已经直接消费 session 的验证信息：
 - `web/src/lib/monaco.ts`
 
 ## 9. 当前边界与缺口
+
+### 9.0 PR 当前不提供 emoji reaction
+
+- PR 正文与 review 记录页不再提供 emoji reaction 交互。
+- 数据库不再保留 reaction 表，避免和 review decision / thread 状态形成重复信号。
 
 ### 9.1 review thread 连续性仍偏保守
 

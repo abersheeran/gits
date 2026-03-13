@@ -91,15 +91,10 @@ export class IssueService {
     };
   }
 
-  private async hydrateIssues(
-    repositoryId: string,
-    rows: BaseIssueRow[],
-    viewerId?: string
-  ): Promise<IssueRecord[]> {
+  private async hydrateIssues(repositoryId: string, rows: BaseIssueRow[]): Promise<IssueRecord[]> {
     const metadata = await this.metadataService.listIssueMetadata({
       repositoryId,
-      issueIds: rows.map((row) => row.id),
-      ...(viewerId ? { viewerId } : {})
+      issueIds: rows.map((row) => row.id)
     });
 
     return rows.map((row) => ({
@@ -115,23 +110,13 @@ export class IssueService {
       acceptance_criteria: row.acceptance_criteria,
       comment_count: metadata.commentCountByIssueId[row.id] ?? 0,
       assignees: metadata.assigneesByIssueId[row.id] ?? [],
-      reactions: metadata.reactionsByIssueId[row.id] ?? [],
       created_at: row.created_at,
       updated_at: row.updated_at,
       closed_at: row.closed_at
     }));
   }
 
-  private async hydrateIssueComments(
-    repositoryId: string,
-    rows: BaseIssueCommentRow[],
-    viewerId?: string
-  ): Promise<IssueCommentRecord[]> {
-    const reactionsByCommentId = await this.metadataService.listIssueCommentReactions(
-      repositoryId,
-      rows.map((row) => row.id),
-      viewerId
-    );
+  private async hydrateIssueComments(rows: BaseIssueCommentRow[]): Promise<IssueCommentRecord[]> {
     return rows.map((row) => ({
       id: row.id,
       repository_id: row.repository_id,
@@ -140,7 +125,6 @@ export class IssueService {
       author_id: row.author_id,
       author_username: row.author_username,
       body: row.body,
-      reactions: reactionsByCommentId[row.id] ?? [],
       created_at: row.created_at,
       updated_at: row.updated_at
     }));
@@ -241,7 +225,7 @@ export class IssueService {
             .bind(repositoryId, state, limit, offset)
             .all<BaseIssueRow>();
 
-    const items = await this.hydrateIssues(repositoryId, rows.results, viewerId);
+    const items = await this.hydrateIssues(repositoryId, rows.results);
     const total = Number(countRow?.count ?? 0);
     return {
       items,
@@ -283,7 +267,7 @@ export class IssueService {
     if (!row) {
       return null;
     }
-    const [issue] = await this.hydrateIssues(repositoryId, [row], viewerId);
+    const [issue] = await this.hydrateIssues(repositoryId, [row]);
     return issue ?? null;
   }
 
@@ -311,7 +295,7 @@ export class IssueService {
       )
       .bind(repositoryId, issueNumber)
       .all<BaseIssueCommentRow>();
-    return this.hydrateIssueComments(repositoryId, rows.results, viewerId);
+    return this.hydrateIssueComments(rows.results);
   }
 
   async createIssue(input: {
@@ -419,7 +403,7 @@ export class IssueService {
     if (!row) {
       throw new Error("Created issue comment not found");
     }
-    const [created] = await this.hydrateIssueComments(input.repositoryId, [row]);
+    const [created] = await this.hydrateIssueComments([row]);
     if (!created) {
       throw new Error("Created issue comment not found");
     }
@@ -609,7 +593,7 @@ export class IssueService {
       .bind(repositoryId, ...normalized)
       .all<BaseIssueRow>();
 
-    return this.hydrateIssues(repositoryId, rows.results, viewerId);
+    return this.hydrateIssues(repositoryId, rows.results);
   }
 
   async closeIssuesByNumbers(repositoryId: string, numbers: number[]): Promise<void> {

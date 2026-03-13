@@ -162,31 +162,9 @@ export type AgentSessionQueueMessage = {
   requestOrigin: string;
 };
 
-export type ReactionSubjectType =
-  | "issue"
-  | "issue_comment"
-  | "pull_request"
-  | "pull_request_review";
-
-export type ReactionContent =
-  | "+1"
-  | "-1"
-  | "laugh"
-  | "hooray"
-  | "confused"
-  | "heart"
-  | "rocket"
-  | "eyes";
-
 export type RepositoryUserSummary = {
   id: string;
   username: string;
-};
-
-export type ReactionSummary = {
-  content: ReactionContent;
-  count: number;
-  viewer_reacted: boolean;
 };
 
 export type TaskFlowWaitingOn = "agent" | "human" | "none";
@@ -220,7 +198,6 @@ export type IssueRecord = {
   acceptance_criteria: string;
   comment_count: number;
   assignees: RepositoryUserSummary[];
-  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -252,7 +229,6 @@ export type IssueCommentRecord = {
   author_id: string;
   author_username: string;
   body: string;
-  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
 };
@@ -273,7 +249,6 @@ export type PullRequestRecord = {
   head_oid: string;
   assignees: RepositoryUserSummary[];
   requested_reviewers: RepositoryUserSummary[];
-  reactions: ReactionSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;
   behind_by?: number;
@@ -296,7 +271,6 @@ export type PullRequestReviewRecord = {
   reviewer_username: string;
   decision: PullRequestReviewDecision;
   body: string;
-  reactions: ReactionSummary[];
   created_at: number;
 };
 

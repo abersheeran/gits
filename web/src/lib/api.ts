@@ -182,31 +182,9 @@ export type IssueListState = IssueState | "all";
 
 export type PullRequestListState = PullRequestState | "all";
 
-export type ReactionSubjectType =
-  | "issue"
-  | "issue_comment"
-  | "pull_request"
-  | "pull_request_review";
-
-export type ReactionContent =
-  | "+1"
-  | "-1"
-  | "laugh"
-  | "hooray"
-  | "confused"
-  | "heart"
-  | "rocket"
-  | "eyes";
-
 export type RepositoryUserSummary = {
   id: string;
   username: string;
-};
-
-export type ReactionSummary = {
-  content: ReactionContent;
-  count: number;
-  viewer_reacted: boolean;
 };
 
 export type PaginationMetadata = {
@@ -239,7 +217,6 @@ export type IssueRecord = {
   acceptance_criteria: string;
   comment_count: number;
   assignees: RepositoryUserSummary[];
-  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -285,7 +262,6 @@ export type IssueCommentRecord = {
   author_id: string;
   author_username: string;
   body: string;
-  reactions: ReactionSummary[];
   created_at: number;
   updated_at: number;
 };
@@ -306,7 +282,6 @@ export type PullRequestRecord = {
   head_oid: string;
   assignees: RepositoryUserSummary[];
   requested_reviewers: RepositoryUserSummary[];
-  reactions: ReactionSummary[];
   mergeable?: "mergeable" | "conflicting" | "unknown";
   ahead_by?: number;
   behind_by?: number;
@@ -354,7 +329,6 @@ export type PullRequestReviewRecord = {
   reviewer_username: string;
   decision: PullRequestReviewDecision;
   body: string;
-  reactions: ReactionSummary[];
   created_at: number;
 };
 
@@ -1722,44 +1696,6 @@ export async function listRepositoryParticipants(
     `/api/repos/${owner}/${repo}/participants`
   );
   return response.participants;
-}
-
-export async function addReaction(
-  owner: string,
-  repo: string,
-  input: {
-    subjectType: ReactionSubjectType;
-    subjectId: string;
-    content: ReactionContent;
-  }
-): Promise<ReactionSummary[]> {
-  const response = await requestJson<{ reactions: ReactionSummary[] }>(
-    `/api/repos/${owner}/${repo}/reactions`,
-    {
-      method: "PUT",
-      bodyJson: input
-    }
-  );
-  return response.reactions;
-}
-
-export async function removeReaction(
-  owner: string,
-  repo: string,
-  input: {
-    subjectType: ReactionSubjectType;
-    subjectId: string;
-    content: ReactionContent;
-  }
-): Promise<ReactionSummary[]> {
-  const response = await requestJson<{ reactions: ReactionSummary[] }>(
-    `/api/repos/${owner}/${repo}/reactions`,
-    {
-      method: "DELETE",
-      bodyJson: input
-    }
-  );
-  return response.reactions;
 }
 
 export async function listCollaborators(

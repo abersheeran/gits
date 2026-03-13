@@ -109,7 +109,6 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `issues`
 - `issue_comments`
 - `issue_assignees`
-- `reactions`
 
 ## 7. 关键代码文件
 
@@ -127,9 +126,13 @@ Issue 不是独立状态机系统，当前主要靠 `issues.task_status` 和 `ta
 - `web/src/lib/api.ts`
 - `web/src/lib/validation-summary.ts`
 - `web/src/components/repository/markdown-editor.tsx`
-- `web/src/components/repository/reaction-strip.tsx`
 
 ## 8. 当前边界与缺口
+
+### 8.0 Issue 当前不提供 emoji reaction
+
+- Issue 正文与评论页不再提供 emoji reaction 交互。
+- 数据库不再保留 reaction 表，避免继续积累无业务价值的反馈噪音。
 
 ### 8.1 task center 已可用，但摘要仍偏首版
 

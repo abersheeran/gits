@@ -1,16 +1,4 @@
-import type {
-  ReactionContent,
-  ReactionSubjectType,
-  ReactionSummary,
-  RepositoryUserSummary
-} from "../types";
-
-type SubjectReactionRow = {
-  subject_id: string;
-  content: ReactionContent;
-  count: number;
-  viewer_reacted: number;
-};
+import type { RepositoryUserSummary } from "../types";
 
 type SubjectUserRow = RepositoryUserSummary & {
   subject_id: string;
@@ -22,21 +10,6 @@ function uniqueValues(values: string[]): string[] {
 
 function placeholders(count: number): string {
   return Array.from({ length: count }, () => "?").join(", ");
-}
-
-function rowsToReactionMap(rows: SubjectReactionRow[]): Record<string, ReactionSummary[]> {
-  const output: Record<string, ReactionSummary[]> = {};
-  for (const row of rows) {
-    if (!output[row.subject_id]) {
-      output[row.subject_id] = [];
-    }
-    output[row.subject_id]?.push({
-      content: row.content,
-      count: Number(row.count),
-      viewer_reacted: Number(row.viewer_reacted) > 0
-    });
-  }
-  return output;
 }
 
 function rowsToUserMap(rows: SubjectUserRow[]): Record<string, RepositoryUserSummary[]> {
@@ -114,112 +87,22 @@ export class RepositoryMetadataService {
     }
   }
 
-  async summarizeReactions(
-    repositoryId: string,
-    subjectType: ReactionSubjectType,
-    subjectIds: string[],
-    viewerId?: string
-  ): Promise<Record<string, ReactionSummary[]>> {
-    const nextSubjectIds = uniqueValues(subjectIds);
-    if (nextSubjectIds.length === 0) {
-      return {};
-    }
-
-    const rows = await this.db
-      .prepare(
-        `SELECT
-          subject_id,
-          content,
-          COUNT(*) AS count,
-          MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS viewer_reacted
-         FROM reactions
-         WHERE repository_id = ?
-           AND subject_type = ?
-           AND subject_id IN (${placeholders(nextSubjectIds.length)})
-         GROUP BY subject_id, content
-         ORDER BY subject_id ASC, content ASC`
-      )
-      .bind(viewerId ?? "", repositoryId, subjectType, ...nextSubjectIds)
-      .all<SubjectReactionRow>();
-    return rowsToReactionMap(rows.results);
-  }
-
-  async addReaction(input: {
-    repositoryId: string;
-    subjectType: ReactionSubjectType;
-    subjectId: string;
-    userId: string;
-    content: ReactionContent;
-  }): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT OR IGNORE INTO reactions (
-          id,
-          repository_id,
-          subject_type,
-          subject_id,
-          user_id,
-          content,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        crypto.randomUUID(),
-        input.repositoryId,
-        input.subjectType,
-        input.subjectId,
-        input.userId,
-        input.content,
-        Date.now()
-      )
-      .run();
-  }
-
-  async removeReaction(input: {
-    repositoryId: string;
-    subjectType: ReactionSubjectType;
-    subjectId: string;
-    userId: string;
-    content: ReactionContent;
-  }): Promise<void> {
-    await this.db
-      .prepare(
-        `DELETE FROM reactions
-         WHERE repository_id = ?
-           AND subject_type = ?
-           AND subject_id = ?
-           AND user_id = ?
-           AND content = ?`
-      )
-      .bind(
-        input.repositoryId,
-        input.subjectType,
-        input.subjectId,
-        input.userId,
-        input.content
-      )
-      .run();
-  }
-
   async listIssueMetadata(input: {
     repositoryId: string;
     issueIds: string[];
-    viewerId?: string;
   }): Promise<{
     commentCountByIssueId: Record<string, number>;
     assigneesByIssueId: Record<string, RepositoryUserSummary[]>;
-    reactionsByIssueId: Record<string, ReactionSummary[]>;
   }> {
     const issueIds = uniqueValues(input.issueIds);
     if (issueIds.length === 0) {
       return {
         commentCountByIssueId: {},
-        assigneesByIssueId: {},
-        reactionsByIssueId: {}
+        assigneesByIssueId: {}
       };
     }
 
-    const [commentRows, assigneeRows, reactionsByIssueId] = await Promise.all([
+    const [commentRows, assigneeRows] = await Promise.all([
       this.db
         .prepare(
           `SELECT issue_id, COUNT(*) AS count
@@ -241,8 +124,7 @@ export class RepositoryMetadataService {
            ORDER BY u.username COLLATE NOCASE ASC`
         )
         .bind(...issueIds)
-        .all<SubjectUserRow>(),
-      this.summarizeReactions(input.repositoryId, "issue", issueIds, input.viewerId)
+        .all<SubjectUserRow>()
     ]);
 
     const commentCountByIssueId: Record<string, number> = {};
@@ -252,30 +134,26 @@ export class RepositoryMetadataService {
 
     return {
       commentCountByIssueId,
-      assigneesByIssueId: rowsToUserMap(assigneeRows.results),
-      reactionsByIssueId
+      assigneesByIssueId: rowsToUserMap(assigneeRows.results)
     };
   }
 
   async listPullRequestMetadata(input: {
     repositoryId: string;
     pullRequestIds: string[];
-    viewerId?: string;
   }): Promise<{
     assigneesByPullRequestId: Record<string, RepositoryUserSummary[]>;
     requestedReviewersByPullRequestId: Record<string, RepositoryUserSummary[]>;
-    reactionsByPullRequestId: Record<string, ReactionSummary[]>;
   }> {
     const pullRequestIds = uniqueValues(input.pullRequestIds);
     if (pullRequestIds.length === 0) {
       return {
         assigneesByPullRequestId: {},
-        requestedReviewersByPullRequestId: {},
-        reactionsByPullRequestId: {}
+        requestedReviewersByPullRequestId: {}
       };
     }
 
-    const [assigneeRows, reviewerRows, reactionsByPullRequestId] = await Promise.all([
+    const [assigneeRows, reviewerRows] = await Promise.all([
       this.db
         .prepare(
           `SELECT
@@ -301,30 +179,12 @@ export class RepositoryMetadataService {
            ORDER BY u.username COLLATE NOCASE ASC`
         )
         .bind(...pullRequestIds)
-        .all<SubjectUserRow>(),
-      this.summarizeReactions(input.repositoryId, "pull_request", pullRequestIds, input.viewerId)
+        .all<SubjectUserRow>()
     ]);
 
     return {
       assigneesByPullRequestId: rowsToUserMap(assigneeRows.results),
-      requestedReviewersByPullRequestId: rowsToUserMap(reviewerRows.results),
-      reactionsByPullRequestId
+      requestedReviewersByPullRequestId: rowsToUserMap(reviewerRows.results)
     };
-  }
-
-  async listIssueCommentReactions(
-    repositoryId: string,
-    commentIds: string[],
-    viewerId?: string
-  ): Promise<Record<string, ReactionSummary[]>> {
-    return this.summarizeReactions(repositoryId, "issue_comment", commentIds, viewerId);
-  }
-
-  async listPullRequestReviewReactions(
-    repositoryId: string,
-    reviewIds: string[],
-    viewerId?: string
-  ): Promise<Record<string, ReactionSummary[]>> {
-    return this.summarizeReactions(repositoryId, "pull_request_review", reviewIds, viewerId);
   }
 }
