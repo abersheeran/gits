@@ -95,6 +95,7 @@ Actions 与 Agent Runtime 模块的职责是把“任务触发”转换成“可
 - session 的状态推进由平台与 Cloudflare container 生命周期协同完成，而不是由容器内 HTTP 状态接口回传
 - `session = 一次面向某个 Issue / PR / manual 入口的 Agent 任务轮次`
 - assign / resume / rerun / dispatch 都会创建新的 session，而不是附着到旧 run
+- boot 阶段的 container / Durable Object internal error 会归类为可重试的 attempt 失败；没有拿到 started 信号时不写入 `started_at`
 - Session detail 已支持：
   - hero summary
   - source / handoff

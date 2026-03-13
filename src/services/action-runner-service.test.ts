@@ -343,4 +343,73 @@ describe("executeActionRun", () => {
       })
     );
   });
+
+  it("retries boot-time container internal errors without marking the attempt started", async () => {
+    const queueSend = vi.fn(async () => undefined);
+    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+    const createRetryAttempt = vi
+      .spyOn(AgentSessionService.prototype, "createRetryAttempt")
+      .mockResolvedValue(
+        buildAttempt({
+          id: "attempt-2",
+          attempt_number: 2,
+          status: "queued",
+          instance_type: "standard-4"
+        })
+      );
+
+    await executeActionRun({
+      env: {
+        DB: {} as D1Database,
+        GIT_BUCKET: {} as R2Bucket,
+        REPOSITORY_OBJECTS: {} as DurableObjectNamespace,
+        JWT_SECRET: "test-secret",
+        ACTIONS_QUEUE: { send: queueSend } as unknown as Queue<unknown>,
+        ACTIONS_RUNNER_STANDARD_4: {
+          getByName: () => ({
+            fetch: (url: string) =>
+              url.endsWith("/stop")
+                ? stopFetch()
+                : Promise.reject(new Error("internal error; reference = j6rrapntn26je11iei4v65ka"))
+          })
+        } as unknown as DurableObjectNamespace
+      },
+      repository: {
+        id: "repo-1",
+        owner_id: "owner-1",
+        owner_username: "alice",
+        name: "demo",
+        description: "demo repo",
+        is_private: 1,
+        created_at: 1
+      },
+      session: buildSession({ instance_type: "standard-4" }),
+      attempt: buildAttempt({ instance_type: "standard-4" }),
+      requestOrigin: "http://localhost:8787"
+    });
+
+    expect(AgentSessionService.prototype.markAttemptRunning).not.toHaveBeenCalled();
+    expect(createRetryAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        sessionId: "session-1",
+        instanceType: "standard-4",
+        promotedFromInstanceType: null
+      })
+    );
+    expect(queueSend).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      sessionId: "session-1",
+      attemptId: "attempt-2",
+      requestOrigin: "http://localhost:8787"
+    });
+    expect(AgentSessionService.prototype.completeAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptId: "attempt-1",
+        status: "retryable_failed",
+        failureReason: "container_error",
+        failureStage: "boot"
+      })
+    );
+  });
 });

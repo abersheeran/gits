@@ -627,6 +627,18 @@ function classifyAttemptFailure(input: {
     diagnostics.includes("out of memory") ||
     diagnostics.includes("oom") ||
     diagnostics.includes("killed");
+  const bootTimeout =
+    diagnostics.includes("port ready timeout") ||
+    diagnostics.includes("timed out waiting for port") ||
+    diagnostics.includes("timed out waiting for container") ||
+    diagnostics.includes("boot timeout");
+  const containerInfraError =
+    diagnostics.includes("internal error; reference") ||
+    diagnostics.includes("durable object") ||
+    diagnostics.includes("startandwaitforports") ||
+    diagnostics.includes("container startup failed") ||
+    diagnostics.includes("container failed to start") ||
+    diagnostics.includes("container unavailable");
 
   if (diagnostics.includes("missing result event")) {
     return {
@@ -650,6 +662,14 @@ function classifyAttemptFailure(input: {
       stage: "boot",
       retryable: true,
       promoteInstanceType: resourcePressure
+    };
+  }
+  if (bootTimeout || containerInfraError) {
+    return {
+      reason: bootTimeout ? "boot_timeout" : "container_error",
+      stage: "boot",
+      retryable: true,
+      promoteInstanceType: resourcePressure || bootTimeout
     };
   }
   if (diagnostics.includes("clone")) {
@@ -1017,40 +1037,43 @@ export async function executeActionRun(input: {
       })
     });
 
-    const lifecycleStartedAt = parseLifecycleStartedAt(runnerResponse) ?? Date.now();
-    startedAt =
-      (await agentSessionService.markAttemptRunning({
+    const lifecycleStartedAt =
+      parseLifecycleStartedAt(runnerResponse) ?? (runnerResponse.ok ? Date.now() : null);
+    if (lifecycleStartedAt !== null) {
+      startedAt =
+        (await agentSessionService.markAttemptRunning({
+          repositoryId: input.repository.id,
+          sessionId,
+          attemptId: attempt.id,
+          containerInstance,
+          startedAt: lifecycleStartedAt
+        })) ?? lifecycleStartedAt;
+
+      await agentSessionService.syncSessionForAttempt({
         repositoryId: input.repository.id,
         sessionId,
-        attemptId: attempt.id,
+        sessionStatus: "running",
+        activeAttemptId: attempt.id,
+        latestAttemptId: attempt.id,
         containerInstance,
-        startedAt: lifecycleStartedAt
-      })) ?? lifecycleStartedAt;
-
-    await agentSessionService.syncSessionForAttempt({
-      repositoryId: input.repository.id,
-      sessionId,
-      sessionStatus: "running",
-      activeAttemptId: attempt.id,
-      latestAttemptId: attempt.id,
-      containerInstance,
-      startedAt,
-      logs: buildLogExcerpt(
-        buildRunLogs({
-          runId: sessionId,
-          runNumber,
-          attemptId: attempt.id,
-          attemptNumber: attempt.attempt_number,
-          instanceType: attemptInstanceType,
-          agentType: input.session.agent_type,
-          prompt: input.session.prompt,
-          claimedAt,
-          startedAt,
-          redactText: redactLogs
-        })
-      ),
-      updatedAt: startedAt
-    });
+        startedAt,
+        logs: buildLogExcerpt(
+          buildRunLogs({
+            runId: sessionId,
+            runNumber,
+            attemptId: attempt.id,
+            attemptNumber: attempt.attempt_number,
+            instanceType: attemptInstanceType,
+            agentType: input.session.agent_type,
+            prompt: input.session.prompt,
+            claimedAt,
+            startedAt,
+            redactText: redactLogs
+          })
+        ),
+        updatedAt: startedAt
+      });
+    }
 
     if (isStreamedRunnerResponse(runnerResponse)) {
       runnerResult = await consumeStreamedRunnerResponse({
