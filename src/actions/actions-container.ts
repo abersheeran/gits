@@ -1,18 +1,26 @@
 import { Container } from "@cloudflare/containers";
-import type { AgentSessionExecutionSourceType, AppBindings } from "../types";
+import { AgentSessionService } from "../services/agent-session-service";
+import type {
+  ActionContainerInstanceType,
+  AgentSessionExecutionSourceType,
+  AppBindings
+} from "../types";
 import {
   ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "../services/action-runner-prompt-tokens";
 import { AuthService } from "../services/auth-service";
 import { appendValidationReportPrompt } from "../services/agent-session-validation-report";
-import { createSecretRedactor } from "../utils/secret-redaction";
 
 type ExecuteRequest = {
   agentType: "codex" | "claude_code";
   prompt: string;
   repositoryId?: string;
+  requestOrigin?: string;
+  sessionId?: string;
+  attemptId?: string;
   runId?: string;
+  attemptNumber?: number;
   containerInstance?: string;
   repositoryUrl?: string;
   ref?: string;
@@ -51,16 +59,36 @@ type ActiveExecutionTokens = {
   prCreateToken: IssuedActionToken | null;
 };
 
+type ExecutionContext = {
+  repositoryId: string;
+  sessionId: string;
+  attemptId: string;
+  sessionNumber: number;
+  attemptNumber: number;
+  instanceType: ActionContainerInstanceType;
+  containerInstance: string;
+  agentType: "codex" | "claude_code";
+  prompt: string;
+  callbackSecret: string;
+  requestOrigin: string;
+  triggerSourceType: AgentSessionExecutionSourceType | null;
+};
+
 const ISSUE_REPLY_TOKEN_UNAVAILABLE = "[GITS_ISSUE_REPLY_TOKEN_UNAVAILABLE]";
 const PR_CREATE_TOKEN_UNAVAILABLE = "[GITS_PR_CREATE_TOKEN_UNAVAILABLE]";
 
-function jsonResponse(payload: unknown, status = 200): Response {
+function jsonResponse(payload: unknown, status = 200, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      ...(headers ?? {})
     }
   });
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -85,30 +113,6 @@ function buildPendingExecutionAuth(payload: ExecuteRequest): PendingExecutionAut
   };
 }
 
-function redactUnknownStrings(value: unknown, redact: (input: string) => string): unknown {
-  if (typeof value === "string") {
-    return redact(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactUnknownStrings(item, redact));
-  }
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, nestedValue]) => [
-      key,
-      redactUnknownStrings(nestedValue, redact)
-    ])
-  );
-}
-
-function cloneHeadersWithoutContentLength(source: Headers): Headers {
-  const headers = new Headers(source);
-  headers.delete("content-length");
-  return headers;
-}
-
 abstract class BaseActionsContainer extends Container<AppBindings> {
   defaultPort = 8080;
   sleepAfter = "10m";
@@ -117,19 +121,15 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
   private pendingExecutionAuth: PendingExecutionAuth | null = null;
   private activeExecutionTokens: ActiveExecutionTokens | null = null;
   private cleanupPromise: Promise<void> | null = null;
+  private executionCtx: ExecutionContext | null = null;
+  private executionCompleted = false;
 
   constructor(ctx: DurableObjectState<{}>, env: AppBindings) {
     super(ctx, env);
     this.bindings = env;
   }
 
-  private collectIssuedSecrets(): string[] {
-    return [
-      this.activeExecutionTokens?.cloneToken?.token,
-      this.activeExecutionTokens?.issueReplyToken?.token,
-      this.activeExecutionTokens?.prCreateToken?.token
-    ].filter((token): token is string => Boolean(token));
-  }
+  protected abstract get actionContainerInstanceType(): ActionContainerInstanceType;
 
   private buildRuntimePrompt(prompt: string): string {
     let runtimePrompt = prompt;
@@ -258,97 +258,60 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
     }
   }
 
-  private async redactRunnerResponse(response: Response): Promise<Response> {
-    const secrets = this.collectIssuedSecrets();
-    if (secrets.length === 0 || !response.body) {
-      return response;
-    }
-
-    const redact = createSecretRedactor(secrets);
-    const headers = cloneHeadersWithoutContentLength(response.headers);
-    const contentType = headers.get("content-type") ?? "";
-
-    if (contentType.includes("application/x-ndjson")) {
-      const decoder = new TextDecoder();
-      const encoder = new TextEncoder();
-      let buffer = "";
-
-      const stream = response.body.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform: (chunk, controller) => {
-            this.renewActivityTimeout();
-            buffer += decoder.decode(chunk, { stream: true });
-            let newlineIndex = buffer.indexOf("\n");
-            while (newlineIndex !== -1) {
-              const line = buffer.slice(0, newlineIndex);
-              buffer = buffer.slice(newlineIndex + 1);
-              if (line.trim().length > 0) {
-                try {
-                  const parsed = JSON.parse(line) as unknown;
-                  controller.enqueue(
-                    encoder.encode(`${JSON.stringify(redactUnknownStrings(parsed, redact))}\n`)
-                  );
-                } catch {
-                  controller.enqueue(encoder.encode(`${redact(line)}\n`));
-                }
-              } else {
-                controller.enqueue(encoder.encode("\n"));
-              }
-              newlineIndex = buffer.indexOf("\n");
-            }
-          },
-          flush: (controller) => {
-            const tail = `${buffer}${decoder.decode()}`;
-            if (!tail) {
-              return;
-            }
-            try {
-              const parsed = JSON.parse(tail) as unknown;
-              controller.enqueue(encoder.encode(JSON.stringify(redactUnknownStrings(parsed, redact))));
-            } catch {
-              controller.enqueue(encoder.encode(redact(tail)));
-            }
-          }
-        })
-      );
-
-      return new Response(stream, {
-        status: response.status,
-        statusText: response.statusText,
-        headers
-      });
-    }
-
-    const bodyText = await response.text();
-    if (contentType.includes("application/json")) {
-      try {
-        const parsed = JSON.parse(bodyText) as unknown;
-        return new Response(JSON.stringify(redactUnknownStrings(parsed, redact)), {
-          status: response.status,
-          statusText: response.statusText,
-          headers
-        });
-      } catch {
-        return new Response(redact(bodyText), {
-          status: response.status,
-          statusText: response.statusText,
-          headers
-        });
-      }
-    }
-
-    return new Response(redact(bodyText), {
-      status: response.status,
-      statusText: response.statusText,
-      headers
-    });
-  }
-
   override async onStart(): Promise<void> {
     await this.ensureExecutionTokens();
+    if (this.executionCtx) {
+      const agentSessionService = new AgentSessionService(this.bindings.DB);
+      const startedAt = Date.now();
+      await agentSessionService.markAttemptRunning({
+        repositoryId: this.executionCtx.repositoryId,
+        sessionId: this.executionCtx.sessionId,
+        attemptId: this.executionCtx.attemptId,
+        containerInstance: this.executionCtx.containerInstance,
+        startedAt
+      });
+      await agentSessionService.syncSessionForAttempt({
+        repositoryId: this.executionCtx.repositoryId,
+        sessionId: this.executionCtx.sessionId,
+        sessionStatus: "running",
+        activeAttemptId: this.executionCtx.attemptId,
+        latestAttemptId: this.executionCtx.attemptId,
+        containerInstance: this.executionCtx.containerInstance,
+        startedAt,
+        updatedAt: startedAt
+      });
+    }
   }
 
   override async onStop(): Promise<void> {
+    if (this.executionCtx && !this.executionCompleted) {
+      try {
+        const agentSessionService = new AgentSessionService(this.bindings.DB);
+        const completedAt = Date.now();
+        await agentSessionService.completeAttempt({
+          repositoryId: this.executionCtx.repositoryId,
+          sessionId: this.executionCtx.sessionId,
+          attemptId: this.executionCtx.attemptId,
+          status: "failed",
+          failureReason: "container_error",
+          failureStage: "runtime",
+          completedAt
+        });
+        await agentSessionService.syncSessionForAttempt({
+          repositoryId: this.executionCtx.repositoryId,
+          sessionId: this.executionCtx.sessionId,
+          sessionStatus: "failed",
+          activeAttemptId: null,
+          latestAttemptId: this.executionCtx.attemptId,
+          failureReason: "container_error",
+          failureStage: "runtime",
+          completedAt,
+          updatedAt: completedAt
+        });
+      } catch {
+        // best-effort finalization
+      }
+    }
     await this.cleanupExecutionTokens();
   }
 
@@ -362,6 +325,34 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
   }
 
   override async onError(error: unknown): Promise<never> {
+    if (this.executionCtx && !this.executionCompleted) {
+      try {
+        const agentSessionService = new AgentSessionService(this.bindings.DB);
+        const completedAt = Date.now();
+        await agentSessionService.completeAttempt({
+          repositoryId: this.executionCtx.repositoryId,
+          sessionId: this.executionCtx.sessionId,
+          attemptId: this.executionCtx.attemptId,
+          status: "failed",
+          failureReason: "container_error",
+          failureStage: "runtime",
+          completedAt
+        });
+        await agentSessionService.syncSessionForAttempt({
+          repositoryId: this.executionCtx.repositoryId,
+          sessionId: this.executionCtx.sessionId,
+          sessionStatus: "failed",
+          activeAttemptId: null,
+          latestAttemptId: this.executionCtx.attemptId,
+          failureReason: "container_error",
+          failureStage: "runtime",
+          completedAt,
+          updatedAt: completedAt
+        });
+      } catch {
+        // best-effort finalization
+      }
+    }
     await this.cleanupExecutionTokens();
     throw error;
   }
@@ -383,6 +374,32 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
       if (payload.agentType !== "codex" && payload.agentType !== "claude_code") {
         return jsonResponse({ message: "Field 'agentType' must be one of: codex, claude_code" }, 400);
       }
+      if (!isNonEmptyString(payload.repositoryId)) {
+        return jsonResponse({ message: "Field 'repositoryId' is required" }, 400);
+      }
+      if (!isNonEmptyString(payload.sessionId)) {
+        return jsonResponse({ message: "Field 'sessionId' is required" }, 400);
+      }
+      if (!isNonEmptyString(payload.attemptId)) {
+        return jsonResponse({ message: "Field 'attemptId' is required" }, 400);
+      }
+      if (!isPositiveInteger(payload.runNumber)) {
+        return jsonResponse({ message: "Field 'runNumber' must be a positive integer" }, 400);
+      }
+      if (!isPositiveInteger(payload.attemptNumber)) {
+        return jsonResponse({ message: "Field 'attemptNumber' must be a positive integer" }, 400);
+      }
+      if (!isNonEmptyString(payload.containerInstance)) {
+        return jsonResponse({ message: "Field 'containerInstance' is required" }, 400);
+      }
+
+      const requestOrigin =
+        payload.requestOrigin?.trim() ||
+        payload.env?.GITS_PLATFORM_API_BASE?.trim() ||
+        null;
+      if (!requestOrigin) {
+        return jsonResponse({ message: "Field 'requestOrigin' is required" }, 400);
+      }
 
       try {
         this.pendingExecutionAuth = buildPendingExecutionAuth(payload);
@@ -391,35 +408,111 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
         return jsonResponse({ message }, 400);
       }
 
+      const callbackSecret = crypto.randomUUID();
+      this.executionCompleted = false;
+      this.executionCtx = {
+        repositoryId: payload.repositoryId,
+        sessionId: payload.sessionId,
+        attemptId: payload.attemptId,
+        sessionNumber: payload.runNumber,
+        attemptNumber: payload.attemptNumber,
+        instanceType: this.actionContainerInstanceType,
+        containerInstance: payload.containerInstance,
+        agentType: payload.agentType,
+        prompt: payload.prompt,
+        callbackSecret,
+        requestOrigin,
+        triggerSourceType: payload.triggerSourceType ?? null
+      };
+
       this.envVars = {
         ...(payload.env ?? {})
       };
 
       await this.startAndWaitForPorts(this.defaultPort, { portReadyTimeoutMS: 30_000 });
 
-      const response = await this.containerFetch("http://localhost/run", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          agentType: payload.agentType,
-          prompt: this.buildRuntimePrompt(payload.prompt),
-          repositoryUrl: payload.repositoryUrl,
-          ref: payload.ref,
-          sha: payload.sha,
-          gitUsername: this.activeExecutionTokens?.cloneToken?.username,
-          gitToken: this.activeExecutionTokens?.cloneToken?.token,
-          allowGitPush: payload.allowGitPush,
-          gitCommitName: payload.gitCommitName,
-          gitCommitEmail: payload.gitCommitEmail,
-          env: this.buildRuntimeEnv(payload.env),
-          configFiles: payload.configFiles
+      this.ctx.waitUntil(
+        this.containerFetch("http://localhost/run", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            agentType: payload.agentType,
+            prompt: this.buildRuntimePrompt(payload.prompt),
+            repositoryUrl: payload.repositoryUrl,
+            ref: payload.ref,
+            sha: payload.sha,
+            gitUsername: this.activeExecutionTokens?.cloneToken?.username,
+            gitToken: this.activeExecutionTokens?.cloneToken?.token,
+            allowGitPush: payload.allowGitPush,
+            gitCommitName: payload.gitCommitName,
+            gitCommitEmail: payload.gitCommitEmail,
+            env: this.buildRuntimeEnv(payload.env),
+            configFiles: payload.configFiles,
+            callbackUrl: `${requestOrigin}/api/internal/container-callback`,
+            callbackSecret,
+            callbackMeta: {
+              repositoryId: payload.repositoryId,
+              sessionId: payload.sessionId,
+              attemptId: payload.attemptId,
+              instanceType: this.actionContainerInstanceType,
+              containerInstance: payload.containerInstance,
+              sessionNumber: payload.runNumber,
+              attemptNumber: payload.attemptNumber
+            }
+          })
         })
-      });
+      );
 
-      const redacted = await this.redactRunnerResponse(response);
-      return redacted;
+      const startedAt = Date.now();
+      return jsonResponse(
+        { started: true, startedAt },
+        200,
+        { "x-gits-run-started-at": String(startedAt) }
+      );
+    }
+
+    if (request.method === "POST" && url.pathname === "/verify-callback-secret") {
+      let body: { callbackSecret?: string };
+      try {
+        body = (await request.json()) as { callbackSecret?: string };
+      } catch {
+        return jsonResponse({ message: "Invalid JSON payload" }, 400);
+      }
+
+      if (!this.executionCtx || body.callbackSecret !== this.executionCtx.callbackSecret) {
+        return jsonResponse({ valid: false }, 403);
+      }
+      return jsonResponse({ valid: true });
+    }
+
+    if (request.method === "POST" && url.pathname === "/callback") {
+      let body: { callbackSecret?: string; type?: string };
+      try {
+        body = (await request.json()) as { callbackSecret?: string; type?: string };
+      } catch {
+        return jsonResponse({ message: "Invalid JSON payload" }, 400);
+      }
+
+      if (!this.executionCtx || body.callbackSecret !== this.executionCtx.callbackSecret) {
+        return jsonResponse({ message: "Invalid callback" }, 403);
+      }
+      if (body.type === "heartbeat") {
+        this.renewActivityTimeout();
+        return jsonResponse({ ok: true });
+      }
+      if (body.type === "completion") {
+        this.executionCompleted = true;
+        this.renewActivityTimeout();
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({ message: "Unknown callback type" }, 400);
+    }
+
+    if (request.method === "POST" && url.pathname === "/keepalive") {
+      this.renewActivityTimeout();
+      return jsonResponse({ ok: true });
     }
 
     if (request.method === "POST" && url.pathname === "/stop") {
@@ -431,14 +524,38 @@ abstract class BaseActionsContainer extends Container<AppBindings> {
   }
 }
 
-export class ActionsContainer extends BaseActionsContainer {}
+export class ActionsContainer extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "lite";
+  }
+}
 
-export class ActionsContainerBasic extends BaseActionsContainer {}
+export class ActionsContainerBasic extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "basic";
+  }
+}
 
-export class ActionsContainerStandard1 extends BaseActionsContainer {}
+export class ActionsContainerStandard1 extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "standard-1";
+  }
+}
 
-export class ActionsContainerStandard2 extends BaseActionsContainer {}
+export class ActionsContainerStandard2 extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "standard-2";
+  }
+}
 
-export class ActionsContainerStandard3 extends BaseActionsContainer {}
+export class ActionsContainerStandard3 extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "standard-3";
+  }
+}
 
-export class ActionsContainerStandard4 extends BaseActionsContainer {}
+export class ActionsContainerStandard4 extends BaseActionsContainer {
+  protected override get actionContainerInstanceType(): ActionContainerInstanceType {
+    return "standard-4";
+  }
+}

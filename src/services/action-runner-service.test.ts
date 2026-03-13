@@ -5,8 +5,8 @@ import { AgentSessionService } from "./agent-session-service";
 import { ActionsService } from "./actions-service";
 import { ACTIONS_SYSTEM_EMAIL, ACTIONS_SYSTEM_USERNAME } from "./auth-service";
 
-function createStartedRunnerResponse(payload: unknown, startedAt = 2): Response {
-  return new Response(JSON.stringify(payload), {
+function createStartedRunnerResponse(startedAt = 2): Response {
+  return new Response(JSON.stringify({ started: true, startedAt }), {
     headers: {
       "content-type": "application/json",
       "x-gits-run-started-at": String(startedAt)
@@ -78,7 +78,6 @@ describe("executeActionRun", () => {
   beforeEach(() => {
     vi.spyOn(AgentSessionService.prototype, "claimQueuedAttempt").mockResolvedValue(1);
     vi.spyOn(AgentSessionService.prototype, "findAttemptById").mockResolvedValue(null);
-    vi.spyOn(AgentSessionService.prototype, "markAttemptRunning").mockResolvedValue(2);
     vi.spyOn(AgentSessionService.prototype, "syncSessionForAttempt").mockResolvedValue();
     vi.spyOn(AgentSessionService.prototype, "recordSessionObservability").mockResolvedValue();
     vi.spyOn(AgentSessionService.prototype, "completeAttempt").mockResolvedValue();
@@ -112,20 +111,21 @@ describe("executeActionRun", () => {
         sessionId: string;
         attemptId: string;
         containerInstance: string;
+        requestOrigin: string;
         configFiles?: Record<string, string>;
       };
 
       expect(payload.sessionId).toBe("session-1");
       expect(payload.attemptId).toBe("attempt-1");
       expect(payload.containerInstance).toBe("agent-session-session-1-attempt-1");
+      expect(payload.requestOrigin).toBe("http://localhost:8787");
       expect(payload.configFiles).toEqual({
         "/home/rootless/.codex/config.toml": 'model = "gpt-5-codex"',
         "/home/rootless/.claude/settings.json": '{\n  "permissions": "bypass"\n}'
       });
 
-      return createStartedRunnerResponse({ exitCode: 0, durationMs: 25 });
+      return createStartedRunnerResponse();
     });
-    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
 
     await executeActionRun({
       env: {
@@ -135,8 +135,7 @@ describe("executeActionRun", () => {
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
-            fetch: (url: string, init?: RequestInit) =>
-              url.endsWith("/stop") ? stopFetch(url, init) : runnerFetch(url, init)
+            fetch: runnerFetch
           })
         } as unknown as DurableObjectNamespace
       },
@@ -155,14 +154,13 @@ describe("executeActionRun", () => {
     });
 
     expect(runnerFetch).toHaveBeenCalledTimes(1);
-    expect(stopFetch).toHaveBeenCalledTimes(1);
-    expect(AgentSessionService.prototype.recordSessionObservability).toHaveBeenCalledTimes(2);
+    expect(AgentSessionService.prototype.recordSessionObservability).not.toHaveBeenCalled();
+    expect(AgentSessionService.prototype.completeAttempt).not.toHaveBeenCalled();
   });
 
   it("uses the runner binding that matches the attempt instance type", async () => {
     const liteFetch = vi.fn();
-    const standard3Fetch = vi.fn(async () => createStartedRunnerResponse({ exitCode: 0, durationMs: 25 }));
-    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+    const standard3Fetch = vi.fn(async () => createStartedRunnerResponse());
 
     await executeActionRun({
       env: {
@@ -177,8 +175,7 @@ describe("executeActionRun", () => {
         } as unknown as DurableObjectNamespace,
         ACTIONS_RUNNER_STANDARD_3: {
           getByName: () => ({
-            fetch: (url: string, init?: RequestInit) =>
-              url.endsWith("/stop") ? stopFetch(url, init) : standard3Fetch(url, init)
+            fetch: standard3Fetch
           })
         } as unknown as DurableObjectNamespace
       },
@@ -198,7 +195,6 @@ describe("executeActionRun", () => {
 
     expect(liteFetch).not.toHaveBeenCalled();
     expect(standard3Fetch).toHaveBeenCalledTimes(1);
-    expect(stopFetch).toHaveBeenCalledTimes(1);
   });
 
   it("passes issue reply and PR creation hints for issue-sourced sessions", async () => {
@@ -221,7 +217,7 @@ describe("executeActionRun", () => {
       expect(payload.gitCommitName).toBe(ACTIONS_SYSTEM_USERNAME);
       expect(payload.gitCommitEmail).toBe(ACTIONS_SYSTEM_EMAIL);
 
-      return createStartedRunnerResponse({ exitCode: 0, durationMs: 25 });
+      return createStartedRunnerResponse();
     });
 
     await executeActionRun({
@@ -232,10 +228,7 @@ describe("executeActionRun", () => {
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
-            fetch: (url: string, init?: RequestInit) =>
-              url.endsWith("/stop")
-                ? new Response(JSON.stringify({ ok: true }))
-                : runnerFetch(url, init)
+            fetch: runnerFetch
           })
         } as unknown as DurableObjectNamespace
       },
@@ -266,78 +259,8 @@ describe("executeActionRun", () => {
     expect(runnerFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("schedules a retry and promotes instance type for resource-pressure failures", async () => {
+  it("retries boot-time container internal errors", async () => {
     const queueSend = vi.fn(async () => undefined);
-    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
-    const createRetryAttempt = vi
-      .spyOn(AgentSessionService.prototype, "createRetryAttempt")
-      .mockResolvedValue(
-        buildAttempt({
-          id: "attempt-2",
-          attempt_number: 2,
-          status: "queued",
-          instance_type: "basic",
-          promoted_from_instance_type: "lite"
-        })
-      );
-
-    await executeActionRun({
-      env: {
-        DB: {} as D1Database,
-        GIT_BUCKET: {} as R2Bucket,
-        REPOSITORY_OBJECTS: {} as DurableObjectNamespace,
-        JWT_SECRET: "test-secret",
-        ACTIONS_QUEUE: { send: queueSend } as unknown as Queue<unknown>,
-        ACTIONS_RUNNER: {
-          getByName: () => ({
-            fetch: (url: string) =>
-              url.endsWith("/stop")
-                ? stopFetch()
-                : createStartedRunnerResponse({ exitCode: 143, durationMs: 25, stderr: "killed" })
-          })
-        } as unknown as DurableObjectNamespace
-      },
-      repository: {
-        id: "repo-1",
-        owner_id: "owner-1",
-        owner_username: "alice",
-        name: "demo",
-        description: "demo repo",
-        is_private: 1,
-        created_at: 1
-      },
-      session: buildSession(),
-      attempt: buildAttempt(),
-      requestOrigin: "http://localhost:8787"
-    });
-
-    expect(createRetryAttempt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repositoryId: "repo-1",
-        sessionId: "session-1",
-        instanceType: "basic",
-        promotedFromInstanceType: "lite"
-      })
-    );
-    expect(queueSend).toHaveBeenCalledWith({
-      repositoryId: "repo-1",
-      sessionId: "session-1",
-      attemptId: "attempt-2",
-      requestOrigin: "http://localhost:8787"
-    });
-    expect(AgentSessionService.prototype.completeAttempt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attemptId: "attempt-1",
-        status: "retryable_failed",
-        failureReason: "unknown_infra_failure",
-        failureStage: "runtime"
-      })
-    );
-  });
-
-  it("retries boot-time container internal errors without marking the attempt started", async () => {
-    const queueSend = vi.fn(async () => undefined);
-    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
     const createRetryAttempt = vi
       .spyOn(AgentSessionService.prototype, "createRetryAttempt")
       .mockResolvedValue(
@@ -358,10 +281,8 @@ describe("executeActionRun", () => {
         ACTIONS_QUEUE: { send: queueSend } as unknown as Queue<unknown>,
         ACTIONS_RUNNER_STANDARD_4: {
           getByName: () => ({
-            fetch: (url: string) =>
-              url.endsWith("/stop")
-                ? stopFetch()
-                : Promise.reject(new Error("internal error; reference = j6rrapntn26je11iei4v65ka"))
+            fetch: () =>
+              Promise.reject(new Error("internal error; reference = j6rrapntn26je11iei4v65ka"))
           })
         } as unknown as DurableObjectNamespace
       },
@@ -379,7 +300,6 @@ describe("executeActionRun", () => {
       requestOrigin: "http://localhost:8787"
     });
 
-    expect(AgentSessionService.prototype.markAttemptRunning).not.toHaveBeenCalled();
     expect(createRetryAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
         repositoryId: "repo-1",
@@ -404,8 +324,7 @@ describe("executeActionRun", () => {
     );
   });
 
-  it("does not overwrite an externally cancelled attempt with a failed terminal state", async () => {
-    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+  it("does not overwrite an externally cancelled attempt on startup failure", async () => {
     vi.spyOn(AgentSessionService.prototype, "findAttemptById").mockResolvedValue(
       buildAttempt({
         id: "attempt-1",
@@ -423,10 +342,7 @@ describe("executeActionRun", () => {
         JWT_SECRET: "test-secret",
         ACTIONS_RUNNER: {
           getByName: () => ({
-            fetch: (url: string) =>
-              url.endsWith("/stop")
-                ? stopFetch()
-                : createStartedRunnerResponse({ exitCode: 143, durationMs: 25, stderr: "killed" })
+            fetch: () => Promise.reject(new Error("container unavailable"))
           })
         } as unknown as DurableObjectNamespace
       },
@@ -444,7 +360,6 @@ describe("executeActionRun", () => {
       requestOrigin: "http://localhost:8787"
     });
 
-    expect(stopFetch).toHaveBeenCalledTimes(1);
     expect(AgentSessionService.prototype.completeAttempt).not.toHaveBeenCalledWith(
       expect.objectContaining({
         attemptId: "attempt-1",

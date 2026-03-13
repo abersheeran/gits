@@ -19,6 +19,17 @@ type RunRequest = {
   gitCommitEmail?: string;
   env?: Record<string, string>;
   configFiles?: Record<string, string>;
+  callbackUrl?: string;
+  callbackSecret?: string;
+  callbackMeta?: {
+    repositoryId: string;
+    sessionId: string;
+    attemptId: string;
+    instanceType: string;
+    containerInstance: string;
+    sessionNumber: number;
+    attemptNumber: number;
+  };
 };
 
 type RunResponse = {
@@ -95,6 +106,7 @@ const GITS_PLATFORM_MCP_AUTH_TOKEN_ENV_KEYS = [
 const MAX_CAPTURED_OUTPUT_CHARS = 256_000;
 const ABORT_KILL_TIMEOUT_MS = 5_000;
 const RUN_STREAM_KEEPALIVE_INTERVAL_MS = 5_000;
+const CALLBACK_HEARTBEAT_INTERVAL_MS = 5_000;
 
 function normalizeHomePath(homePath: string | undefined): string | null {
   const trimmed = homePath?.trim() ?? "";
@@ -170,6 +182,66 @@ function writeRunStreamKeepalive(response: http.ServerResponse): void {
   }
 }
 
+async function sendCallback(
+  callbackUrl: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  try {
+    const response = await fetch(callbackUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      console.error(`Callback failed: HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.error("Callback failed:", toErrorMessage(error));
+  }
+}
+
+function buildHeartbeatPayload(input: {
+  callbackSecret: string;
+  callbackMeta: RunRequest["callbackMeta"];
+  stdout: string;
+  stderr: string;
+}): Record<string, unknown> {
+  return {
+    type: "heartbeat",
+    callbackSecret: input.callbackSecret,
+    ...(input.callbackMeta ?? {}),
+    stdout: input.stdout,
+    stderr: input.stderr
+  };
+}
+
+function buildCompletionPayload(input: {
+  callbackSecret: string;
+  callbackMeta: RunRequest["callbackMeta"];
+  exitCode: number;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  error?: string;
+  spawnError?: string;
+  attemptedCommand?: string;
+  mcpSetupWarning?: string;
+}): Record<string, unknown> {
+  return {
+    type: "completion",
+    callbackSecret: input.callbackSecret,
+    ...(input.callbackMeta ?? {}),
+    exitCode: input.exitCode,
+    durationMs: input.durationMs,
+    stdout: input.stdout,
+    stderr: input.stderr,
+    ...(input.error ? { error: input.error } : {}),
+    ...(input.spawnError ? { spawnError: input.spawnError } : {}),
+    ...(input.attemptedCommand ? { attemptedCommand: input.attemptedCommand } : {}),
+    ...(input.mcpSetupWarning ? { mcpSetupWarning: input.mcpSetupWarning } : {})
+  };
+}
+
 function normalizeRef(ref: string | undefined): string {
   const trimmed = ref?.trim() ?? "";
   if (!trimmed) {
@@ -238,6 +310,29 @@ function formatOutputBuffer(buffer: BoundedOutputBuffer): string {
     return buffer.text;
   }
   return `[truncated ${buffer.truncatedChars} chars]\n${buffer.text}`;
+}
+
+function mergeOutputText(base: string, extra: string | undefined): string {
+  if (!extra) {
+    return base;
+  }
+  if (!base) {
+    return extra;
+  }
+  if (base === extra || base.endsWith(extra)) {
+    return base;
+  }
+  if (extra.endsWith(base)) {
+    return extra;
+  }
+  return `${base}\n${extra}`;
+}
+
+function buildBufferedCompletionOutput(
+  buffer: BoundedOutputBuffer,
+  extraText?: string
+): string {
+  return mergeOutputText(formatOutputBuffer(buffer), extraText);
 }
 
 function isShallowUnsupportedError(result: CommandResult): boolean {
@@ -871,6 +966,22 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function isCallbackMeta(
+  value: RunRequest["callbackMeta"]
+): value is NonNullable<RunRequest["callbackMeta"]> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof value.repositoryId === "string" &&
+    typeof value.sessionId === "string" &&
+    typeof value.attemptId === "string" &&
+    typeof value.instanceType === "string" &&
+    typeof value.containerInstance === "string" &&
+    typeof value.sessionNumber === "number" &&
+    typeof value.attemptNumber === "number"
+  );
+}
+
 async function runHandler(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
   if (request.method !== "POST") {
     writeJson(response, 405, { message: "method not allowed" });
@@ -902,9 +1013,156 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
     return;
   }
 
+  const callbackUrl = runRequest.callbackUrl?.trim() ?? "";
+  const callbackSecret = typeof runRequest.callbackSecret === "string" ? runRequest.callbackSecret : "";
+  const callbackMeta = isCallbackMeta(runRequest.callbackMeta) ? runRequest.callbackMeta : null;
+  const useCallbackMode = Boolean(callbackUrl && callbackSecret && callbackMeta);
   const startedAt = Date.now();
   let workspaceRoot: string | null = null;
   const abortController = new AbortController();
+  if (useCallbackMode && callbackMeta) {
+    let stdout = createBoundedOutputBuffer();
+    let stderr = createBoundedOutputBuffer();
+    let pendingHeartbeatStdout = "";
+    let pendingHeartbeatStderr = "";
+    let callbackTimer: NodeJS.Timeout | null = null;
+
+    const clearCallbackTimer = () => {
+      if (!callbackTimer) {
+        return;
+      }
+      clearInterval(callbackTimer);
+      callbackTimer = null;
+    };
+
+    try {
+      const prepared = await prepareWorkspace(runRequest);
+      workspaceRoot = prepared.workspaceRoot;
+      await applyConfigFiles(runRequest.configFiles);
+      if (runRequest.repositoryUrl?.trim()) {
+        await configureWorkspaceGitIdentity(prepared.workspaceDir, {
+          name: runRequest.gitCommitName,
+          email: runRequest.gitCommitEmail
+        });
+      }
+
+      callbackTimer = setInterval(() => {
+        if (pendingHeartbeatStdout || pendingHeartbeatStderr) {
+          const heartbeatStdout = pendingHeartbeatStdout;
+          const heartbeatStderr = pendingHeartbeatStderr;
+          pendingHeartbeatStdout = "";
+          pendingHeartbeatStderr = "";
+          void sendCallback(
+            callbackUrl,
+            buildHeartbeatPayload({
+              callbackSecret,
+              callbackMeta,
+              stdout: heartbeatStdout,
+              stderr: heartbeatStderr
+            })
+          );
+          return;
+        }
+
+        void sendCallback(callbackUrl, {
+          type: "heartbeat",
+          callbackSecret,
+          ...callbackMeta
+        });
+      }, CALLBACK_HEARTBEAT_INTERVAL_MS);
+      callbackTimer.unref?.();
+
+      const executed = await runAgentPrompt(
+        agentType,
+        prompt,
+        prepared.workspaceDir,
+        runRequest.env,
+        {
+          name: runRequest.gitCommitName,
+          email: runRequest.gitCommitEmail
+        },
+        {
+          onStdout: (chunk) => {
+            stdout = appendOutputChunk(stdout, chunk);
+            pendingHeartbeatStdout += chunk;
+          },
+          onStderr: (chunk) => {
+            stderr = appendOutputChunk(stderr, chunk);
+            pendingHeartbeatStderr += chunk;
+          }
+        },
+        abortController.signal
+      );
+
+      clearCallbackTimer();
+
+      if (pendingHeartbeatStdout || pendingHeartbeatStderr) {
+        await sendCallback(
+          callbackUrl,
+          buildHeartbeatPayload({
+            callbackSecret,
+            callbackMeta,
+            stdout: pendingHeartbeatStdout,
+            stderr: pendingHeartbeatStderr
+          })
+        );
+        pendingHeartbeatStdout = "";
+        pendingHeartbeatStderr = "";
+      }
+
+      await sendCallback(
+        callbackUrl,
+        buildCompletionPayload({
+          callbackSecret,
+          callbackMeta,
+          exitCode: executed.exitCode,
+          durationMs: Date.now() - startedAt,
+          stdout: buildBufferedCompletionOutput(stdout, executed.stdout),
+          stderr: buildBufferedCompletionOutput(stderr, executed.stderr),
+          ...(executed.spawnError ? { error: "failed to execute agent", spawnError: executed.spawnError } : {}),
+          ...(executed.attemptedCommand ? { attemptedCommand: executed.attemptedCommand } : {}),
+          ...(executed.mcpSetupWarning ? { mcpSetupWarning: executed.mcpSetupWarning } : {})
+        })
+      );
+
+      writeJson(response, 200, {
+        exitCode: executed.exitCode,
+        durationMs: Date.now() - startedAt
+      });
+    } catch (error) {
+      clearCallbackTimer();
+
+      const durationMs = Date.now() - startedAt;
+      const errorMessage = toErrorMessage(error);
+
+      await sendCallback(
+        callbackUrl,
+        buildCompletionPayload({
+          callbackSecret,
+          callbackMeta,
+          exitCode: -1,
+          durationMs,
+          stdout: formatOutputBuffer(stdout),
+          stderr: mergeOutputText(formatOutputBuffer(stderr), errorMessage),
+          error: "workspace preparation failed"
+        })
+      );
+
+      writeJson(response, 500, {
+        exitCode: -1,
+        stderr: errorMessage,
+        durationMs,
+        error: "workspace preparation failed"
+      });
+    } finally {
+      clearCallbackTimer();
+      if (workspaceRoot) {
+        await rm(workspaceRoot, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
+    return;
+  }
+
   let keepaliveTimer: NodeJS.Timeout | null = null;
   const abortExecution = () => {
     abortController.abort();
