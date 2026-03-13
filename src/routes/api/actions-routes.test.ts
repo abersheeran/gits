@@ -1105,30 +1105,7 @@ describe("API actions and session routes", () => {
       },
       {
         when: "FROM agent_session_attempt_events",
-        all: () => [
-          {
-            id: 1,
-            attempt_id: "attempt-timeline",
-            session_id: "session-timeline",
-            repository_id: "repo-1",
-            type: "stdout_chunk",
-            stream: "stdout",
-            message: "Analyzing repository",
-            payload_json: null,
-            created_at: now - 9_500
-          },
-          {
-            id: 2,
-            attempt_id: "attempt-timeline",
-            session_id: "session-timeline",
-            repository_id: "repo-1",
-            type: "stderr_chunk",
-            stream: "stderr",
-            message: "Tests still failing",
-            payload_json: null,
-            created_at: now - 9_000
-          }
-        ]
+        all: () => []
       }
     ]);
 
@@ -1150,16 +1127,6 @@ describe("API actions and session routes", () => {
     expect(body.events.some((event) => event.type === "session_queued")).toBe(true);
     expect(body.events.some((event) => event.type === "session_claimed")).toBe(true);
     expect(body.events.some((event) => event.type === "session_started")).toBe(true);
-    expect(
-      body.events.some(
-        (event) => event.type === "log" && event.stream === "stdout" && event.detail === "Analyzing repository"
-      )
-    ).toBe(true);
-    expect(
-      body.events.some(
-        (event) => event.type === "log" && event.stream === "stderr" && event.detail === "Tests still failing"
-      )
-    ).toBe(true);
     expect(body.events.some((event) => event.type === "session_completed")).toBe(true);
   });
 

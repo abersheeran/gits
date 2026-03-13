@@ -66,11 +66,6 @@ type AgentCommandResult = CommandResult & {
   mcpSetupWarning?: string;
 };
 
-type BoundedOutputBuffer = {
-  text: string;
-  truncatedChars: number;
-};
-
 type RunStreamEvent =
   | {
       type: "stdout";
@@ -103,7 +98,6 @@ const GITS_PLATFORM_MCP_AUTH_TOKEN_ENV_KEYS = [
   "GITS_ISSUE_REPLY_TOKEN",
   "GITS_PR_CREATE_TOKEN"
 ] as const;
-const MAX_CAPTURED_OUTPUT_CHARS = 256_000;
 const ABORT_KILL_TIMEOUT_MS = 5_000;
 const RUN_STREAM_KEEPALIVE_INTERVAL_MS = 5_000;
 const CALLBACK_HEARTBEAT_INTERVAL_MS = 5_000;
@@ -274,44 +268,6 @@ function buildCommandFailureDetail(result: CommandResult): string {
   return [result.stdout, result.stderr, result.spawnError ?? ""].join("\n").trim();
 }
 
-function createBoundedOutputBuffer(): BoundedOutputBuffer {
-  return {
-    text: "",
-    truncatedChars: 0
-  };
-}
-
-function appendOutputChunk(
-  current: BoundedOutputBuffer,
-  chunk: string,
-  limit = MAX_CAPTURED_OUTPUT_CHARS
-): BoundedOutputBuffer {
-  if (!chunk) {
-    return current;
-  }
-
-  const combined = `${current.text}${chunk}`;
-  if (combined.length <= limit) {
-    return {
-      text: combined,
-      truncatedChars: current.truncatedChars
-    };
-  }
-
-  const overflow = combined.length - limit;
-  return {
-    text: combined.slice(overflow),
-    truncatedChars: current.truncatedChars + overflow
-  };
-}
-
-function formatOutputBuffer(buffer: BoundedOutputBuffer): string {
-  if (buffer.truncatedChars === 0) {
-    return buffer.text;
-  }
-  return `[truncated ${buffer.truncatedChars} chars]\n${buffer.text}`;
-}
-
 function mergeOutputText(base: string, extra: string | undefined): string {
   if (!extra) {
     return base;
@@ -326,13 +282,6 @@ function mergeOutputText(base: string, extra: string | undefined): string {
     return extra;
   }
   return `${base}\n${extra}`;
-}
-
-function buildBufferedCompletionOutput(
-  buffer: BoundedOutputBuffer,
-  extraText?: string
-): string {
-  return mergeOutputText(formatOutputBuffer(buffer), extraText);
 }
 
 function isShallowUnsupportedError(result: CommandResult): boolean {
@@ -412,21 +361,21 @@ async function runCommandStreaming(
       return;
     }
 
-    let stdout = createBoundedOutputBuffer();
-    let stderr = createBoundedOutputBuffer();
+    let stdout = "";
+    let stderr = "";
     let stderrStreamed = false;
     let settled = false;
     let abortKillTimer: NodeJS.Timeout | null = null;
 
     const handleStdout = (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      stdout = appendOutputChunk(stdout, text);
+      stdout += text;
       options?.onStdout?.(text);
     };
 
     const handleStderr = (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      stderr = appendOutputChunk(stderr, text);
+      stderr += text;
       stderrStreamed = true;
       options?.onStderr?.(text);
     };
@@ -471,8 +420,8 @@ async function runCommandStreaming(
 
     const handleError = (error: Error) => {
       finalize({
-        stdout: formatOutputBuffer(stdout),
-        stderr: formatOutputBuffer(stderr),
+        stdout,
+        stderr,
         exitCode: -1,
         spawnError: error.message,
         attemptedCommand,
@@ -482,8 +431,8 @@ async function runCommandStreaming(
 
     const handleClose = (code: number | null) => {
       finalize({
-        stdout: formatOutputBuffer(stdout),
-        stderr: formatOutputBuffer(stderr),
+        stdout,
+        stderr,
         exitCode: code ?? -1,
         attemptedCommand,
         stderrStreamed
@@ -1021,8 +970,8 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
   let workspaceRoot: string | null = null;
   const abortController = new AbortController();
   if (useCallbackMode && callbackMeta) {
-    let stdout = createBoundedOutputBuffer();
-    let stderr = createBoundedOutputBuffer();
+    let stdout = "";
+    let stderr = "";
     let pendingHeartbeatStdout = "";
     let pendingHeartbeatStderr = "";
     let callbackTimer: NodeJS.Timeout | null = null;
@@ -1083,11 +1032,11 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
         },
         {
           onStdout: (chunk) => {
-            stdout = appendOutputChunk(stdout, chunk);
+            stdout += chunk;
             pendingHeartbeatStdout += chunk;
           },
           onStderr: (chunk) => {
-            stderr = appendOutputChunk(stderr, chunk);
+            stderr += chunk;
             pendingHeartbeatStderr += chunk;
           }
         },
@@ -1117,8 +1066,8 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
           callbackMeta,
           exitCode: executed.exitCode,
           durationMs: Date.now() - startedAt,
-          stdout: buildBufferedCompletionOutput(stdout, executed.stdout),
-          stderr: buildBufferedCompletionOutput(stderr, executed.stderr),
+          stdout: mergeOutputText(stdout, executed.stdout),
+          stderr: mergeOutputText(stderr, executed.stderr),
           ...(executed.spawnError ? { error: "failed to execute agent", spawnError: executed.spawnError } : {}),
           ...(executed.attemptedCommand ? { attemptedCommand: executed.attemptedCommand } : {}),
           ...(executed.mcpSetupWarning ? { mcpSetupWarning: executed.mcpSetupWarning } : {})
@@ -1142,8 +1091,8 @@ async function runHandler(request: http.IncomingMessage, response: http.ServerRe
           callbackMeta,
           exitCode: -1,
           durationMs,
-          stdout: formatOutputBuffer(stdout),
-          stderr: mergeOutputText(formatOutputBuffer(stderr), errorMessage),
+          stdout,
+          stderr: mergeOutputText(stderr, errorMessage),
           error: "workspace preparation failed"
         })
       );

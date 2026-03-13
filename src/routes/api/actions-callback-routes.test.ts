@@ -8,7 +8,7 @@ describe("API action container callback routes", () => {
     vi.restoreAllMocks();
   });
 
-  it("processes heartbeat callbacks only after callback secret verification succeeds", async () => {
+  it("renews container keepalive on heartbeat only after callback secret verification succeeds", async () => {
     const appendAttemptEvents = vi
       .spyOn(AgentSessionService.prototype, "appendAttemptEvents")
       .mockResolvedValue();
@@ -62,17 +62,7 @@ describe("API action container callback routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(appendAttemptEvents).toHaveBeenCalledWith(
-      "repo-1",
-      "session-1",
-      "attempt-1",
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "stdout_chunk",
-          stream: "stdout"
-        })
-      ])
-    );
+    expect(appendAttemptEvents).not.toHaveBeenCalled();
     expect(runnerFetch).toHaveBeenNthCalledWith(
       1,
       "https://actions-container.internal/verify-callback-secret",

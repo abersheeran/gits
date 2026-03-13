@@ -14,7 +14,7 @@ import {
   ACTION_CONTAINER_INSTANCE_TYPES,
   getActionRunnerNamespace
 } from "./action-container-instance-types";
-import { ActionLogStorageService, buildLogExcerpt } from "./action-log-storage-service";
+import { ActionLogStorageService } from "./action-log-storage-service";
 import {
   extractValidationReportFromText,
   parseAgentSessionValidationReport
@@ -52,8 +52,6 @@ type CompletionResult = {
   validationReport?: AgentSessionValidationReport;
 };
 
-const MAX_SESSION_LOG_CHARS = 120_000;
-
 export type CallbackMeta = {
   repositoryId: string;
   sessionId: string;
@@ -86,21 +84,13 @@ export type CompletionCallbackPayload = {
 
 export type ContainerCallbackPayload = HeartbeatCallbackPayload | CompletionCallbackPayload;
 
-function truncateLog(logs: string): string {
-  if (logs.length <= MAX_SESSION_LOG_CHARS) {
-    return logs;
-  }
-  const retained = logs.slice(logs.length - MAX_SESSION_LOG_CHARS);
-  return `[truncated ${logs.length - MAX_SESSION_LOG_CHARS} chars]\n${retained}`;
-}
-
 function appendSessionLogSection(logs: string, section: string, detail: string): string {
   const trimmedDetail = detail.trim();
   if (!trimmedDetail) {
     return logs;
   }
   const separator = logs.endsWith("\n") ? "" : "\n";
-  return truncateLog(`${logs}${separator}\n[${section}]\n${trimmedDetail}`);
+  return `${logs}${separator}\n[${section}]\n${trimmedDetail}`;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -187,7 +177,7 @@ function buildCompletionSessionLogs(input: {
     lines.push(input.redactText(input.result.stderr));
   }
 
-  return truncateLog(lines.join("\n"));
+  return lines.join("\n");
 }
 
 async function findRepositoryById(
@@ -468,46 +458,6 @@ export async function handleContainerHeartbeat(input: {
   const verified = await verifyCallbackSecret(input.env, input.payload);
   if (!verified) {
     return;
-  }
-
-  const actionLogStorage = new ActionLogStorageService(input.env.ACTION_LOGS_BUCKET ?? input.env.GIT_BUCKET);
-  const agentSessionService = new AgentSessionService(input.env.DB, actionLogStorage);
-  const redactText = createSecretRedactor([input.payload.callbackSecret]);
-
-  if (input.payload.stdout || input.payload.stderr) {
-    const events: Array<{
-      type: "stdout_chunk" | "stderr_chunk";
-      stream: "stdout" | "stderr";
-      message: string;
-      payload: { chars: number };
-    }> = [];
-
-    if (input.payload.stdout) {
-      const stdout = redactText(input.payload.stdout);
-      events.push({
-        type: "stdout_chunk",
-        stream: "stdout",
-        message: buildLogExcerpt(stdout, 2_000),
-        payload: { chars: stdout.length }
-      });
-    }
-
-    if (input.payload.stderr) {
-      const stderr = redactText(input.payload.stderr);
-      events.push({
-        type: "stderr_chunk",
-        stream: "stderr",
-        message: buildLogExcerpt(stderr, 2_000),
-        payload: { chars: stderr.length }
-      });
-    }
-
-    await agentSessionService.appendAttemptEvents(
-      input.payload.repositoryId,
-      input.payload.sessionId,
-      input.payload.attemptId,
-      events
-    );
   }
 
   const actionsRunner = getActionRunnerNamespace(input.env, input.payload.instanceType);

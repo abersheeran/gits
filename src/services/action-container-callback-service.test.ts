@@ -112,7 +112,7 @@ describe("action-container-callback-service", () => {
     vi.restoreAllMocks();
   });
 
-  it("appends heartbeat log chunks and renews container keepalive", async () => {
+  it("renews container keepalive on heartbeat", async () => {
     const runnerFetch = vi.fn(async (url: string) => {
       if (url === "https://actions-container.internal/verify-callback-secret") {
         return new Response(JSON.stringify({ valid: true }), {
@@ -154,23 +154,7 @@ describe("action-container-callback-service", () => {
       }
     });
 
-    expect(AgentSessionService.prototype.appendAttemptEvents).toHaveBeenCalledWith(
-      "repo-1",
-      "session-1",
-      "attempt-1",
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: "stdout_chunk",
-          stream: "stdout",
-          message: "Analyzing repository"
-        }),
-        expect.objectContaining({
-          type: "stderr_chunk",
-          stream: "stderr",
-          message: "Tests still failing"
-        })
-      ])
-    );
+    expect(AgentSessionService.prototype.appendAttemptEvents).not.toHaveBeenCalled();
     expect(runnerFetch).toHaveBeenNthCalledWith(
       1,
       "https://actions-container.internal/verify-callback-secret",
