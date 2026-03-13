@@ -50,14 +50,11 @@ type PullRequestFilesChangedSheetProps = {
   lineDecorations?: RepositoryDiffLineDecoration[];
   reviewThreadBody: string;
   onReviewThreadBodyChange: (value: string) => void;
-  reviewThreadSuggestedCode: string;
-  onReviewThreadSuggestedCodeChange: (value: string) => void;
   onClearSelection: () => void;
   onDiscardDraft: () => void;
   onSubmitReviewThread: () => void;
   reviewThreadSubmitting: boolean;
   reviewThreadDisabled: boolean;
-  selectedRangeSupportsSuggestion: boolean;
   formatSelectedRange: (range: SelectedReviewRange) => string;
   formatCompareLabel: (range: SelectedReviewRange) => string;
   countSelectedLines: (range: SelectedReviewRange) => number;
@@ -76,14 +73,11 @@ export function PullRequestFilesChangedSheet({
   lineDecorations,
   reviewThreadBody,
   onReviewThreadBodyChange,
-  reviewThreadSuggestedCode,
-  onReviewThreadSuggestedCodeChange,
   onClearSelection,
   onDiscardDraft,
   onSubmitReviewThread,
   reviewThreadSubmitting,
   reviewThreadDisabled,
-  selectedRangeSupportsSuggestion,
   formatSelectedRange,
   formatCompareLabel,
   countSelectedLines,
@@ -200,11 +194,8 @@ export function PullRequestFilesChangedSheet({
                   hunkHeader={selectedReviewRange.hunkHeader}
                   side={selectedReviewRange.side}
                   lineCount={countSelectedLines(selectedReviewRange)}
-                  supportsSuggestion={selectedRangeSupportsSuggestion}
                   body={reviewThreadBody}
                   onBodyChange={onReviewThreadBodyChange}
-                  suggestedCode={reviewThreadSuggestedCode}
-                  onSuggestedCodeChange={onReviewThreadSuggestedCodeChange}
                   onClearSelection={onClearSelection}
                   onDiscardDraft={onDiscardDraft}
                   onSubmit={onSubmitReviewThread}

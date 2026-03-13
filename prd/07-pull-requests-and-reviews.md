@@ -56,13 +56,13 @@ PR 是当前产品里的交付中心和评审中心。
 
 - anchored 到真实 diff path/range/hunk
 - 多轮 comments
-- suggested changes
+- 历史 comments 中如 API 返回 suggested change，会以只读代码块展示
 - `open / resolved`
 - `Files changed` 内支持类似 GitHub 的行级 comment 草稿流：
   - 点击行号或代码行即可选中 review range
   - 左侧文件树同步显示当前 patch 中被修改的文件，并可附带该文件的 `open / resolved` thread 数量，便于先按文件定位再进入 diff 评论
-  - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview、suggested change 与提交动作
-  - 一旦草稿正文或 suggested change 已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
+  - 草稿表单直接挂在对应文件的 diff 区块内，并默认先展示选区摘要；只有显式进入编辑状态后才展开正文编辑器、write/preview 与提交动作
+  - 一旦草稿正文已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
   - 文件头展示该文件的 `open / resolved` thread 数量
   - `Files changed` 也提供独立的右侧 Sheet 组件形态，选中 review range 时会把 thread composer 固定到右栏
 - 支持从单条 unresolved thread focused resume agent
@@ -71,7 +71,7 @@ PR 是当前产品里的交付中心和评审中心。
   - `reanchored`
   - `stale`
 - 同时显示 `patchset_changed`
-- open review thread 下的 reply composer 默认收起，仅在显式进入编辑状态后展示正文编辑器、suggested change 与提交动作，并沿用页面内标准卡片尺度
+- open review thread 下的 reply composer 默认收起，仅在显式进入编辑状态后展示正文编辑器与提交动作，并沿用页面内标准卡片尺度
 
 ### 2.5 Merge
 
@@ -114,7 +114,7 @@ PR 页面已经直接消费 session 的验证信息：
 
 1. Agent 推分支并创建 PR。
 2. PR 创建时触发 `pull_request_created` workflow。
-3. 人类在 PR diff 上创建 review、review thread 和 suggested changes。
+3. 人类在 PR diff 上创建 review 和 review thread 评论。
 4. Agent 从 PR 级或 thread 级入口继续执行。
 5. 新 commit 后，thread 尝试映射到当前 patch set。
 6. review、thread、session、merge 结果持续回流到 PR handoff 和关联 Issue task status。

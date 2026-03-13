@@ -3,9 +3,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { PendingButton } from "@/components/ui/pending-button";
-import { Textarea } from "@/components/ui/textarea";
 import type { PullRequestReviewThreadSide } from "@/lib/api";
 
 type PullRequestInlineThreadComposerProps = {
@@ -14,11 +12,8 @@ type PullRequestInlineThreadComposerProps = {
   hunkHeader: string | null;
   side: PullRequestReviewThreadSide;
   lineCount: number;
-  supportsSuggestion: boolean;
   body: string;
   onBodyChange: (value: string) => void;
-  suggestedCode: string;
-  onSuggestedCodeChange: (value: string) => void;
   onClearSelection: () => void;
   onDiscardDraft: () => void;
   onSubmit: () => void;
@@ -36,18 +31,15 @@ export function PullRequestInlineThreadComposer({
   hunkHeader,
   side,
   lineCount,
-  supportsSuggestion,
   body,
   onBodyChange,
-  suggestedCode,
-  onSuggestedCodeChange,
   onClearSelection,
   onDiscardDraft,
   onSubmit,
   submitting,
   disabled
 }: PullRequestInlineThreadComposerProps) {
-  const hasDraft = body.trim().length > 0 || suggestedCode.trim().length > 0;
+  const hasDraft = body.trim().length > 0;
   const [editing, setEditing] = useState(hasDraft);
   const expanded = editing || hasDraft;
 
@@ -100,23 +92,6 @@ export function PullRequestInlineThreadComposer({
 
       {expanded ? (
         <>
-          <div className="panel-inset-compact space-y-2">
-            <Label htmlFor="inline-review-thread-suggested-code">Suggested change</Label>
-            <Textarea
-              id="inline-review-thread-suggested-code"
-              value={suggestedCode}
-              onChange={(event) => onSuggestedCodeChange(event.target.value)}
-              rows={5}
-              disabled={!supportsSuggestion}
-              placeholder={
-                supportsSuggestion
-                  ? "Optional replacement code for the selected head-side range"
-                  : "Suggested changes are only available for head-side ranges"
-              }
-              className="min-h-[180px] bg-surface-base shadow-none"
-            />
-          </div>
-
           <div className="flex flex-wrap gap-2">
             <PendingButton
               onClick={onSubmit}

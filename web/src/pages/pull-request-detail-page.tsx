@@ -214,11 +214,6 @@ function formatReviewThreadAnchor(thread: PullRequestReviewThreadRecord): string
   });
 }
 
-function canSuggestChangeOnReviewThread(thread: PullRequestReviewThreadRecord): boolean {
-  const currentAnchor = getCurrentReviewThreadAnchor(thread);
-  return currentAnchor?.start_side === "head";
-}
-
 function reviewThreadDisplayPath(thread: PullRequestReviewThreadRecord): string {
   return thread.anchor?.path ?? thread.path;
 }
@@ -375,12 +370,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
   const [selectedReviewRange, setSelectedReviewRange] = useState<SelectedReviewRange | null>(null);
   const [filesChangedSheetOpen, setFilesChangedSheetOpen] = useState(false);
   const [reviewThreadBody, setReviewThreadBody] = useState("");
-  const [reviewThreadSuggestedCode, setReviewThreadSuggestedCode] = useState("");
   const [reviewThreadSubmitting, setReviewThreadSubmitting] = useState(false);
   const [threadReplyBodies, setThreadReplyBodies] = useState<Record<string, string>>({});
-  const [threadReplySuggestedCodes, setThreadReplySuggestedCodes] = useState<Record<string, string>>(
-    {}
-  );
   const [threadReplyEditorsExpanded, setThreadReplyEditorsExpanded] = useState<
     Record<string, boolean>
   >({});
@@ -486,21 +477,13 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setSelectedReviewRange(null);
   }, [comparison?.mergeBaseOid, comparison?.baseOid, comparison?.headOid]);
 
-  useEffect(() => {
-    if (selectedReviewRange?.side !== "head" && reviewThreadSuggestedCode) {
-      setReviewThreadSuggestedCode("");
-    }
-  }, [reviewThreadSuggestedCode, selectedReviewRange?.side]);
-
   function clearReviewThreadSelection() {
     setSelectedReviewRange(null);
-    setReviewThreadSuggestedCode("");
   }
 
   function discardReviewThreadDraft() {
     setSelectedReviewRange(null);
     setReviewThreadBody("");
-    setReviewThreadSuggestedCode("");
   }
 
   const hasPendingPullRequestSession = isPendingAgentSession(latestPullRequestSession);
@@ -657,10 +640,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
 
     const trimmedBody = reviewThreadBody.trim();
-    const trimmedSuggestedCode =
-      selectedReviewRange.side === "head" ? reviewThreadSuggestedCode.trim() : "";
-    if (!trimmedBody && !trimmedSuggestedCode) {
-      setError("Review threads require either a comment or suggested code.");
+    if (!trimmedBody) {
+      setError("Review threads require a comment.");
       return;
     }
 
@@ -676,13 +657,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         endSide: selectedReviewRange.side,
         endLine: selectedReviewRange.endLine,
         hunkHeader: selectedReviewRange.hunkHeader,
-        ...(trimmedBody ? { body: trimmedBody } : {}),
-        ...(trimmedSuggestedCode ? { suggestedCode: trimmedSuggestedCode } : {})
+        body: trimmedBody
       });
       setReviewThreads((previous) => sortReviewThreads([...previous, created]));
       setSelectedReviewRange(null);
       setReviewThreadBody("");
-      setReviewThreadSuggestedCode("");
       await refreshPullRequestDetail();
     } catch (submitError) {
       setError(formatApiError(submitError));
@@ -763,12 +742,8 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     }
 
     const trimmedBody = (threadReplyBodies[thread.id] ?? "").trim();
-    const trimmedSuggestedCode =
-      canSuggestChangeOnReviewThread(thread)
-        ? (threadReplySuggestedCodes[thread.id] ?? "").trim()
-        : "";
-    if (!trimmedBody && !trimmedSuggestedCode) {
-      setError("Review thread replies require either a comment or suggested code.");
+    if (!trimmedBody) {
+      setError("Review thread replies require a comment.");
       return;
     }
 
@@ -776,8 +751,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
     setError(null);
     try {
       const updatedThread = await createPullRequestReviewThreadComment(owner, repo, number, thread.id, {
-        ...(trimmedBody ? { body: trimmedBody } : {}),
-        ...(trimmedSuggestedCode ? { suggestedCode: trimmedSuggestedCode } : {})
+        body: trimmedBody
       });
       setReviewThreads((previous) =>
         sortReviewThreads(
@@ -787,7 +761,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
         )
       );
       setThreadReplyBodies((previous) => ({ ...previous, [thread.id]: "" }));
-      setThreadReplySuggestedCodes((previous) => ({ ...previous, [thread.id]: "" }));
       setThreadReplyEditorsExpanded((previous) => ({ ...previous, [thread.id]: false }));
       await refreshPullRequestDetail();
     } catch (replyError) {
@@ -850,7 +823,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
   const openReviewThreadCount = reviewThreads.filter((thread) => thread.status === "open").length;
   const resolvedReviewThreadCount = reviewThreads.length - openReviewThreadCount;
-  const selectedRangeSupportsSuggestion = selectedReviewRange?.side === "head";
   const latestValidationSession = provenanceDetail?.session ?? latestPullRequestSession;
   const latestValidationState = latestValidationStatus(
     provenanceDetail,
@@ -1228,8 +1200,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 lineDecorations={reviewThreadLineDecorations}
                 reviewThreadBody={reviewThreadBody}
                 onReviewThreadBodyChange={setReviewThreadBody}
-                reviewThreadSuggestedCode={reviewThreadSuggestedCode}
-                onReviewThreadSuggestedCodeChange={setReviewThreadSuggestedCode}
                 onClearSelection={clearReviewThreadSelection}
                 onDiscardDraft={discardReviewThreadDraft}
                 onSubmitReviewThread={() => {
@@ -1239,7 +1209,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                 reviewThreadDisabled={
                   reviewThreadSubmitting || pullRequest.state !== "open" || !selectedReviewRange
                 }
-                selectedRangeSupportsSuggestion={selectedRangeSupportsSuggestion}
                 formatSelectedRange={formatSelectedReviewRange}
                 formatCompareLabel={(range) =>
                   `Compare ${shortOid(range.baseOid)}..${shortOid(range.headOid)}`
@@ -1404,31 +1373,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                             />
                             {threadReplyEditorsExpanded[thread.id] ? (
                               <>
-                                <div className="panel-card-compact space-y-2">
-                                  <Label htmlFor={`thread-suggested-code-${thread.id}`}>
-                                    Suggested change
-                                  </Label>
-                                  <Textarea
-                                    id={`thread-suggested-code-${thread.id}`}
-                                    value={threadReplySuggestedCodes[thread.id] ?? ""}
-                                    onChange={(event) =>
-                                      setThreadReplySuggestedCodes((previous) => ({
-                                        ...previous,
-                                        [thread.id]: event.target.value
-                                      }))
-                                    }
-                                    rows={5}
-                                    disabled={!canSuggestChangeOnReviewThread(thread)}
-                                    placeholder={
-                                      canSuggestChangeOnReviewThread(thread)
-                                        ? "Optional replacement code for this anchored range"
-                                        : thread.anchor?.status === "stale"
-                                          ? "Suggested changes are disabled until this thread maps to the current diff"
-                                        : "Suggested changes are only available for head-side ranges"
-                                    }
-                                    className="min-h-[160px] bg-surface-focus"
-                                  />
-                                </div>
                                 <div className="flex flex-wrap gap-2">
                                   <PendingButton
                                     size="sm"
