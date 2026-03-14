@@ -7,6 +7,7 @@ import { MarkdownBody } from "@/components/repository/markdown-body";
 import { MarkdownEditor } from "@/components/repository/markdown-editor";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { DetailSection } from "@/components/common/detail-section";
+import { HelpTip } from "@/components/common/help-tip";
 import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -586,7 +587,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
             <DetailSection
               variant="muted"
               title="Add comment"
-              description="默认收起评论编辑器，需要补充上下文时再显式展开，减少页面噪音。"
             >
               <MarkdownEditor
                 label="Comment"
@@ -624,8 +624,11 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
 
         <aside className="space-y-4">
           <DetailSection
-            title="Task center"
-            description="查看任务状态、最近交付和 Agent 操作。"
+            title={
+              <>
+                Task center <HelpTip content="查看任务状态、最近交付和 Agent 操作。" />
+              </>
+            }
           >
             <div className="panel-inset-compact space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -666,10 +669,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               ) : (
                 <p className="text-xs text-muted-foreground">当前 Issue 还没有交付 session。</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                手动修改 task status 仅作为临时覆盖；后续 assign/resume、PR review、thread
-                处理、merge 与 session 完成都会按主流程自动回写。
-              </p>
             </div>
             {canUpdate ? (
               <div className="space-y-3">
@@ -680,23 +679,30 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                   onValueChange={(nextStatus) => setTaskStatusDraft(nextStatus)}
                   options={ISSUE_TASK_STATUS_SELECT_OPTIONS}
                 />
-                <PendingButton
-                  pending={taskStatusSaving}
-                  pendingText="Saving task status..."
-                  disabled={taskStatusDraft === issue.task_status}
-                  onClick={() => {
-                    void saveTaskStatus();
-                  }}
-                >
-                  保存任务状态
-                </PendingButton>
+                <div className="flex flex-wrap items-center gap-2">
+                  <PendingButton
+                    pending={taskStatusSaving}
+                    pendingText="Saving task status..."
+                    disabled={taskStatusDraft === issue.task_status}
+                    onClick={() => {
+                      void saveTaskStatus();
+                    }}
+                  >
+                    保存任务状态
+                  </PendingButton>
+                  <HelpTip content="手动修改 task status 仅作为临时覆盖；后续 assign/resume、PR review、thread 处理、merge 与 session 完成都会按主流程自动回写。" />
+                </div>
               </div>
             ) : null}
           </DetailSection>
 
           <DetailSection
-            title="Linked pull requests"
-            description="直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent session 和验证摘要。"
+            title={
+              <>
+                Linked pull requests{" "}
+                <HelpTip content="直接在 Issue 里回看当前交付入口，以及 PR 上的最新 Agent session 和验证摘要。" />
+              </>
+            }
           >
             {linkedPullRequests.length === 0 ? (
               <p className="text-body-sm text-text-secondary">
@@ -849,8 +855,12 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           </DetailSection>
 
           <DetailSection
-            title="Agent session"
-            description="将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。"
+            title={
+              <>
+                Agent session{" "}
+                <HelpTip content="将当前 Issue 作为任务入口，创建或继续一个受仓库策略约束的 Agent session。" />
+              </>
+            }
           >
 
             {latestIssueSession ? (
@@ -925,7 +935,6 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                     继续 Agent
                   </PendingButton>
                 </div>
-                <p className="text-xs text-muted-foreground">运行详情可在 Actions 页面查看。</p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">

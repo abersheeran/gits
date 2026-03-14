@@ -19,6 +19,7 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 ### 2.1 基础对象
 
 - Issue 列表与分页
+- Issue 列表页使用 URL `page` 参数管理分页，默认第 1 页，每页 20 条；切换 `open / closed / all` 筛选会回到第 1 页
 - Issue 详情
 - Issue 评论
 - Issue 与评论 Reaction

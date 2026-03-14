@@ -18,6 +18,7 @@ PR 是当前产品里的交付中心和评审中心。
 ### 2.1 PR 创建与元数据
 
 - PR 列表与详情
+- PR 列表页使用 URL `page` 参数管理分页，默认第 1 页，每页 20 条；切换 `open / closed / merged / all` 筛选会回到第 1 页
 - 选择 `baseRef / headRef`
 - draft
 - closing issues
@@ -108,6 +109,7 @@ PR 页面已经直接消费 session 的验证信息：
   - scoped multi-step checks
 - highlighted artifacts 会按失败/通过上下文与检查命中结果做优先级排序
 - validation summary 与 Agent handoff 只围绕最新 session 展示，不再额外分出 linked run 入口
+- PR detail 中 Validation summary / Merge summary / Task chain / Agent handoff 的说明改为标题旁 HelpTip，正文只保留面向用户任务的状态信息
 
 ## 5. 当前关键流程
 

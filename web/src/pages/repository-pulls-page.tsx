@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { GitPullRequest } from "lucide-react";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
@@ -16,6 +16,7 @@ import {
   listPullRequests,
   type AgentSessionRecord,
   type AuthUser,
+  type PaginationMetadata,
   type PullRequestListState,
   type PullRequestRecord,
   type RepositoryDetailResponse
@@ -32,18 +33,40 @@ function stripHeadsRef(refName: string): string {
 
 export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const owner = params.owner ?? "";
   const repo = params.repo ?? "";
+  const requestedPage = Math.max(Number.parseInt(searchParams.get("page") ?? "1", 10) || 1, 1);
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [pullRequests, setPullRequests] = useState<PullRequestRecord[]>([]);
-  const [totalPullRequests, setTotalPullRequests] = useState(0);
+  const [pagination, setPagination] = useState<PaginationMetadata>({
+    total: 0,
+    page: 1,
+    perPage: 20,
+    hasNextPage: false
+  });
   const [latestSessionByPullNumber, setLatestSessionByPullNumber] = useState<
     Record<number, AgentSessionRecord>
   >({});
   const [state, setState] = useState<PullRequestListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  function updatePage(page: number) {
+    const nextParams = new URLSearchParams(searchParams);
+    if (page > 1) {
+      nextParams.set("page", String(page));
+    } else {
+      nextParams.delete("page");
+    }
+    setSearchParams(nextParams);
+  }
+
+  function handleStateChange(nextState: PullRequestListState) {
+    setState(nextState);
+    updatePage(1);
+  }
 
   useEffect(() => {
     let canceled = false;
@@ -57,7 +80,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
       try {
         const [nextDetail, nextPullRequests] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listPullRequests(owner, repo, { state, limit: 100 })
+          listPullRequests(owner, repo, { state, limit: 20, page: requestedPage })
         ]);
         const pullNumbers = nextPullRequests.pullRequests.map((pullRequest) => pullRequest.number);
         const latestSessionItems =
@@ -78,7 +101,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
         }
         setDetail(nextDetail);
         setPullRequests(nextPullRequests.pullRequests);
-        setTotalPullRequests(nextPullRequests.pagination.total);
+        setPagination(nextPullRequests.pagination);
         setLatestSessionByPullNumber(nextSessionByPullNumber);
       } catch (loadError) {
         if (!canceled) {
@@ -95,7 +118,7 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
     return () => {
       canceled = true;
     };
-  }, [owner, repo, state]);
+  }, [owner, repo, requestedPage, state]);
 
   const hasPendingSession = pullRequests.some((pullRequest) => {
     const session = latestSessionByPullNumber[pullRequest.number];
@@ -175,34 +198,34 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
             <Button
               size="sm"
               variant={state === "open" ? "secondary" : "ghost"}
-              onClick={() => setState("open")}
+              onClick={() => handleStateChange("open")}
             >
               Open
             </Button>
             <Button
               size="sm"
               variant={state === "closed" ? "secondary" : "ghost"}
-              onClick={() => setState("closed")}
+              onClick={() => handleStateChange("closed")}
             >
               Closed
             </Button>
             <Button
               size="sm"
               variant={state === "merged" ? "secondary" : "ghost"}
-              onClick={() => setState("merged")}
+              onClick={() => handleStateChange("merged")}
             >
               Merged
             </Button>
             <Button
               size="sm"
               variant={state === "all" ? "secondary" : "ghost"}
-              onClick={() => setState("all")}
+              onClick={() => handleStateChange("all")}
             >
               All
             </Button>
           </div>
           <div className="text-body-xs text-text-secondary">
-            {totalPullRequests} pull requests · filter: {state}
+            第 {pagination.page} 页 · 每页 {pagination.perPage} 条 · filter: {state}
           </div>
           {canCreate ? (
             <Button size="sm" asChild>
@@ -214,61 +237,88 @@ export function RepositoryPullsPage({ user }: RepositoryPullsPageProps) {
         {pullRequests.length === 0 ? (
           <div className="p-6 text-sm text-muted-foreground">当前筛选下没有 pull request。</div>
         ) : (
-          <ul className="divide-y">
-            {pullRequests.map((pullRequest) => {
-              const latestSession = latestSessionByPullNumber[pullRequest.number];
-              return (
-                <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 gap-3">
-                      <AuthorAvatar name={pullRequest.author_username} className="h-9 w-9 text-sm" />
-                      <div className="min-w-0 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            className="inline-flex items-center gap-2 text-sm font-medium gh-link"
-                            to={`/repo/${owner}/${repo}/pulls/${pullRequest.number}`}
-                          >
-                            <GitPullRequest className="h-4 w-4" />
-                            #{pullRequest.number} {pullRequest.title}
-                          </Link>
-                          {pullRequest.draft ? (
-                            <Badge variant="secondary" className="text-[11px]">
-                              Draft
-                            </Badge>
-                          ) : null}
-                          {latestSession ? (
+          <section className="min-w-0">
+            <ul className="divide-y">
+              {pullRequests.map((pullRequest) => {
+                const latestSession = latestSessionByPullNumber[pullRequest.number];
+                return (
+                  <li key={pullRequest.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <AuthorAvatar name={pullRequest.author_username} className="h-9 w-9 text-sm" />
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Link
-                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                              to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
+                              className="inline-flex items-center gap-2 text-sm font-medium gh-link"
+                              to={`/repo/${owner}/${repo}/pulls/${pullRequest.number}`}
                             >
-                              <ActionStatusBadge
-                                status={latestSession.status}
-                                withDot
-                                className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
-                              />
+                              <GitPullRequest className="h-4 w-4" />
+                              #{pullRequest.number} {pullRequest.title}
                             </Link>
-                          ) : null}
+                            {pullRequest.draft ? (
+                              <Badge variant="secondary" className="text-[11px]">
+                                Draft
+                              </Badge>
+                            ) : null}
+                            {latestSession ? (
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                                to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
+                              >
+                                <ActionStatusBadge
+                                  status={latestSession.status}
+                                  withDot
+                                  className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
+                                />
+                              </Link>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {stripHeadsRef(pullRequest.head_ref)} to {stripHeadsRef(pullRequest.base_ref)}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {pullRequest.author_username} opened {formatRelativeTime(pullRequest.created_at)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {stripHeadsRef(pullRequest.head_ref)} to {stripHeadsRef(pullRequest.base_ref)}
-                        </p>
                       </div>
+                      <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />
                     </div>
-                    <RepositoryStateBadge state={pullRequest.state} kind="pull_request" />
-                  </div>
-                  <p className="line-clamp-2 text-sm text-muted-foreground">
-                    {pullRequest.body.trim() ? pullRequest.body : "(no description)"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    updated at {formatDateTime(pullRequest.updated_at)}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
+                    <p className="line-clamp-2 text-sm text-muted-foreground">
+                      {pullRequest.body.trim() ? pullRequest.body : "(no description)"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      updated at {formatDateTime(pullRequest.updated_at)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <span className="text-body-xs text-text-secondary">
+                本页显示 {pullRequests.length} 条 pull request，共 {pagination.total} 条
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={pagination.page <= 1 || loading}
+                  onClick={() => updatePage(pagination.page - 1)}
+                >
+                  上一页
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!pagination.hasNextPage || loading}
+                  onClick={() => updatePage(pagination.page + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </section>
         )}
       </section>
     </div>

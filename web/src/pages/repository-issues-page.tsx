@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { MessageSquareText } from "lucide-react";
 import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
@@ -19,6 +19,7 @@ import {
   type AuthUser,
   type IssueListState,
   type IssueRecord,
+  type PaginationMetadata,
   type RepositoryDetailResponse
 } from "@/lib/api";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
@@ -29,18 +30,40 @@ type RepositoryIssuesPageProps = {
 
 export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
   const params = useParams<{ owner: string; repo: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const owner = params.owner ?? "";
   const repo = params.repo ?? "";
+  const requestedPage = Math.max(Number.parseInt(searchParams.get("page") ?? "1", 10) || 1, 1);
 
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [issues, setIssues] = useState<IssueRecord[]>([]);
-  const [totalIssues, setTotalIssues] = useState(0);
+  const [pagination, setPagination] = useState<PaginationMetadata>({
+    total: 0,
+    page: 1,
+    perPage: 20,
+    hasNextPage: false
+  });
   const [latestSessionByIssueNumber, setLatestSessionByIssueNumber] = useState<
     Record<number, AgentSessionRecord>
   >({});
   const [state, setState] = useState<IssueListState>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  function updatePage(page: number) {
+    const nextParams = new URLSearchParams(searchParams);
+    if (page > 1) {
+      nextParams.set("page", String(page));
+    } else {
+      nextParams.delete("page");
+    }
+    setSearchParams(nextParams);
+  }
+
+  function handleStateChange(nextState: IssueListState) {
+    setState(nextState);
+    updatePage(1);
+  }
 
   useEffect(() => {
     let canceled = false;
@@ -54,7 +77,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
       try {
         const [nextDetail, nextIssues] = await Promise.all([
           getRepositoryDetail(owner, repo),
-          listIssues(owner, repo, { state, limit: 100 })
+          listIssues(owner, repo, { state, limit: 20, page: requestedPage })
         ]);
         const issueNumbers = nextIssues.issues.map((issue) => issue.number);
         const latestSessionItems =
@@ -75,7 +98,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
         }
         setDetail(nextDetail);
         setIssues(nextIssues.issues);
-        setTotalIssues(nextIssues.pagination.total);
+        setPagination(nextIssues.pagination);
         setLatestSessionByIssueNumber(nextSessionByIssueNumber);
       } catch (loadError) {
         if (!canceled) {
@@ -92,7 +115,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     return () => {
       canceled = true;
     };
-  }, [owner, repo, state]);
+  }, [owner, repo, requestedPage, state]);
 
   const hasPendingSession = issues.some((issue) => {
     const session = latestSessionByIssueNumber[issue.number];
@@ -105,7 +128,11 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     }
     const timer = window.setInterval(async () => {
       try {
-        const nextIssues = await listIssues(owner, repo, { state, limit: 100 });
+        const nextIssues = await listIssues(owner, repo, {
+          state,
+          limit: 20,
+          page: requestedPage
+        });
         const issueNumbers = nextIssues.issues.map((issue) => issue.number);
         const latestSessionItems =
           issueNumbers.length > 0
@@ -121,7 +148,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
           }
         }
         setIssues(nextIssues.issues);
-        setTotalIssues(nextIssues.pagination.total);
+        setPagination(nextIssues.pagination);
         setLatestSessionByIssueNumber(nextSessionByIssueNumber);
       } catch {
         // Ignore transient polling errors.
@@ -130,7 +157,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [hasPendingSession, issues, owner, repo, state]);
+  }, [hasPendingSession, issues, owner, repo, requestedPage, state]);
 
   if (!owner || !repo) {
     return (
@@ -178,27 +205,27 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
             <Button
               size="sm"
               variant={state === "open" ? "secondary" : "ghost"}
-              onClick={() => setState("open")}
+              onClick={() => handleStateChange("open")}
             >
               Open
             </Button>
             <Button
               size="sm"
               variant={state === "closed" ? "secondary" : "ghost"}
-              onClick={() => setState("closed")}
+              onClick={() => handleStateChange("closed")}
             >
               Closed
             </Button>
             <Button
               size="sm"
               variant={state === "all" ? "secondary" : "ghost"}
-              onClick={() => setState("all")}
+              onClick={() => handleStateChange("all")}
             >
               All
             </Button>
           </div>
           <div className="text-body-xs text-text-secondary">
-            {totalIssues} issues · filter: {state}
+            第 {pagination.page} 页 · 每页 {pagination.perPage} 条 · filter: {state}
           </div>
           {canCreate ? (
             <Button size="sm" asChild>
@@ -210,59 +237,88 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
         {issues.length === 0 ? (
           <div className="p-6 text-sm text-muted-foreground">当前筛选下没有 issue。</div>
         ) : (
-          <ul className="divide-y">
-            {issues.map((issue) => {
-              const latestSession = latestSessionByIssueNumber[issue.number];
-              return (
-                <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 gap-3">
-                      <AuthorAvatar name={issue.author_username} className="h-9 w-9 text-sm" />
-                      <div className="min-w-0 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            className="inline-flex items-center gap-2 text-sm font-medium gh-link"
-                            to={`/repo/${owner}/${repo}/issues/${issue.number}`}
-                          >
-                            <MessageSquareText className="h-4 w-4" />
-                            #{issue.number} {issue.title}
-                          </Link>
-                          {issue.comment_count > 0 ? (
-                            <Badge variant="outline" className="text-[11px]">
-                              {issue.comment_count} comments
-                            </Badge>
-                          ) : null}
-                          {latestSession ? (
+          <section className="min-w-0">
+            <ul className="divide-y">
+              {issues.map((issue) => {
+                const latestSession = latestSessionByIssueNumber[issue.number];
+                return (
+                  <li key={issue.id} className="space-y-2 p-4 transition-colors hover:bg-muted/30">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <AuthorAvatar name={issue.author_username} className="h-9 w-9 text-sm" />
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Link
-                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                              to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
+                              className="inline-flex items-center gap-2 text-sm font-medium gh-link"
+                              to={`/repo/${owner}/${repo}/issues/${issue.number}`}
                             >
-                              <ActionStatusBadge
-                                status={latestSession.status}
-                                withDot
-                                className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
-                              />
+                              <MessageSquareText className="h-4 w-4" />
+                              #{issue.number} {issue.title}
                             </Link>
-                          ) : null}
+                            {issue.comment_count > 0 ? (
+                              <Badge variant="outline" className="text-[11px]">
+                                {issue.comment_count} comments
+                              </Badge>
+                            ) : null}
+                            {latestSession ? (
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                                to={`/repo/${owner}/${repo}/actions?sessionId=${latestSession.id}`}
+                              >
+                                <ActionStatusBadge
+                                  status={latestSession.status}
+                                  withDot
+                                  className="border-0 bg-transparent p-0 text-[11px] font-normal text-inherit shadow-none"
+                                />
+                              </Link>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {issue.author_username} opened {formatRelativeTime(issue.created_at)}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {issue.author_username} opened {formatRelativeTime(issue.created_at)}
-                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <IssueTaskStatusBadge status={issue.task_status} />
+                        <RepositoryStateBadge state={issue.state} kind="issue" />
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <IssueTaskStatusBadge status={issue.task_status} />
-                      <RepositoryStateBadge state={issue.state} kind="issue" />
-                    </div>
-                  </div>
-                  <p className="line-clamp-2 text-sm text-muted-foreground">
-                    {issue.body.trim() ? issue.body : "(no description)"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">updated at {formatDateTime(issue.updated_at)}</p>
-                </li>
-              );
-            })}
-          </ul>
+                    <p className="line-clamp-2 text-sm text-muted-foreground">
+                      {issue.body.trim() ? issue.body : "(no description)"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      updated at {formatDateTime(issue.updated_at)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <span className="text-body-xs text-text-secondary">
+                本页显示 {issues.length} 条 issue，共 {pagination.total} 条
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={pagination.page <= 1 || loading}
+                  onClick={() => updatePage(pagination.page - 1)}
+                >
+                  上一页
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!pagination.hasNextPage || loading}
+                  onClick={() => updatePage(pagination.page + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </section>
         )}
       </section>
     </div>

@@ -16,6 +16,7 @@ import {
 import { RepositoryMetadataFields } from "@/components/repository/repository-metadata-fields";
 import { RepositoryStateBadge } from "@/components/repository/repository-state-badge";
 import { DetailSection } from "@/components/common/detail-section";
+import { HelpTip } from "@/components/common/help-tip";
 import { LabeledSelectField } from "@/components/common/labeled-select-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -964,8 +965,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           </DetailSection>
 
           <DetailSection
-            title="Validation summary"
-            description="直接展示最近一轮 Agent 交付、验证结果和关键 artifact，不再要求先跳到 Session 页。"
+            title={<>Validation summary <HelpTip content="展示最近一轮验证结果和关键 artifact。" /></>}
             headerActions={
               latestValidationState ? <ActionStatusBadge status={latestValidationState} /> : null
             }
@@ -1093,9 +1093,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     )}
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    当前只拿到最新 session 状态，尚无更完整的 provenance 摘要。
-                  </p>
+                  <p className="text-sm text-muted-foreground">验证摘要正在生成中。</p>
                 )}
               </div>
             ) : (
@@ -1104,8 +1102,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           </DetailSection>
 
           <DetailSection
-            title="Merge summary"
-            description="在一个地方汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。"
+            title={<>Merge summary <HelpTip content="汇总 mergeability、review 反馈、验证状态和关联 Issue 的完成度。" /></>}
             contentClassName="space-y-3"
           >
             <div className="panel-inset-compact space-y-3">
@@ -1462,7 +1459,6 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
             <DetailSection
               variant="muted"
               title="Submit review"
-              description="提交 review 结论与说明。"
             >
               {reviewEditorExpanded ? (
                 <div className="panel-card-compact">
@@ -1508,8 +1504,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
 
         <aside className="space-y-4">
           <DetailSection
-            title="Task chain / Handoff"
-            description="将 linked issue、review/validation 状态和下一步 handoff 收拢到同一处。"
+            title={<>Task chain / Handoff <HelpTip content="查看 linked issue、review 与验证状态，以及下一步 handoff。" /></>}
           >
             <div className="panel-inset-compact space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -1558,19 +1553,12 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     </button>
                   </p>
                 ) : null}
-                <p>
-                  Main CTA:{" "}
-                  {primaryResumeThreadId !== null
-                    ? "默认继续最早的未解决 review thread。"
-                    : "继续整个 PR 的下一轮 Agent 交付。"}
-                </p>
               </div>
             </div>
           </DetailSection>
 
           <DetailSection
-            title="Agent handoff"
-            description="查看最近交付、验证摘要并继续 Agent。"
+            title={<>Agent handoff <HelpTip content="查看最近交付与验证摘要，并继续 Agent。" /></>}
           >
 
             {provenanceDetail || latestPullRequestSession ? (
@@ -1666,19 +1654,19 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     className="min-h-[180px] bg-surface-focus"
                   />
                 </div>
-                <PendingButton
-                  pending={agentSubmitting && agentResumeThreadId === primaryResumeThreadId}
-                  disabled={agentSubmitting || pullRequest.state !== "open"}
-                  pendingText="Resuming agent..."
-                  onClick={() => {
-                    void handleResumeAgent(primaryResumeThreadId ?? undefined);
-                  }}
-                >
-                  {primaryResumeLabel}
-                </PendingButton>
-                <p className="text-xs text-muted-foreground">
-                  新 session 会继承当前 PR 标题、描述、Review 历史和 head 分支上下文。
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <PendingButton
+                    pending={agentSubmitting && agentResumeThreadId === primaryResumeThreadId}
+                    disabled={agentSubmitting || pullRequest.state !== "open"}
+                    pendingText="Resuming agent..."
+                    onClick={() => {
+                      void handleResumeAgent(primaryResumeThreadId ?? undefined);
+                    }}
+                  >
+                    {primaryResumeLabel}
+                  </PendingButton>
+                  <HelpTip content="继续 Agent 时会沿用当前 PR 的上下文与 review 历史。" />
+                </div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">

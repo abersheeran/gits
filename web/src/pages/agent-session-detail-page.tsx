@@ -247,7 +247,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
 
   if (loading) {
     return (
-      <div className="mx-auto w-[min(1200px,92vw)] py-10">
+      <div className="app-page">
         <PageLoadingState
           title="Loading agent session"
           description="Loading the session overview and timeline."
@@ -258,7 +258,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
 
   if (!detail || !sessionDetail) {
     return (
-      <div className="mx-auto w-[min(1200px,92vw)] py-10">
+      <div className="app-page">
         <Alert variant="destructive">
           <AlertTitle>Agent session unavailable</AlertTitle>
           <AlertDescription>{error ?? "Unable to load the requested session."}</AlertDescription>
@@ -271,7 +271,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
   const { artifacts, attempts, events, activeAttempt, latestAttempt } = sessionDetail;
 
   return (
-    <div className="mx-auto flex w-[min(1200px,92vw)] flex-col gap-6 py-6">
+    <div className="app-page">
       <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
 
       {error ? (
@@ -395,12 +395,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
 
               <div className="panel-inset-compact">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Prompt</p>
-                    <p className="text-xs text-muted-foreground">
-                      需要时展开查看完整 prompt。
-                    </p>
-                  </div>
+                  <p className="text-xs font-medium text-foreground">Prompt</p>
                   <Button
                     size="sm"
                     variant="outline"
@@ -632,9 +627,6 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
                             ) : null}
                           </div>
                         </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          {showingExcerpt ? "当前显示节选。" : "当前显示完整输出。"}
-                        </p>
                         <MonacoTextViewer
                           value={fullContent ?? artifact.content_text}
                           path={`agent-session/${sessionDetail.session.id}/artifact-${artifact.id}-${artifact.title}.log`}
