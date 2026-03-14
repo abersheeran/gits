@@ -78,6 +78,7 @@ PR 是当前产品里的交付中心和评审中心。
 
 - 当前只支持 squash merge
 - 合并后自动关闭关联 closing issues
+- 合并后自动删除 head 分支（head 与 base 相同时跳过，删除失败不影响合并结果）
 - merge 成功会触发对应 `push` workflow
 
 ## 3. 当前 handoff 与状态语义

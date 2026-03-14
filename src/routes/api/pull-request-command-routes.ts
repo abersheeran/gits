@@ -393,8 +393,8 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         if (existingPullRequest.state !== "open") {
           throw new HTTPException(409, { message: "Only open pull requests can be merged" });
         }
+        const repositoryClient = createRepositoryObjectClient(c.env);
         try {
-          const repositoryClient = createRepositoryObjectClient(c.env);
           mergeResult = await repositoryClient.squashMergePullRequest({
             repositoryId: repository.id,
             owner,
@@ -415,6 +415,16 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
             throw new HTTPException(409, { message: error.message });
           }
           throw error;
+        }
+        if (existingPullRequest.head_ref !== existingPullRequest.base_ref) {
+          try {
+            await repositoryClient.deleteBranch({
+              repositoryId: repository.id,
+              owner,
+              repo,
+              branchName: existingPullRequest.head_ref
+            });
+          } catch {}
         }
       }
       if (patch.closeIssueNumbers !== undefined) {
