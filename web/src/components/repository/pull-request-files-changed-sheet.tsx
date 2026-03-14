@@ -124,11 +124,11 @@ export function PullRequestFilesChangedSheet({
     <Sheet open={open} onOpenChange={handleSheetOpenChange}>
       <SheetContent
         side="right"
-        className="flex h-dvh w-screen max-w-none flex-col gap-0 border-0 bg-surface-elevated p-0 sm:inset-y-3 sm:right-3 sm:h-[calc(100dvh-1.5rem)] sm:w-[min(96vw,1320px)] sm:rounded-[32px] sm:border sm:border-border-subtle"
+        className="flex h-dvh w-screen max-w-none flex-col gap-0 border-0 bg-surface-elevated p-0 sm:inset-y-3 sm:right-3 sm:h-[calc(100dvh-1.5rem)] sm:w-[min(96vw,1320px)] sm:rounded-[20px] sm:border sm:border-border-subtle"
       >
         <SheetHeader
           className={cn(
-            "gap-2 overflow-hidden bg-surface-focus px-5 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:px-6",
+            "gap-2 overflow-hidden bg-surface-focus px-4 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:px-4",
             isHeaderHidden
               ? "max-h-0 -translate-y-3 border-b-0 py-0 opacity-0"
               : "max-h-28 border-b border-border-subtle py-4 opacity-100"
@@ -152,7 +152,7 @@ export function PullRequestFilesChangedSheet({
         </SheetHeader>
 
         <div
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-4 sm:py-4"
           onScroll={handleContentScroll}
         >
           <div

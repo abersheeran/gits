@@ -226,7 +226,7 @@ export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
             <HelpTip content="修改仓库名称、描述和可见性。" />
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Clone URL</Label>
             <div className="flex items-center gap-2">

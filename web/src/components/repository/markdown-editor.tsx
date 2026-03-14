@@ -116,7 +116,7 @@ export function MarkdownEditor({
               </pre>
             </div>
           ) : (
-            <div className="flex min-h-[120px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border-subtle bg-surface-focus px-4 py-5 text-center">
+            <div className="flex min-h-[120px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-focus px-4 py-3 text-center">
               <Sparkles className="h-4 w-4 text-text-tertiary" />
               <p className="mt-3 text-body-sm font-medium text-text-primary">准备开始编辑</p>
               <p className="mt-1 text-body-sm text-text-secondary">展开后继续编辑并预览内容。</p>

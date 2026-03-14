@@ -262,7 +262,7 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
         </div>
       </section>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         {formError ? (
           <Alert variant="destructive">
             <AlertTitle>操作失败</AlertTitle>

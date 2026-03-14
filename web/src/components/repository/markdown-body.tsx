@@ -53,7 +53,7 @@ export function MarkdownBody({
           ),
           pre: (props) => (
             <pre
-              className="mb-4 overflow-x-auto rounded-[24px] border border-border-subtle bg-surface-focus p-4"
+              className="mb-4 overflow-x-auto rounded-[16px] border border-border-subtle bg-surface-focus p-4"
               {...props}
             />
           ),
@@ -71,7 +71,7 @@ export function MarkdownBody({
             return <code className="font-mono text-code-sm leading-6 text-text-primary" {...props} />;
           },
           table: (props) => (
-            <div className="mb-4 overflow-x-auto rounded-[24px] border border-border-subtle">
+            <div className="mb-4 overflow-x-auto rounded-[16px] border border-border-subtle">
               <table className="w-full border-collapse text-body-sm" {...props} />
             </div>
           ),

@@ -36,7 +36,7 @@ export function PageLoadingState({
   return (
     <section
       className={cn(
-        "rounded-[28px] border border-border-subtle bg-surface-base p-6 shadow-container",
+        "rounded-[18px] border border-border-subtle bg-surface-base p-4 shadow-container",
         className
       )}
       role="status"

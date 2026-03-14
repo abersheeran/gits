@@ -6,30 +6,30 @@
 
 @layer base {
   :root {
-    --color-surface-canvas: #faf8f5;
+    --color-surface-canvas: #f8f4ef;
     --color-surface-base: #ffffff;
     --color-surface-elevated: #ffffff;
-    --color-surface-focus: #f4eeeb;
+    --color-surface-focus: #f0e8e2;
     --color-surface-glass: #0000000a;
-    --color-surface-hover: #f6f4f4;
+    --color-surface-hover: #f2ece6;
     --color-surface-overlay: #f5f3f103;
     --color-surface-glass-bright: #ffffffcc;
 
     --text-primary: #0f0e0d;
-    --text-secondary: #766f6a;
-    --text-tertiary: #a6a09b;
-    --text-supporting: #6e6e6e;
-    --text-supporting-strong: #44403b;
+    --text-secondary: #6b5e54;
+    --text-tertiary: #9c8f84;
+    --text-supporting: #7a6d62;
+    --text-supporting-strong: #3d352e;
     --text-inverse: #ffffff;
 
-    --border-default: #e5e5e5;
-    --border-subtle: #efe9e7;
+    --border-default: #e2dbd4;
+    --border-subtle: #ebe3dc;
     --border-muted: #0000000a;
     --border-strong: #0000001a;
 
-    --color-fill-primary: #ebe4e0;
-    --color-fill-secondary: #d1cecc;
-    --color-fill-tertiary: #bbb6b4;
+    --color-fill-primary: #e5dbd3;
+    --color-fill-secondary: #ccc2b8;
+    --color-fill-tertiary: #b5a99e;
 
     --color-action-primary-bg: #0f0e0d;
 
@@ -49,19 +49,19 @@
     --control-height-mobile: 40px;
     --control-height-compact: 36px;
 
-    --radius: 1.25rem;
+    --radius: 0.75rem;
     --radius-pill: 9999px;
-    --radius-lg: 1.25rem;
-    --radius-xl: 1.75rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
   }
 
   .dark {
-    --color-surface-canvas: #141210;
-    --color-surface-base: #1b1917;
-    --color-surface-elevated: #221f1d;
-    --color-surface-focus: #272320;
-    --color-surface-glass: #ffffff14;
-    --color-surface-hover: #2c2724;
+    --color-surface-canvas: #12100d;
+    --color-surface-base: #17140f;
+    --color-surface-elevated: #1e1a15;
+    --color-surface-focus: #252018;
+    --color-surface-glass: #ffffff1a;
+    --color-surface-hover: #231e18;
     --color-surface-overlay: #ffffff08;
     --color-surface-glass-bright: #ffffff33;
 
@@ -77,9 +77,9 @@
     --border-muted: #ffffff0f;
     --border-strong: #ffffff26;
 
-    --color-fill-primary: #2a2623;
-    --color-fill-secondary: #332e2a;
-    --color-fill-tertiary: #3d3732;
+    --color-fill-primary: #2d261e;
+    --color-fill-secondary: #362d24;
+    --color-fill-tertiary: #40352b;
 
     --color-action-primary-bg: #faf8f5;
 
@@ -186,27 +186,27 @@
 
 @layer components {
   .app-container {
-    @apply mx-auto w-full max-w-page px-page-gutter md:px-6;
+    @apply mx-auto w-full max-w-page px-page-gutter md:px-4;
   }
 
   .app-page {
-    @apply space-y-6 md:space-y-8;
+    @apply space-y-4 md:space-y-6;
   }
 
   .page-hero {
-    @apply overflow-hidden rounded-[32px] border border-border-subtle bg-surface-base p-6 shadow-container-elevated md:p-8;
+    @apply overflow-hidden rounded-[20px] border border-border-subtle bg-surface-base p-4 shadow-container-elevated md:p-5;
   }
 
   .page-panel {
-    @apply overflow-hidden rounded-[28px] border border-border-subtle bg-surface-base shadow-container;
+    @apply overflow-hidden rounded-[18px] border border-border-subtle bg-surface-base shadow-container;
   }
 
   .page-panel-muted {
-    @apply overflow-hidden rounded-[28px] bg-surface-focus;
+    @apply overflow-hidden rounded-[18px] bg-surface-focus;
   }
 
   .panel-content {
-    @apply p-4 md:p-5;
+    @apply p-4 md:p-4;
   }
 
   .panel-content-compact {
@@ -214,23 +214,23 @@
   }
 
   .panel-inset {
-    @apply rounded-[24px] bg-surface-focus p-4 md:p-5;
+    @apply rounded-[16px] bg-surface-focus p-4 md:p-4;
   }
 
   .panel-inset-compact {
-    @apply rounded-[20px] bg-surface-focus px-4 py-3;
+    @apply rounded-[14px] bg-surface-focus px-4 py-3;
   }
 
   .panel-card {
-    @apply rounded-[24px] bg-surface-base p-4 md:p-5;
+    @apply rounded-[16px] bg-surface-base p-4 md:p-4;
   }
 
   .panel-card-compact {
-    @apply rounded-[20px] bg-surface-base px-4 py-3;
+    @apply rounded-[14px] bg-surface-base px-4 py-3;
   }
 
   .panel-toolbar {
-    @apply flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 md:px-5;
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 md:px-4;
   }
 
   .segmented-control {
@@ -254,11 +254,11 @@
   }
 
   .monaco-shell {
-    @apply overflow-hidden rounded-[24px] border border-border-subtle bg-surface-focus p-1.5 shadow-container;
+    @apply overflow-hidden rounded-[16px] border border-border-subtle bg-surface-focus p-1.5 shadow-container;
   }
 
   .monaco-shell__viewport {
-    @apply overflow-hidden rounded-[18px] border border-border-subtle bg-surface-base;
+    @apply overflow-hidden rounded-[12px] border border-border-subtle bg-surface-base;
   }
 }
 

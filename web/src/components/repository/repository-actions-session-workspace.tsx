@@ -113,7 +113,7 @@ export function RepositoryActionsSessionWorkspace({
     return (
       <section className="page-panel">
         <div className="panel-content">
-          <div className="rounded-[24px] border border-dashed border-border-subtle bg-surface-focus px-5 py-6 text-body-sm text-text-secondary">
+          <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">
             正在加载会话工作区...
           </div>
         </div>
@@ -125,7 +125,7 @@ export function RepositoryActionsSessionWorkspace({
     return (
       <section className="page-panel">
         <div className="panel-content">
-          <div className="rounded-[24px] border border-dashed border-border-subtle bg-surface-focus px-5 py-6 text-body-sm text-text-secondary">
+          <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">
             选择一个会话查看 Prompt、执行轮次、验证与产物。
           </div>
         </div>
@@ -142,7 +142,7 @@ export function RepositoryActionsSessionWorkspace({
 
   return (
     <section className="page-panel">
-      <div className="panel-content space-y-5">
+      <div className="panel-content space-y-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -245,7 +245,7 @@ export function RepositoryActionsSessionWorkspace({
             ) : (
               <ol className="space-y-3">
                 {detail.attempts.map((attempt) => (
-                  <li key={attempt.id} className="rounded-[20px] bg-surface-base px-4 py-3">
+                  <li key={attempt.id} className="rounded-[14px] bg-surface-base px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">#{attempt.attempt_number}</Badge>
                       <Badge variant={attemptStatusVariant(attempt.status)}>
@@ -383,7 +383,7 @@ export function RepositoryActionsSessionWorkspace({
                         .reverse()
                         .slice(0, 8)
                         .map((event) => (
-                          <li key={event.id} className="rounded-[20px] bg-surface-base px-4 py-3">
+                          <li key={event.id} className="rounded-[14px] bg-surface-base px-4 py-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant="outline">
@@ -416,7 +416,7 @@ export function RepositoryActionsSessionWorkspace({
                         <button
                           key={item.id}
                           type="button"
-                          className={`w-full rounded-[18px] px-4 py-3 text-left transition-colors ${
+                          className={`w-full rounded-[12px] px-4 py-3 text-left transition-colors ${
                             selectedArtifactId === item.id
                               ? "bg-surface-base text-text-primary"
                               : "bg-transparent text-text-secondary hover:bg-surface-base hover:text-text-primary"

@@ -281,7 +281,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
         </div>
 
         {history.commits.length === 0 ? (
-          <div className="p-6 text-sm text-muted-foreground">当前引用下没有提交记录。</div>
+          <div className="p-4 text-sm text-muted-foreground">当前引用下没有提交记录。</div>
         ) : (
           <section className="min-w-0">
             <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">

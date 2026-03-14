@@ -50,7 +50,7 @@ export function RepositoryActionsWorkflowsPanel({
 
   return (
     <section className="page-panel">
-      <div className="panel-content space-y-5">
+      <div className="panel-content space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             <h2 className="font-display text-heading-3-16-semibold text-text-primary">
@@ -94,7 +94,7 @@ export function RepositoryActionsWorkflowsPanel({
         </div>
 
         {workflows.length === 0 ? (
-          <div className="rounded-[24px] border border-dashed border-border-subtle bg-surface-focus px-5 py-6 text-body-sm text-text-secondary">
+          <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">
             当前仓库还没有工作流。先定义触发规则，再让仓库事件自动创建会话。
           </div>
         ) : (

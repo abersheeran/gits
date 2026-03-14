@@ -678,7 +678,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       ) : null}
 
       <section className="page-hero">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
             <div className="space-y-2">
               <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">

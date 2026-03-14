@@ -166,7 +166,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
             <HelpTip content="设置新 session 的全局默认 runtime 配置。" />
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           <div className="panel-inset flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-label-xs text-text-supporting">
@@ -198,7 +198,7 @@ export function ActionsSettingsPage({ user }: ActionsSettingsPageProps) {
             )}
           </div>
 
-          <form id="actions-global-config-form" className="space-y-6" onSubmit={handleSubmit}>
+          <form id="actions-global-config-form" className="space-y-4" onSubmit={handleSubmit}>
             <CodeConfigPanel
               title="Codex"
               description="设置全局默认的 Codex 配置。"

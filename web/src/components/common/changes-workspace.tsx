@@ -63,7 +63,7 @@ export function ChangesWorkspace({
       )}
     >
       <aside className={cn("min-w-0 xl:sticky xl:top-4 xl:self-start", fileTreeClassName)}>
-        <div className="overflow-hidden rounded-[24px] border border-border-subtle bg-surface-focus shadow-container">
+        <div className="overflow-hidden rounded-[16px] border border-border-subtle bg-surface-focus shadow-container">
           <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
             <div className="space-y-1">
               <h3 className="font-display text-heading-4 text-text-primary">Changed files</h3>

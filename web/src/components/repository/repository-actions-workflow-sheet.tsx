@@ -125,9 +125,9 @@ export function RepositoryActionsWorkflowSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full max-w-[720px] border-l border-border-subtle bg-surface-base px-6 py-6 sm:px-8"
+        className="w-full max-w-[720px] border-l border-border-subtle bg-surface-base px-4 py-4 sm:px-5"
       >
-        <form className="flex h-full flex-col gap-6" onSubmit={handleSubmit}>
+        <form className="flex h-full flex-col gap-4" onSubmit={handleSubmit}>
           <SheetHeader className="pr-12">
             <SheetTitle>{title}</SheetTitle>
             <SheetDescription>{description}</SheetDescription>

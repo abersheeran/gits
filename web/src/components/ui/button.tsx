@@ -21,9 +21,9 @@ const buttonVariants = cva(
         link: "h-auto rounded-none px-0 py-0 font-sans text-link-sm text-text-primary shadow-none hover:text-text-supportingStrong hover:underline",
       },
       size: {
-        default: "h-10 px-5 text-button-lg",
+        default: "h-9 px-4 text-button-lg",
         sm: "h-9 px-[14px] text-button-md",
-        lg: "h-12 px-6 text-button-lg",
+        lg: "h-10 px-5 text-button-lg",
         icon: "size-10 p-0",
       },
     },

@@ -112,7 +112,7 @@ export function CodeConfigPanel({
               autoCapitalize="off"
               autoCorrect="off"
               autoComplete="off"
-              className="overflow-x-auto whitespace-pre rounded-[16px] bg-surface-canvas px-3 py-3 font-mono text-code-sm leading-6 shadow-none"
+              className="overflow-x-auto whitespace-pre rounded-[12px] bg-surface-canvas px-3 py-3 font-mono text-code-sm leading-6 shadow-none"
               style={style}
             />
           </div>
@@ -128,14 +128,14 @@ export function CodeConfigPanel({
               ) : null}
             </div>
             <pre
-              className="max-h-[20rem] overflow-auto whitespace-pre rounded-[16px] bg-surface-canvas px-3 py-3 text-code-sm leading-6 text-text-primary"
+              className="max-h-[20rem] overflow-auto whitespace-pre rounded-[12px] bg-surface-canvas px-3 py-3 text-code-sm leading-6 text-text-primary"
               style={style}
             >
               {previewValue}
             </pre>
           </div>
         ) : (
-          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border-subtle bg-surface-base px-4 py-6 text-center">
+          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-base px-4 py-4 text-center">
             <Sparkles className="h-4 w-4 text-text-supporting" />
             <p className="mt-3 text-body-sm font-medium text-text-primary">{emptyTitle}</p>
             <p className="mt-1 max-w-md text-body-sm leading-6 text-text-secondary">{emptyDescription}</p>

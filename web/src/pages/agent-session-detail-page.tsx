@@ -306,8 +306,8 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
         ) : null}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+        <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Overview</CardTitle>
@@ -531,7 +531,7 @@ export function AgentSessionDetailPage({ user }: AgentSessionDetailPageProps) {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Validation</CardTitle>

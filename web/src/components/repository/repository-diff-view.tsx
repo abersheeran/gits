@@ -195,7 +195,7 @@ export function RepositoryDiffView({
             key={`${change.status}:${change.path}`}
             id={sectionIdForPath?.(change.path)}
             className={cn(
-              "scroll-mt-4 overflow-hidden rounded-[24px] border border-border-subtle bg-surface-base shadow-container transition-colors",
+              "scroll-mt-4 overflow-hidden rounded-[16px] border border-border-subtle bg-surface-base shadow-container transition-colors",
               isActive ? "border-border-default ring-1 ring-border-default" : ""
             )}
             onMouseDownCapture={() => onChangeActivate?.(change)}

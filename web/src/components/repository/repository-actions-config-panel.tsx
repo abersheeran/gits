@@ -54,7 +54,7 @@ export function RepositoryActionsConfigPanel({
 }: RepositoryActionsConfigPanelProps) {
   return (
     <section className="page-panel" id="actions-config-panel" role="tabpanel" aria-labelledby="actions-config-tab">
-      <div className="panel-content space-y-5">
+      <div className="panel-content space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -116,7 +116,7 @@ export function RepositoryActionsConfigPanel({
         ) : (
           <form
             id="repository-actions-config-form"
-            className="space-y-5"
+            className="space-y-4"
             onSubmit={onSubmit}
           >
             <section className="panel-inset space-y-4">
@@ -139,7 +139,7 @@ export function RepositoryActionsConfigPanel({
                   triggerClassName="bg-surface-base"
                 />
 
-                <div className="overflow-x-auto rounded-[24px] border border-border-subtle bg-surface-base">
+                <div className="overflow-x-auto rounded-[16px] border border-border-subtle bg-surface-base">
                   <table className="min-w-full text-left text-body-xs text-text-primary">
                     <thead className="bg-surface-focus">
                       <tr>

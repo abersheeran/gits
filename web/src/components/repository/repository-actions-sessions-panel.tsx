@@ -180,13 +180,13 @@ export function RepositoryActionsSessionsPanel({
       </div>
 
       {loading && sessions.length === 0 ? (
-        <div className="rounded-[24px] border border-dashed border-border-subtle bg-surface-base px-4 py-5 text-body-sm text-text-secondary">
+        <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-base px-4 py-3 text-body-sm text-text-secondary">
           正在加载会话列表...
         </div>
       ) : null}
 
       {visibleSessions.length === 0 ? (
-        <div className="rounded-[24px] border border-dashed border-border-subtle bg-surface-base px-4 py-5 text-body-sm text-text-secondary">
+        <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-base px-4 py-3 text-body-sm text-text-secondary">
           {hasActiveFilters ? "当前筛选条件下没有匹配的会话。" : "当前仓库还没有会话。"}
         </div>
       ) : (

@@ -235,7 +235,7 @@ export function RepositoryIssuesPage({ user }: RepositoryIssuesPageProps) {
         </div>
 
         {issues.length === 0 ? (
-          <div className="p-6 text-sm text-muted-foreground">当前筛选下没有 issue。</div>
+          <div className="p-4 text-sm text-muted-foreground">当前筛选下没有 issue。</div>
         ) : (
           <section className="min-w-0">
             <ul className="divide-y">

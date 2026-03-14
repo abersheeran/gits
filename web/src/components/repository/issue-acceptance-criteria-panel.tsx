@@ -30,8 +30,8 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[20px] border border-dashed border-border-subtle bg-surface-focus px-4 py-6 text-center">
-      <div className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-border-subtle bg-surface-base shadow-container">
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-[12px] border border-border-subtle bg-surface-base shadow-container">
         <Sparkles className="h-5 w-5 text-text-tertiary" />
       </div>
       <p className="mt-4 text-body-sm font-semibold text-text-primary">{title}</p>
@@ -69,7 +69,7 @@ export function IssueAcceptanceCriteriaPanel({
 
   return (
     <section className="page-panel overflow-hidden">
-      <div className="border-b border-border-subtle bg-surface-focus px-4 py-4 md:px-5">
+      <div className="border-b border-border-subtle bg-surface-focus px-4 py-4 md:px-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-surface-base px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-supporting shadow-container">
@@ -109,7 +109,7 @@ export function IssueAcceptanceCriteriaPanel({
         </div>
       </div>
 
-      <div className="space-y-4 p-4 md:p-5">
+      <div className="space-y-4 p-4 md:p-4">
         <div className="grid gap-4">
           {canUpdate && editing ? (
             <div className="panel-inset">

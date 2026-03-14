@@ -49,8 +49,8 @@ export function HomePage({ user }: HomePageProps) {
   return (
     <div className="app-page">
       <section className="page-hero">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-          <div className="space-y-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
+          <div className="space-y-4">
             <div className="inline-flex items-center gap-2">
               <Badge variant="secondary" className="w-fit">
                 Explore
@@ -152,16 +152,16 @@ export function HomePage({ user }: HomePageProps) {
             />
           </div>
         ) : repositories.length === 0 ? (
-          <div className="p-6 text-body-sm text-text-secondary">暂无公开仓库。</div>
+          <div className="p-4 text-body-sm text-text-secondary">暂无公开仓库。</div>
         ) : (
           <div className="grid items-start gap-4 p-4 md:grid-cols-2">
             {repositories.map((repo) => (
               <div
                 key={repo.id}
-                className="overflow-hidden rounded-[24px] bg-surface-base transition-transform duration-200 ease-out hover:-translate-y-0.5"
+                className="overflow-hidden rounded-[16px] bg-surface-base transition-transform duration-200 ease-out hover:-translate-y-0.5"
               >
                 <div className="flex h-full flex-col">
-                  <div className="flex flex-1 flex-col gap-4 p-5 md:p-6">
+                  <div className="flex flex-1 flex-col gap-4 p-4 md:p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0 space-y-2">
                         <Link
@@ -182,7 +182,7 @@ export function HomePage({ user }: HomePageProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-5 py-4 text-body-micro text-text-secondary md:px-6 md:py-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle px-4 py-4 text-body-micro text-text-secondary md:px-4 md:py-4">
                     <span>Created on {formatDateTime(repo.created_at)}</span>
                     <Link
                       to={`/repo/${repo.owner_username}/${repo.name}`}

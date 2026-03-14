@@ -31,7 +31,7 @@ export function RepositoryHeader({
   const isPrivate = detail.repository.is_private === 1;
 
   return (
-    <header className="page-hero space-y-5">
+    <header className="page-hero space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-text-secondary">

@@ -17,12 +17,12 @@ export function RepositoryMetadataFields({
   saving = false
 }: RepositoryMetadataFieldsProps) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {draft !== undefined ? (
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">Draft</h3>
           {canEdit && onDraftChange ? (
-            <label className="flex items-center justify-between rounded-[18px] bg-surface-focus px-3 py-2">
+            <label className="flex items-center justify-between rounded-[12px] bg-surface-focus px-3 py-2">
               <span className="text-sm">Keep this pull request as draft</span>
               <Checkbox
                 checked={draft}
