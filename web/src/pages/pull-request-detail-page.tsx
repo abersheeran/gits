@@ -1177,6 +1177,11 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               <PullRequestFilesChangedSheet
                 open={filesChangedSheetOpen}
                 onOpenChange={setFilesChangedSheetOpen}
+                title={pullRequest.title}
+                number={pullRequest.number}
+                authorUsername={pullRequest.author_username}
+                headRef={pullRequest.head_ref}
+                baseRef={pullRequest.base_ref}
                 comparison={comparison}
                 canReview={canReview}
                 selectedReviewRange={selectedReviewRange}

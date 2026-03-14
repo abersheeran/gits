@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode, type UIEvent } from "react";
 import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { PullRequestInlineThreadComposer } from "@/components/repository/pull-request-inline-thread-composer";
+import { AuthorAvatar } from "@/components/repository/author-avatar";
 import {
   RepositoryDiffView,
   type RepositoryDiffLineDecoration,
@@ -42,6 +43,11 @@ export type ReviewThreadPathSummary = {
 type PullRequestFilesChangedSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  title: string;
+  number: number;
+  authorUsername: string;
+  headRef: string;
+  baseRef: string;
   comparison: RepositoryCompareResponse;
   canReview: boolean;
   selectedReviewRange: SelectedReviewRange | null;
@@ -62,9 +68,18 @@ type PullRequestFilesChangedSheetProps = {
   renderChangeHeaderExtras?: (change: RepositoryCompareChange) => ReactNode;
 };
 
+function stripHeadsRef(refName: string): string {
+  return refName.startsWith("refs/heads/") ? refName.slice("refs/heads/".length) : refName;
+}
+
 export function PullRequestFilesChangedSheet({
   open,
   onOpenChange,
+  title,
+  number,
+  authorUsername,
+  headRef,
+  baseRef,
   comparison,
   canReview,
   selectedReviewRange,
@@ -87,7 +102,9 @@ export function PullRequestFilesChangedSheet({
   const previousScrollTopRef = useRef(0);
   const headerHiddenRef = useRef(false);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
-  const description = `${comparison.filesChanged} files changed, ${comparison.additions} additions, ${comparison.deletions} deletions`;
+  const description = [authorUsername, `${stripHeadsRef(headRef)} → ${stripHeadsRef(baseRef)}`]
+    .filter(Boolean)
+    .join(" · ");
 
   function updateHeaderVisibility(hidden: boolean) {
     if (headerHiddenRef.current === hidden) {
@@ -128,26 +145,39 @@ export function PullRequestFilesChangedSheet({
       >
         <SheetHeader
           className={cn(
-            "gap-2 overflow-hidden bg-surface-focus px-4 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:px-4",
+            "overflow-hidden bg-surface-focus pl-4 pr-16 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:pl-4 sm:pr-16",
             isHeaderHidden
               ? "max-h-0 -translate-y-3 border-b-0 py-0 opacity-0"
-              : "max-h-28 border-b border-border-subtle py-4 opacity-100"
+              : "max-h-56 border-b border-border-subtle py-4 opacity-100"
           )}
         >
-          <SheetTitle className="pr-12">Files changed</SheetTitle>
-          <SheetDescription className="pr-12 text-body-micro text-text-secondary">
-            {description}
-          </SheetDescription>
-          <div className="flex flex-wrap gap-2 pr-12">
-            <Badge variant="outline" className="bg-surface-base">
-              {comparison.filesChanged} files
-            </Badge>
-            <Badge variant="outline" className="bg-surface-base">
-              +{comparison.additions}
-            </Badge>
-            <Badge variant="outline" className="bg-surface-base">
-              -{comparison.deletions}
-            </Badge>
+          <div className="flex flex-col gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <AuthorAvatar name={authorUsername} className="h-9 w-9 text-[12px]" />
+              <div className="min-w-0">
+                <SheetTitle className="line-clamp-2 text-heading-3-16-semibold">
+                  {title}
+                </SheetTitle>
+                <SheetDescription className="text-body-micro text-text-secondary">
+                  {description}
+                </SheetDescription>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 text-body-micro text-text-secondary">
+              <Badge variant="outline" className="bg-surface-base">
+                #{number}
+              </Badge>
+              <Badge variant="outline" className="bg-surface-base">
+                {comparison.filesChanged} files
+              </Badge>
+              <Badge variant="outline" className="bg-surface-base">
+                +{comparison.additions}
+              </Badge>
+              <Badge variant="outline" className="bg-surface-base">
+                -{comparison.deletions}
+              </Badge>
+            </div>
           </div>
         </SheetHeader>
 
