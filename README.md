@@ -51,15 +51,17 @@ Local development variables are loaded from `.env` (via `wrangler --env-file .en
 ```bash
 APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
+ALLOW_USER_REGISTRATION=true
 ```
 
-1. Configure remote non-secret variables (for example `APP_ORIGIN`, optional body-limit vars).
+1. Configure remote non-secret variables (for example `APP_ORIGIN`, `ALLOW_USER_REGISTRATION`, optional body-limit vars).
    - Dashboard: Worker Settings -> Variables / Environment Variables
    - Wrangler CLI (set/update during deployment):
 
 ```bash
 wrangler deploy --minify \
   --var APP_ORIGIN:https://gits.example.com \
+  --var ALLOW_USER_REGISTRATION:true \
   --var UPLOAD_PACK_MAX_BODY_BYTES:8388608 \
   --var RECEIVE_PACK_MAX_BODY_BYTES:33554432 \
   --keep-vars

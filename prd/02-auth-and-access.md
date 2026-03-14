@@ -39,6 +39,7 @@
 ## 4. 当前已实现能力
 
 - 注册、登录、登出、当前用户查询。
+- 注册受环境变量 `ALLOW_USER_REGISTRATION` 控制：只有显式设置该变量时才允许创建新用户。
 - PAT 创建、列表、撤销。
 - session bearer 与 PAT bearer 共存；中间件会先尝试 session，再回退到 access token。
 - Git 路由使用单独的 Basic Auth 中间件。
@@ -54,9 +55,10 @@
 
 ### 5.1 人类访问
 
-1. 用户注册或登录。
-2. Worker 通过 session cookie 或 bearer token 识别用户。
-3. 路由根据仓库权限决定是否允许读、写或管理。
+1. 部署环境显式设置 `ALLOW_USER_REGISTRATION` 后，游客才可调用注册接口创建账号；未设置时注册直接被拒绝。
+2. 用户注册或登录。
+3. Worker 通过 session cookie 或 bearer token 识别用户。
+4. 路由根据仓库权限决定是否允许读、写或管理。
 
 ### 5.2 Git 客户端访问
 

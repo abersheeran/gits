@@ -91,6 +91,7 @@ npx wrangler queues create gits-actions
 ```bash
 APP_ORIGIN=auto
 JWT_SECRET=replace-with-a-strong-secret
+ALLOW_USER_REGISTRATION=true
 ```
 
 说明：
@@ -98,6 +99,7 @@ JWT_SECRET=replace-with-a-strong-secret
 - `APP_ORIGIN=auto` 适合本地调试
 - 线上环境建议显式设置真实域名，例如 `https://gits.example.com`
 - 当前必须提供的 secret 只有 `JWT_SECRET`
+- 只有显式设置 `ALLOW_USER_REGISTRATION` 后，外部用户才可注册新账号
 
 设置本地开发 secret：
 
@@ -116,6 +118,7 @@ npm run secret:prod
 ```bash
 npm run deploy -- \
   --var APP_ORIGIN:https://gits.example.com \
+  --var ALLOW_USER_REGISTRATION:true \
   --keep-vars
 ```
 

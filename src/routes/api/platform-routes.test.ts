@@ -27,6 +27,53 @@ describe("API platform routes", () => {
     vi.restoreAllMocks();
   });
 
+  it("returns 403 when user registration flag is missing", async () => {
+    const env = createBaseEnv(createMockD1Database([]));
+    delete env.ALLOW_USER_REGISTRATION;
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice@example.com",
+          password: "Password123"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("User registration is disabled");
+  });
+
+  it("allows registration when user registration flag is set", async () => {
+    vi.spyOn(AuthService.prototype, "createUser").mockResolvedValue({
+      id: "user-1",
+      username: "alice"
+    });
+    vi.spyOn(AuthService.prototype, "createSessionToken").mockResolvedValue("session-token");
+
+    const env = createBaseEnv(createMockD1Database([]));
+    env.ALLOW_USER_REGISTRATION = "enabled";
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice@example.com",
+          password: "Password123"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(201);
+  });
+
   it("returns 400 when request json is not an object", async () => {
     const response = await createApp().fetch(
       new Request("http://localhost/api/auth/register", {

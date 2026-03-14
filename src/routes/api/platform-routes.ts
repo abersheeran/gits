@@ -31,10 +31,17 @@ import {
   type UpdateRepositoryActionsConfigInput
 } from "./shared";
 
+const userRegistrationEnabled = (flag: string | undefined): boolean =>
+  typeof flag === "string" && flag.trim().length > 0;
+
 export function registerPlatformRoutes(router: ApiRouter): void {
   router.get("/healthz", (c) => c.json({ ok: true }));
 
   router.post("/auth/register", async (c) => {
+    if (!userRegistrationEnabled(c.env.ALLOW_USER_REGISTRATION)) {
+      throw new HTTPException(403, { message: "User registration is disabled" });
+    }
+
     const payload = await parseJsonObject(c.req.raw);
     const username = assertString(payload.username, "username");
     const email = assertString(payload.email, "email").toLowerCase();

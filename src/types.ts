@@ -491,6 +491,7 @@ export type AppBindings = {
   ASSETS?: Fetcher;
   JWT_SECRET: string;
   APP_ORIGIN: string;
+  ALLOW_USER_REGISTRATION?: string;
   UPLOAD_PACK_MAX_BODY_BYTES?: string;
   RECEIVE_PACK_MAX_BODY_BYTES?: string;
 };
