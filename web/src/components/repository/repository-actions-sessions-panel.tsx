@@ -132,7 +132,7 @@ export function RepositoryActionsSessionsPanel({
       }
       className="page-panel-muted xl:sticky xl:top-6 xl:self-start"
     >
-      <div className="panel-card-compact space-y-4">
+      <div className="space-y-4">
         <div className="grid gap-3">
           <LabeledSelectField
             id="actions-session-status-filter"

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Braces, FileCog, Sparkles } from "lucide-react";
+import { Braces, FileCog } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,7 +16,6 @@ type CodeConfigPanelProps = {
   style?: CSSProperties;
   className?: string;
   statusText?: string;
-  emptyTitle?: string;
   emptyDescription?: string;
 };
 
@@ -57,7 +56,6 @@ export function CodeConfigPanel({
   style,
   className,
   statusText,
-  emptyTitle = "还没有配置内容",
   emptyDescription = "编辑后可保存对应的配置文件内容。"
 }: CodeConfigPanelProps) {
   const hasValue = value.trim().length > 0;
@@ -66,12 +64,7 @@ export function CodeConfigPanel({
   const previewIsMasked = previewValue !== value;
 
   return (
-    <section
-      className={cn(
-        "panel-inset",
-        className
-      )}
-    >
+    <section className={cn(className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 text-label-xs text-text-supporting">
@@ -98,8 +91,8 @@ export function CodeConfigPanel({
         </div>
       </div>
 
-      <div className="mt-3 panel-card-compact">
-        {editing ? (
+      {editing ? (
+        <div className="mt-3">
           <div className="space-y-3">
             <Label className="text-body-sm text-text-primary">{label}</Label>
             <Textarea
@@ -116,7 +109,9 @@ export function CodeConfigPanel({
               style={style}
             />
           </div>
-        ) : hasValue ? (
+        </div>
+      ) : hasValue ? (
+        <div className="mt-3">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="inline-flex items-center gap-2 text-label-xs text-text-supporting">
@@ -134,14 +129,10 @@ export function CodeConfigPanel({
               {previewValue}
             </pre>
           </div>
-        ) : (
-          <div className="flex min-h-[180px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-base px-4 py-4 text-center">
-            <Sparkles className="h-4 w-4 text-text-supporting" />
-            <p className="mt-3 text-body-sm font-medium text-text-primary">{emptyTitle}</p>
-            <p className="mt-1 max-w-md text-body-sm leading-6 text-text-secondary">{emptyDescription}</p>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-body-sm text-text-tertiary">{emptyDescription}</p>
+      )}
     </section>
   );
 }

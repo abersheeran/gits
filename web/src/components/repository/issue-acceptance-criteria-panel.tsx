@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, Eye, FileText, PencilLine, Sparkles } from "lucide-react";
+import { CheckCircle2, Eye, FileText, PencilLine } from "lucide-react";
 import { MarkdownBody } from "@/components/repository/markdown-body";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,18 +26,6 @@ function countChecklistItems(value: string): number {
 
 function formatCount(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function EmptyState({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-center">
-      <div className="flex h-11 w-11 items-center justify-center rounded-[12px] border border-border-subtle bg-surface-base shadow-container">
-        <Sparkles className="h-5 w-5 text-text-tertiary" />
-      </div>
-      <p className="mt-4 text-body-sm font-semibold text-text-primary">{title}</p>
-      <p className="mt-2 max-w-sm text-body-sm text-text-secondary">{description}</p>
-    </div>
-  );
 }
 
 export function IssueAcceptanceCriteriaPanel({
@@ -112,7 +100,7 @@ export function IssueAcceptanceCriteriaPanel({
       <div className="space-y-4 p-4 md:p-4">
         <div className="grid gap-4">
           {canUpdate && editing ? (
-            <div className="panel-inset">
+            <div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
@@ -175,14 +163,13 @@ export function IssueAcceptanceCriteriaPanel({
                     className="min-h-[280px] bg-surface-base shadow-none"
                   />
                 ) : (
-                  <div className="panel-card min-h-[280px]">
+                  <div className="min-h-[280px]">
                     {hasDraft ? (
                       <MarkdownBody content={draft} emptyText="暂无验收标准。" />
                     ) : (
-                      <EmptyState
-                        title="预览区域为空"
-                        description="添加验收标准以生成预览。"
-                      />
+                      <p className="text-body-sm text-text-tertiary">
+                        添加验收标准后，这里会显示预览。
+                      </p>
                     )}
                   </div>
                 )}
@@ -215,7 +202,7 @@ export function IssueAcceptanceCriteriaPanel({
               </div>
             </div>
           ) : (
-            <div className="panel-inset">
+            <div>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
@@ -228,14 +215,13 @@ export function IssueAcceptanceCriteriaPanel({
                   {hasContent ? "Ready for review" : "Waiting for definition"}
                 </Badge>
               </div>
-              <div className="mt-3 panel-card-compact">
+              <div className="mt-3">
                 {hasContent ? (
                   <MarkdownBody content={content} emptyText="(no acceptance criteria)" />
                 ) : (
-                  <EmptyState
-                    title="还没有验收标准"
-                    description="建议补充可验证结果、关键命令和需要回看的产物，让交付边界更稳定。"
-                  />
+                  <p className="text-body-sm text-text-tertiary">
+                    还没有验收标准，补充完成定义后再开始交付。
+                  </p>
                 )}
               </div>
               {canUpdate ? (

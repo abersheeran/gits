@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Eye, FileText, PencilLine, Sparkles } from "lucide-react";
+import { Eye, FileText, PencilLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -73,12 +73,7 @@ export function MarkdownEditor({
 
   if (!expanded) {
     return (
-      <div
-        className={cn(
-          "panel-inset",
-          className
-        )}
-      >
+      <div className={className}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-supporting">
@@ -100,29 +95,23 @@ export function MarkdownEditor({
           </Button>
         </div>
 
-        <div className="mt-3 panel-card-compact">
-          {hasValue ? (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="bg-surface-focus">
-                  {nonEmptyLineCount} lines
-                </Badge>
-                <Badge variant="secondary">
-                  Draft in progress
-                </Badge>
-              </div>
-              <pre className="whitespace-pre-wrap break-words text-body-sm text-text-secondary">
-                {excerpt}
-              </pre>
+        {hasValue ? (
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="bg-surface-focus">
+                {nonEmptyLineCount} lines
+              </Badge>
+              <Badge variant="secondary">
+                Draft in progress
+              </Badge>
             </div>
-          ) : (
-            <div className="flex min-h-[120px] flex-col items-center justify-center rounded-[14px] border border-dashed border-border-subtle bg-surface-focus px-4 py-3 text-center">
-              <Sparkles className="h-4 w-4 text-text-tertiary" />
-              <p className="mt-3 text-body-sm font-medium text-text-primary">准备开始编辑</p>
-              <p className="mt-1 text-body-sm text-text-secondary">展开后继续编辑并预览内容。</p>
-            </div>
-          )}
-        </div>
+            <pre className="whitespace-pre-wrap break-words text-body-sm text-text-secondary">
+              {excerpt}
+            </pre>
+          </div>
+        ) : (
+          <p className="mt-3 text-body-sm text-text-tertiary">点击右侧按钮开始编写</p>
+        )}
       </div>
     );
   }
@@ -183,7 +172,7 @@ function ExpandedMarkdownEditorPanel({
   return (
     <div
       className={cn(
-        "panel-inset space-y-4",
+        "space-y-4",
         className
       )}
     >
@@ -262,7 +251,7 @@ function ExpandedMarkdownEditorPanel({
           )}
         />
       ) : (
-        <div className="panel-card-compact min-h-[8rem]">
+        <div className="min-h-[8rem]">
           <MarkdownBody content={value} emptyText={previewEmptyText} />
         </div>
       )}

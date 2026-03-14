@@ -1466,7 +1466,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
               title="Submit review"
             >
               {reviewEditorExpanded ? (
-                <div className="panel-card-compact">
+                <div>
                   <LabeledSelectField
                     id="review-decision"
                     label="Decision"
@@ -1511,7 +1511,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           <DetailSection
             title={<>Task chain / Handoff <HelpTip content="查看 linked issue、review 与验证状态，以及下一步 handoff。" /></>}
           >
-            <div className="panel-inset-compact space-y-3">
+            <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{taskFlowWaitingLabel(currentTaskFlow.waiting_on)}</Badge>
                 {comparison ? (
@@ -1567,7 +1567,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
           >
 
             {provenanceDetail || latestPullRequestSession ? (
-              <div className="panel-inset-compact space-y-3">
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge
                     status={(provenanceDetail?.session ?? latestPullRequestSession)?.status ?? "queued"}
@@ -1611,7 +1611,7 @@ export function PullRequestDetailPage({ user }: PullRequestDetailPageProps) {
                     {highlightedArtifacts.length > 0 ? (
                       <div className="space-y-2">
                         {highlightedArtifacts.slice(0, 2).map((artifact) => (
-                          <div key={artifact.id} className="panel-inset-compact">
+                          <div key={artifact.id} className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Badge variant="outline">{artifact.kind}</Badge>
                               <span>{artifact.title}</span>

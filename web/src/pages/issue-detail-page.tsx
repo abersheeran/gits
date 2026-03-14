@@ -630,7 +630,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
               </>
             }
           >
-            <div className="panel-inset-compact space-y-3">
+            <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <IssueTaskStatusBadge status={currentTaskFlow.status} />
                 <RepositoryStateBadge state={issue.state} kind="issue" />
@@ -762,7 +762,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                         )}
                       </div>
                       {pullRequestProvenance ? (
-                        <div className="panel-card-compact space-y-3">
+                        <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-medium">Latest validation</span>
                             {pullRequestValidationStatus ? (
@@ -824,10 +824,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
                           {pullRequestHighlightedArtifacts.length > 0 ? (
                             <div className="space-y-2">
                               {pullRequestHighlightedArtifacts.map((artifact) => (
-                                <div
-                                  key={artifact.id}
-                                  className="panel-inset-compact space-y-1"
-                                >
+                                <div key={artifact.id} className="space-y-1">
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <Badge variant="outline">{artifact.kind}</Badge>
                                     <span>{artifact.title}</span>
@@ -864,7 +861,7 @@ export function IssueDetailPage({ user }: IssueDetailPageProps) {
           >
 
             {latestIssueSession ? (
-              <div className="panel-inset-compact space-y-3">
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionStatusBadge status={latestIssueSession.status} />
                   <span className="rounded-full border px-2 py-0.5 text-[11px]">
