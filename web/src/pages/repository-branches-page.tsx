@@ -23,6 +23,14 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
+import {
   createRepositoryBranch,
   deleteRepositoryBranch,
   formatApiError,
@@ -54,6 +62,7 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
   const [defaultBranchDraft, setDefaultBranchDraft] = useState("");
   const [branchNameDraft, setBranchNameDraft] = useState("");
   const [branchSourceOidDraft, setBranchSourceOidDraft] = useState("");
+  const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [branchSubmitting, setBranchSubmitting] = useState(false);
   const [defaultBranchPending, setDefaultBranchPending] = useState(false);
   const [branchDeletingName, setBranchDeletingName] = useState<string | null>(null);
@@ -174,6 +183,7 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
       });
       await refreshRepositoryDetail();
       setBranchNameDraft("");
+      setCreateBranchOpen(false);
       setNotice(`分支 ${createdBranchName} 已创建`);
     } catch (error) {
       setFormError(formatApiError(error));
@@ -311,13 +321,33 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
         <Card>
           <CardHeader>
             <div className="flex items-start justify-between gap-3">
-              <CardTitle>创建分支</CardTitle>
+              <div className="space-y-1">
+                <CardTitle>创建分支</CardTitle>
+                <p className="text-body-sm text-text-secondary">需要时再打开表单，避免和分支列表直接平铺。</p>
+              </div>
               <HelpTip content="默认预填仓库当前 HEAD commit，也可以手动填写任意已存在的 commit SHA 作为起点。" />
             </div>
           </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={handleCreateBranch}>
-              <div className="grid gap-4 md:grid-cols-2">
+          <CardContent className="flex items-center justify-between gap-4">
+            <p className="text-body-sm text-text-secondary">从当前 HEAD 或指定 commit 快速创建新分支。</p>
+            <Button type="button" onClick={() => setCreateBranchOpen(true)}>
+              创建分支
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Sheet open={createBranchOpen} onOpenChange={setCreateBranchOpen}>
+          <SheetContent
+            side="right"
+            className="w-full max-w-[640px] border-l border-border-subtle bg-surface-base px-6 py-6 sm:px-8"
+          >
+            <form className="flex h-full flex-col gap-6" onSubmit={handleCreateBranch}>
+              <SheetHeader className="pr-12">
+                <SheetTitle>创建分支</SheetTitle>
+                <SheetDescription>填写新分支名和起点 commit，提交后会立即出现在当前仓库分支列表中。</SheetDescription>
+              </SheetHeader>
+
+              <div className="grid gap-4 overflow-y-auto pr-1">
                 <div className="space-y-2">
                   <Label htmlFor="new-branch-name">新分支名</Label>
                   <Input
@@ -326,6 +356,7 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
                     onChange={(event) => setBranchNameDraft(event.target.value)}
                     placeholder="feature/new-ui"
                     required
+                    className="bg-surface-base"
                   />
                 </div>
                 <div className="space-y-2">
@@ -336,15 +367,22 @@ export function RepositoryBranchesPage({ user }: RepositoryBranchesPageProps) {
                     onChange={(event) => setBranchSourceOidDraft(event.target.value)}
                     placeholder="40 位 commit SHA"
                     required
+                    className="bg-surface-base"
                   />
                 </div>
               </div>
-              <PendingButton type="submit" pending={branchSubmitting} pendingText="创建中...">
-                创建分支
-              </PendingButton>
+
+              <SheetFooter className="border-t border-border-subtle pt-4">
+                <Button type="button" variant="outline" onClick={() => setCreateBranchOpen(false)}>
+                  取消
+                </Button>
+                <PendingButton type="submit" pending={branchSubmitting} pendingText="创建中...">
+                  创建分支
+                </PendingButton>
+              </SheetFooter>
             </form>
-          </CardContent>
-        </Card>
+          </SheetContent>
+        </Sheet>
 
         <Card>
           <CardHeader>
