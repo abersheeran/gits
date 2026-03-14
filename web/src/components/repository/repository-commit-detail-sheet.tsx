@@ -44,8 +44,16 @@ export function RepositoryCommitDetailSheet({
   const previousScrollTopRef = useRef(0);
   const headerHiddenRef = useRef(false);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
+  const authoredAt = detail ? formatDateTime(detail.commit.author.timestamp * 1000) : null;
+  const title = detail
+    ? commitTitle(detail.commit.message)
+    : loading
+      ? "Loading commit detail"
+      : error
+        ? "Commit detail could not be loaded."
+        : "Select a commit";
   const description = detail
-    ? `${shortOid(detail.commit.oid)} · ${formatDateTime(detail.commit.author.timestamp * 1000)}`
+    ? `${detail.commit.author.name} · ${authoredAt}`
     : loading
       ? "Loading the selected commit diff."
       : error
@@ -91,16 +99,60 @@ export function RepositoryCommitDetailSheet({
       >
         <SheetHeader
           className={cn(
-            "gap-2 overflow-hidden bg-surface-focus px-4 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:px-4",
+            "overflow-hidden bg-surface-focus pl-4 pr-16 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:pl-4 sm:pr-16",
             isHeaderHidden
               ? "max-h-0 -translate-y-3 border-b-0 py-0 opacity-0"
-              : "max-h-24 border-b border-border-subtle py-4 opacity-100"
+              : "max-h-56 border-b border-border-subtle py-4 opacity-100"
           )}
         >
-          <SheetTitle className="pr-12">Commit detail</SheetTitle>
-          <SheetDescription className="pr-12 text-body-micro text-text-secondary">
-            {description}
-          </SheetDescription>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                {detail ? (
+                  <AuthorAvatar
+                    name={detail.commit.author.name}
+                    className="h-9 w-9 text-[12px]"
+                  />
+                ) : null}
+                <div className="min-w-0">
+                  <SheetTitle className="line-clamp-2 text-heading-3-16-semibold">
+                    {title}
+                  </SheetTitle>
+                  <SheetDescription className="text-body-micro text-text-secondary">
+                    {description}
+                  </SheetDescription>
+                </div>
+              </div>
+
+              {detail ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onBrowseSnapshot(detail.commit.oid)}
+                >
+                  Browse snapshot
+                </Button>
+              ) : null}
+            </div>
+
+            {detail ? (
+              <div className="flex flex-wrap gap-2 text-body-micro text-text-secondary">
+                <Badge variant="outline" className="bg-surface-base font-mono text-[11px]">
+                  {shortOid(detail.commit.oid)}
+                </Badge>
+                <Badge variant="outline" className="bg-surface-base">
+                  {detail.filesChanged} files
+                </Badge>
+                <Badge variant="outline" className="bg-surface-base">
+                  +{detail.additions}
+                </Badge>
+                <Badge variant="outline" className="bg-surface-base">
+                  -{detail.deletions}
+                </Badge>
+              </div>
+            ) : null}
+          </div>
         </SheetHeader>
 
         <div
@@ -122,60 +174,16 @@ export function RepositoryCommitDetailSheet({
           ) : null}
 
           {!loading && !error && detail ? (
-            <div className="space-y-4">
-              <section className="panel-inset">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <AuthorAvatar
-                      name={detail.commit.author.name}
-                      className="h-9 w-9 text-[12px]"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate font-display text-heading-3-16-semibold text-text-primary">
-                        {commitTitle(detail.commit.message)}
-                      </p>
-                      <p className="text-body-micro text-text-secondary">
-                        {detail.commit.author.name} ·{" "}
-                        {formatDateTime(detail.commit.author.timestamp * 1000)}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onBrowseSnapshot(detail.commit.oid)}
-                  >
-                    Browse snapshot
-                  </Button>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2 text-body-micro text-text-secondary">
-                  <Badge variant="outline" className="bg-surface-base font-mono text-[11px]">
-                    {shortOid(detail.commit.oid)}
-                  </Badge>
-                  <Badge variant="outline" className="bg-surface-base">
-                    {detail.filesChanged} files
-                  </Badge>
-                  <Badge variant="outline" className="bg-surface-base">
-                    +{detail.additions}
-                  </Badge>
-                  <Badge variant="outline" className="bg-surface-base">
-                    -{detail.deletions}
-                  </Badge>
-                </div>
-              </section>
-
-              <ChangesWorkspace changes={detail.changes}>
-                {({ activePath, setActivePath, sectionIdForPath }) => (
-                  <RepositoryDiffView
-                    changes={detail.changes}
-                    activePath={activePath}
-                    onChangeActivate={(change) => setActivePath(change.path)}
-                    sectionIdForPath={sectionIdForPath}
-                  />
-                )}
-              </ChangesWorkspace>
-            </div>
+            <ChangesWorkspace changes={detail.changes}>
+              {({ activePath, setActivePath, sectionIdForPath }) => (
+                <RepositoryDiffView
+                  changes={detail.changes}
+                  activePath={activePath}
+                  onChangeActivate={(change) => setActivePath(change.path)}
+                  sectionIdForPath={sectionIdForPath}
+                />
+              )}
+            </ChangesWorkspace>
           ) : null}
         </div>
       </SheetContent>
