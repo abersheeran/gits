@@ -347,6 +347,9 @@ headers:
 body example:
   {"title":"fix: ...","body":"Closes #${input.issueNumber}","baseRef":"${defaultBranchName}","headRef":"<your-branch>","closeIssueNumbers":[${input.issueNumber}]}
 
+[Error Handling]
+If any API call or MCP tool call fails with HTTP 522 (connection timeout), retry up to 3 times with a 5-second delay between attempts before giving up.
+
 [Git Push Credentials]
 username: ${input.triggeredByUsername}
 token_for_git_push: ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}
