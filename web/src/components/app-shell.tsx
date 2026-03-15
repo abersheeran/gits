@@ -55,7 +55,7 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-surface-canvas">
-      <header className="sticky top-0 z-20 px-0 py-3 md:py-4">
+      <header className="px-0 py-3 md:py-4">
         <div className="app-container">
           <div className="page-panel overflow-hidden bg-surface-base px-4 py-4 backdrop-blur md:px-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

@@ -136,3 +136,8 @@
   - `POST /api/repos/:owner/:repo/branches`
   - `PATCH /api/repos/:owner/:repo/default-branch`
   - `DELETE /api/repos/:owner/:repo/branches/:branch`
+
+## 11. 2026-03 全局导航滚动行为补充
+
+- 顶部全局导航改为随页面内容自然滚动，不再固定吸附在视口顶部。
+- 首页、Dashboard、仓库与设置相关页面共享同一导航壳层，避免长内容页面持续占用首屏纵向空间。
