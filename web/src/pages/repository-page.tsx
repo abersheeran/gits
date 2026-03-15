@@ -340,7 +340,7 @@ function RepositoryContentsPanel({
                 <button
                   type="button"
                   onClick={() => onNavigate({ kind: isDir ? "tree" : "blob", path: entry.path })}
-                  className="grid w-full grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_120px] items-center gap-3 px-4 py-2 text-left text-sm hover:bg-muted/40"
+                  className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 px-4 py-2 text-left text-sm hover:bg-muted/40 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_120px] md:items-center md:gap-3"
                 >
                   <span className="inline-flex min-w-0 items-center gap-2">
                     {isDir ? (
@@ -350,7 +350,7 @@ function RepositoryContentsPanel({
                     )}
                     <span className="truncate font-medium">{entry.name}</span>
                   </span>
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="hidden truncate text-xs text-muted-foreground md:block">
                     {entry.latestCommit ? commitTitle(entry.latestCommit.message) : entry.type}
                   </span>
                   <span className="shrink-0 text-right text-xs text-muted-foreground">
@@ -629,7 +629,7 @@ export function RepositoryPage({ user }: RepositoryPageProps) {
                 });
               }}
             >
-              <SelectTrigger className="h-9 w-[220px] bg-surface-base text-label-sm">
+              <SelectTrigger className="h-9 w-full bg-surface-base text-label-sm sm:w-[220px]">
                 <SelectValue placeholder="选择分支" />
               </SelectTrigger>
               <SelectContent>

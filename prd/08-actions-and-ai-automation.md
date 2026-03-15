@@ -157,6 +157,7 @@ Container DO 实例命名：`agent-session-{sessionId}-attempt-{attemptNumber}`
 
 - 所有日志（含摘要和全量）和 artifact 全文按 session/attempt 组织存入 `ACTION_LOGS_BUCKET`
 - 前端从 R2 拉取日志内容，D1 只提供索引和状态查询
+- Actions 页与会话工作区的分页标签在移动端支持横向滚动，避免会话 / 工作流 / 运行时切换被压缩换行
 
 ### 3.6 平台 MCP 层
 

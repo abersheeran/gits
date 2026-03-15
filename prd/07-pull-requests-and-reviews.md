@@ -66,6 +66,7 @@ PR 是当前产品里的交付中心和评审中心。
   - 一旦草稿正文已有内容，草稿表单会保持展开，避免用户折叠后误以为草稿已丢失
   - 文件头展示该文件的 `open / resolved` thread 数量
   - `Files changed` 也提供独立的右侧 Sheet 组件形态，选中 review range 时会把 thread composer 固定到右栏
+- 仓库页、PR / Issue / Actions 等分页标签在移动端统一支持横向滚动，保持当前标签可读且不压缩成多行
 - 支持从单条 unresolved thread focused resume agent
 - 新 commit 后会给出锚点状态：
   - `current`

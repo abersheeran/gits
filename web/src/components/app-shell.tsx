@@ -76,15 +76,15 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                 ) : null}
               </div>
 
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
+              <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
                 <nav
-                  className="flex max-w-full flex-wrap items-center gap-1 rounded-full bg-surface-focus p-1"
+                  className="flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-surface-focus p-1"
                   aria-label="Primary"
                 >
                   <Button
                     variant="ghost"
                     className={cn(
-                      "h-9 px-4 text-button-md",
+                      "h-9 shrink-0 px-4 text-button-md",
                       isExploreActive && "bg-surface-base shadow-sm hover:bg-surface-base"
                     )}
                     asChild
@@ -98,7 +98,7 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                       <Button
                         variant="ghost"
                         className={cn(
-                          "h-9 px-4 text-button-md",
+                          "h-9 shrink-0 px-4 text-button-md",
                           isDashboardActive && "bg-surface-base shadow-sm hover:bg-surface-base"
                         )}
                         asChild
@@ -110,7 +110,7 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                       <Button
                         variant="ghost"
                         className={cn(
-                          "h-9 px-4 text-button-md",
+                          "h-9 shrink-0 px-4 text-button-md",
                           isTokensActive && "bg-surface-base shadow-sm hover:bg-surface-base"
                         )}
                         asChild
@@ -122,7 +122,7 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                       <Button
                         variant="ghost"
                         className={cn(
-                          "h-9 px-4 text-button-md",
+                          "h-9 shrink-0 px-4 text-button-md",
                           isActionsSettingsActive &&
                             "bg-surface-base shadow-sm hover:bg-surface-base"
                         )}

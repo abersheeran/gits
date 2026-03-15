@@ -234,11 +234,12 @@
   }
 
   .segmented-control {
-    @apply inline-flex items-center rounded-full bg-surface-focus p-1;
+    @apply inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-surface-focus p-1;
+    scrollbar-width: thin;
   }
 
   .segmented-control__item {
-    @apply inline-flex h-9 items-center gap-2 rounded-full px-4 font-display text-button-md text-text-supporting transition-colors duration-100 ease-in-out hover:bg-surface-glass hover:text-text-primary;
+    @apply inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-4 font-display text-button-md text-text-supporting transition-colors duration-100 ease-in-out hover:bg-surface-glass hover:text-text-primary;
   }
 
   .segmented-control__item[data-active="true"] {

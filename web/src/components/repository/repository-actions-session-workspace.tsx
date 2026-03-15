@@ -265,7 +265,7 @@ export function RepositoryActionsSessionWorkspace({
           </div>
 
           <div className="space-y-4">
-            <div className="segmented-control w-fit" role="tablist" aria-label="会话工作区视图">
+            <div className="segmented-control w-full sm:w-fit" role="tablist" aria-label="会话工作区视图">
               <button
                 type="button"
                 className="segmented-control__item"

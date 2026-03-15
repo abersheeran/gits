@@ -55,7 +55,7 @@ function tabCount(
 
 export function RepositoryTabs({ owner, repo, detail, active }: RepositoryTabsProps) {
   return (
-    <nav className="segmented-control w-fit max-w-full flex-wrap" aria-label="Repository sections">
+    <nav className="segmented-control w-full sm:w-fit" aria-label="Repository sections">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = active === tab.key;
@@ -68,6 +68,7 @@ export function RepositoryTabs({ owner, repo, detail, active }: RepositoryTabsPr
               "segmented-control__item",
               isActive && "bg-surface-base text-text-primary shadow-sm hover:bg-surface-base"
             )}
+            data-active={isActive}
           >
             <Icon className="h-4 w-4" />
             {tab.label}

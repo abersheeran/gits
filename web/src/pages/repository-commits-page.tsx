@@ -258,7 +258,7 @@ export function RepositoryCommitsPage({ user }: RepositoryCommitsPageProps) {
                 updateSearch({ ref: value, oid: null, page: 1 });
               }}
             >
-              <SelectTrigger className="h-9 w-[220px] bg-surface-base text-label-sm">
+              <SelectTrigger className="h-9 w-full bg-surface-base text-label-sm sm:w-[220px]">
                 <SelectValue placeholder="选择分支" />
               </SelectTrigger>
               <SelectContent>

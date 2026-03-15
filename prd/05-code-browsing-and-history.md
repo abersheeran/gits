@@ -29,6 +29,7 @@
 - 二进制文件元信息
 - 最新提交摘要展示
 - 文本查看统一使用 Monaco 只读 viewer，按需懒加载
+- 移动端目录列表会折叠次要列，避免文件名、提交摘要和时间并排挤压导致横向溢出
 
 ### 2.3 历史与比较
 
@@ -41,6 +42,7 @@
 - commit detail changes 左侧提供按目录组织的文件树，并标记新增 / 修改 / 删除文件，便于快速切换阅读
 - commit detail / compare 对新增或删除的文本文件会继续渲染结构化文本 diff，不会退化成 `Binary change`
 - commit detail sheet 顶部摘要栏在向下滚动 changes 区域时自动收起，向上滚动或回到顶部时恢复，释放纵向阅读空间
+- 分支选择等固定宽度控件在移动端改为占满可用宽度，避免工具栏换行后仍超出视口
 - ahead / behind
 - mergeability 估算
 - 统一 diff 结构：

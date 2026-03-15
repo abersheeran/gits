@@ -733,7 +733,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         </div>
       </section>
 
-      <div className="segmented-control w-fit" role="tablist" aria-label="Actions 标签">
+      <div className="segmented-control w-full sm:w-fit" role="tablist" aria-label="Actions 标签">
         <button
           type="button"
           className="segmented-control__item"
