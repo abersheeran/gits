@@ -5,11 +5,16 @@ import { RepositoryActionsSessionWorkspace } from "@/components/repository/repos
 import { RepositoryActionsSessionsPanel } from "@/components/repository/repository-actions-sessions-panel";
 import { RepositoryActionsWorkflowSheet } from "@/components/repository/repository-actions-workflow-sheet";
 import { RepositoryActionsWorkflowsPanel } from "@/components/repository/repository-actions-workflows-panel";
-import { ActionStatusBadge } from "@/components/repository/action-status-badge";
 import { RepositoryHeader } from "@/components/repository/repository-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
 import {
   cancelRepositoryAgentSession,
   createActionWorkflow,
@@ -41,7 +46,6 @@ import {
   isPendingAgentSession,
   parseAgentSessionLogStreamEvent
 } from "@/lib/agent-session-utils";
-import { formatDateTime } from "@/lib/format";
 
 type RepositoryActionsPageProps = {
   user: AuthUser | null;
@@ -80,8 +84,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [loading, setLoading] = useState(true);
   const [loadingSessionDetail, setLoadingSessionDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActionsTab>("sessions");
+  const [sessionsSheetOpen, setSessionsSheetOpen] = useState(false);
 
   const [pendingSessionAction, setPendingSessionAction] = useState<{
     sessionId: string;
@@ -359,6 +363,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("sessionId", sessionId);
     setSearchParams(nextParams);
+    setSessionsSheetOpen(false);
   }
 
   async function handleCancelSession(session: AgentSessionRecord) {
@@ -367,7 +372,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
     setPendingSessionAction({ sessionId: session.id, action: "cancel" });
     setError(null);
-    setSuccessMessage(null);
     try {
       const response = await cancelRepositoryAgentSession(owner, repo, session.id);
       if (!mountedRef.current || !response.session) {
@@ -393,14 +397,12 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
     setPendingSessionAction({ sessionId: session.id, action: "rerun" });
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextSession = await rerunRepositoryAgentSession(owner, repo, session.id);
       if (!mountedRef.current) {
         return;
       }
       setSessions((currentSessions) => insertOrReplaceSession(currentSessions, nextSession));
-      setSuccessMessage("已创建新的重新执行会话。");
       handleSelectSession(nextSession.id);
       await loadOverview({ background: true });
     } catch (rerunError) {
@@ -453,7 +455,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
     setSavingWorkflowSheet(true);
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextWorkflow =
         workflowSheetState.mode === "create"
@@ -472,9 +473,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         );
       });
       setWorkflowSheetState(null);
-      setSuccessMessage(
-        workflowSheetState.mode === "create" ? "工作流已创建。" : "工作流已更新。"
-      );
     } catch (workflowError) {
       if (mountedRef.current) {
         setError(formatApiError(workflowError));
@@ -492,7 +490,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
     setSavingWorkflowId(workflow.id);
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextWorkflow = await updateActionWorkflow(owner, repo, workflow.id, {
         enabled: workflow.enabled !== 1
@@ -520,14 +517,12 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     }
     setDispatchingWorkflowId(workflow.id);
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextSession = await dispatchActionWorkflow(owner, repo, workflow.id, dispatchRef ? { ref: dispatchRef } : undefined);
       if (!mountedRef.current) {
         return;
       }
       setSessions((currentSessions) => insertOrReplaceSession(currentSessions, nextSession));
-      setSuccessMessage("已创建新的手动执行会话。");
       handleSelectSession(nextSession.id);
       setActiveTab("sessions");
       await loadOverview({ background: true });
@@ -549,7 +544,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setSavingRunnerConfig(true);
     setRunnerConfigAction("save");
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
         instanceType: runnerInstanceType,
@@ -562,7 +556,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setRunnerConfig(nextConfig);
       resetRunnerConfigDraft(nextConfig);
       setRunnerConfigEditing(false);
-      setSuccessMessage("仓库运行时配置已保存。");
     } catch (saveError) {
       if (mountedRef.current) {
         setError(formatApiError(saveError));
@@ -582,7 +575,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setSavingRunnerConfig(true);
     setRunnerConfigAction("reset");
     setError(null);
-    setSuccessMessage(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
         instanceType: null,
@@ -595,7 +587,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
       setRunnerConfig(nextConfig);
       resetRunnerConfigDraft(nextConfig);
       setRunnerConfigEditing(false);
-      setSuccessMessage("仓库已恢复为继承全局运行时配置。");
     } catch (resetError) {
       if (mountedRef.current) {
         setError(formatApiError(resetError));
@@ -613,17 +604,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     (runnerInstanceType !== runnerConfig.instanceType ||
       codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
       claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
-
-  const sessionSummary = useMemo(
-    () => ({
-      total: sessions.length,
-      pending: sessions.filter((session) => isPendingAgentSession(session)).length,
-      failed: sessions.filter(
-        (session) => session.status === "failed" || session.status === "cancelled"
-      ).length
-    }),
-    [sessions]
-  );
 
   if (!owner || !repo) {
     return (
@@ -656,20 +636,6 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     <div className="app-page">
       <RepositoryHeader owner={owner} repo={repo} detail={detail} user={user} active="actions" />
 
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>操作失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {successMessage ? (
-        <Alert>
-          <AlertTitle>已完成</AlertTitle>
-          <AlertDescription>{successMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
       {loading ? (
         <InlineLoadingState
           title="正在刷新 Actions"
@@ -677,105 +643,44 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
         />
       ) : null}
 
-      <section className="page-hero">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">
-                Actions
-              </h1>
-              <p className="max-w-3xl text-body-sm text-text-secondary">
-                用会话回看任务执行，用工作流决定何时触发，用运行时控制仓库级运行策略。
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="outline" className="bg-surface-focus">
-                {sessionSummary.total} 个会话
-              </Badge>
-              <Badge variant="outline" className="bg-surface-focus">
-                {visibleWorkflows.length} 条工作流规则
-              </Badge>
-              <Badge variant="outline" className="bg-surface-focus">
-                {sessionSummary.pending} 个进行中
-              </Badge>
-              <Badge variant="outline" className="bg-surface-focus">
-                {sessionSummary.failed} 个待处理
-              </Badge>
-            </div>
-          </div>
-
-          <div className="panel-inset space-y-3">
-            <p className="text-label-xs text-text-supporting">当前焦点</p>
-            {selectedSessionDetail ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <ActionStatusBadge status={selectedSessionDetail.session.status} />
-                  <Badge variant="outline">{selectedSessionDetail.session.agent_type}</Badge>
-                  <Badge variant="outline">
-                    {selectedSessionDetail.session.workflow_name ?? selectedSessionDetail.session.origin}
-                  </Badge>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-body-sm font-medium text-text-primary">
-                    会话 #{selectedSessionDetail.session.session_number}
-                  </p>
-                  <p className="text-body-xs text-text-secondary">
-                    {selectedSessionDetail.sourceContext.title ?? "当前会话"} · 更新于{" "}
-                    {formatDateTime(selectedSessionDetail.session.updated_at)}
-                  </p>
-                </div>
-              </>
-            ) : (
-              <p className="text-body-sm text-text-secondary">当前仓库还没有可聚焦的会话。</p>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <div className="segmented-control w-full sm:w-fit" role="tablist" aria-label="Actions 标签">
-        <button
-          type="button"
-          className="segmented-control__item"
-          data-active={activeTab === "sessions"}
-          onClick={() => setActiveTab("sessions")}
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-heading-3-16-semibold font-display text-text-primary">Actions</h1>
+        <div
+          className="segmented-control ml-auto w-full sm:w-fit"
+          role="tablist"
+          aria-label="Actions 标签"
         >
-          会话
-        </button>
-        <button
-          type="button"
-          className="segmented-control__item"
-          data-active={activeTab === "workflows"}
-          onClick={() => setActiveTab("workflows")}
-        >
-          工作流
-        </button>
-        {canManageActions ? (
           <button
             type="button"
             className="segmented-control__item"
-            data-active={activeTab === "runtime"}
-            onClick={() => setActiveTab("runtime")}
+            data-active={activeTab === "sessions"}
+            onClick={() => setActiveTab("sessions")}
           >
-            运行时
+            会话
           </button>
-        ) : null}
+          <button
+            type="button"
+            className="segmented-control__item"
+            data-active={activeTab === "workflows"}
+            onClick={() => setActiveTab("workflows")}
+          >
+            工作流
+          </button>
+          {canManageActions ? (
+            <button
+              type="button"
+              className="segmented-control__item"
+              data-active={activeTab === "runtime"}
+              onClick={() => setActiveTab("runtime")}
+            >
+              运行时
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {activeTab === "sessions" ? (
-        <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <RepositoryActionsSessionsPanel
-            owner={owner}
-            repo={repo}
-            sessions={sessions}
-            selectedSessionId={selectedSessionId}
-            loading={loading}
-            canManageActions={canManageActions}
-            pendingSessionAction={pendingSessionAction}
-            onSelectSession={handleSelectSession}
-            onCancelSession={handleCancelSession}
-          />
-
+        <>
           <RepositoryActionsSessionWorkspace
             owner={owner}
             repo={repo}
@@ -788,8 +693,30 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
             onCancelSession={handleCancelSession}
             onRerunSession={handleRerunSession}
             onLoadArtifactContent={handleLoadArtifactContent}
+            onOpenSessionsList={() => setSessionsSheetOpen(true)}
           />
-        </div>
+          <Sheet open={sessionsSheetOpen} onOpenChange={setSessionsSheetOpen}>
+            <SheetContent side="left" className="w-full max-w-sm">
+              <SheetHeader className="border-b border-border-subtle px-6 py-5 pr-14">
+                <SheetTitle>会话列表</SheetTitle>
+                <SheetDescription>筛选并选择要查看的会话。</SheetDescription>
+              </SheetHeader>
+              <div className="flex-1 overflow-y-auto p-6">
+                <RepositoryActionsSessionsPanel
+                  owner={owner}
+                  repo={repo}
+                  sessions={sessions}
+                  selectedSessionId={selectedSessionId}
+                  loading={loading}
+                  canManageActions={canManageActions}
+                  pendingSessionAction={pendingSessionAction}
+                  onSelectSession={handleSelectSession}
+                  onCancelSession={handleCancelSession}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
+        </>
       ) : null}
 
       {activeTab === "workflows" ? (

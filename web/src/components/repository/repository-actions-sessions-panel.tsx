@@ -124,13 +124,12 @@ export function RepositoryActionsSessionsPanel({
   return (
     <DetailSection
       title="会话"
-      description="以会话视图浏览最近的执行轮次。"
       headerActions={
         <Badge variant="outline" className="bg-surface-focus">
           {filteredSessions.length} 个会话
         </Badge>
       }
-      className="page-panel-muted xl:sticky xl:top-6 xl:self-start"
+      className="page-panel-muted"
     >
       <div className="space-y-4">
         <div className="grid gap-3">

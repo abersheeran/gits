@@ -46,19 +46,18 @@ export function RepositoryActionsWorkflowsPanel({
   onDispatch
 }: RepositoryActionsWorkflowsPanelProps) {
   const enabledCount = workflows.filter((workflow) => workflow.enabled === 1).length;
-  const automatedCount = workflows.length;
 
   return (
     <section className="page-panel">
       <div className="panel-content space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-display text-heading-3-16-semibold text-text-primary">
               工作流规则
             </h2>
-            <p className="max-w-3xl text-body-sm text-text-secondary">
-              管理哪些仓库事件会创建新的会话，并在需要时手动执行一次。
-            </p>
+            <Badge variant="outline" className="bg-surface-base">
+              {enabledCount}/{workflows.length} 启用
+            </Badge>
           </div>
           {canManageActions ? (
             <Button onClick={onCreate}>
@@ -74,24 +73,6 @@ export function RepositoryActionsWorkflowsPanel({
             description="正在同步触发规则和手动执行配置。"
           />
         ) : null}
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">总数</p>
-            <p className="font-display text-card-title text-text-primary">{workflows.length}</p>
-            <p className="text-body-xs text-text-secondary">当前对用户可见的工作流数量。</p>
-          </div>
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">启用中</p>
-            <p className="font-display text-card-title text-text-primary">{enabledCount}</p>
-            <p className="text-body-xs text-text-secondary">会继续参与触发匹配的规则。</p>
-          </div>
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">自动触发</p>
-            <p className="font-display text-card-title text-text-primary">{automatedCount}</p>
-            <p className="text-body-xs text-text-secondary">来自 issue、PR 或 push 的自动触发。</p>
-          </div>
-        </div>
 
         {workflows.length === 0 ? (
           <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">

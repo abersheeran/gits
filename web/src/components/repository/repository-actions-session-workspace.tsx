@@ -5,6 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { PendingButton } from "@/components/ui/pending-button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
 import type {
   AgentSessionArtifactRecord,
   AgentSessionAttemptRecord,
@@ -33,9 +40,8 @@ type RepositoryActionsSessionWorkspaceProps = {
   onCancelSession: (session: AgentSessionDetail["session"]) => void;
   onRerunSession: (session: AgentSessionDetail["session"]) => void;
   onLoadArtifactContent: (sessionId: string, artifactId: string) => void;
+  onOpenSessionsList: () => void;
 };
-
-type WorkspaceView = "prompt" | "validation" | "artifacts";
 
 function attemptStatusVariant(
   status: AgentSessionAttemptRecord["status"]
@@ -89,9 +95,11 @@ export function RepositoryActionsSessionWorkspace({
   loadingArtifactId,
   onCancelSession,
   onRerunSession,
-  onLoadArtifactContent
+  onLoadArtifactContent,
+  onOpenSessionsList
 }: RepositoryActionsSessionWorkspaceProps) {
-  const [activeView, setActiveView] = useState<WorkspaceView>("prompt");
+  const [promptSheetOpen, setPromptSheetOpen] = useState(false);
+  const [logsSheetOpen, setLogsSheetOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,7 +108,9 @@ export function RepositoryActionsSessionWorkspace({
       return;
     }
     const nextArtifact =
-      detail.artifacts.find((artifact) => artifact.kind === "session_logs") ?? detail.artifacts[0] ?? null;
+      detail.artifacts.find((artifact) => artifact.kind === "session_logs") ??
+      detail.artifacts[0] ??
+      null;
     setSelectedArtifactId(nextArtifact?.id ?? null);
   }, [detail]);
 
@@ -113,8 +123,11 @@ export function RepositoryActionsSessionWorkspace({
     return (
       <section className="page-panel">
         <div className="panel-content">
-          <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">
-            正在加载会话工作区...
+          <div className="space-y-3 rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-center">
+            <p className="text-body-sm text-text-secondary">正在加载会话工作区...</p>
+            <Button size="sm" variant="outline" onClick={onOpenSessionsList}>
+              选择会话
+            </Button>
           </div>
         </div>
       </section>
@@ -125,8 +138,11 @@ export function RepositoryActionsSessionWorkspace({
     return (
       <section className="page-panel">
         <div className="panel-content">
-          <div className="rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-body-sm text-text-secondary">
-            选择一个会话查看 Prompt、执行轮次、验证与产物。
+          <div className="space-y-3 rounded-[16px] border border-dashed border-border-subtle bg-surface-focus px-4 py-4 text-center">
+            <p className="text-body-sm text-text-secondary">选择一个会话查看摘要与日志。</p>
+            <Button size="sm" variant="outline" onClick={onOpenSessionsList}>
+              选择会话
+            </Button>
           </div>
         </div>
       </section>
@@ -159,6 +175,11 @@ export function RepositoryActionsSessionWorkspace({
               <p className="text-body-sm text-text-secondary">
                 {detail.sourceContext.title ?? sessionSourceLabel(session)} · 更新于{" "}
                 {formatDateTime(session.updated_at)}
+              </p>
+              <p className="text-body-xs text-text-secondary">
+                发起人 {session.created_by_username ?? "system"} · 耗时{" "}
+                {formatSessionDuration(session.started_at, session.completed_at)} · 执行轮次{" "}
+                {detail.attempts.length}
               </p>
             </div>
           </div>
@@ -200,245 +221,175 @@ export function RepositoryActionsSessionWorkspace({
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">来源</p>
-            <p className="text-body-sm font-medium text-text-primary">
-              {detail.sourceContext.title ?? sessionSourceLabel(session)}
-            </p>
-            <p className="text-body-xs text-text-secondary">
-              {detail.sourceContext.commentId ? `评论 ${detail.sourceContext.commentId}` : session.origin}
-            </p>
+        <div className="panel-inset space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionStatusBadge status={validation.status ?? session.status} />
+            {validation.exit_code !== null ? (
+              <Badge variant="outline">exit {validation.exit_code}</Badge>
+            ) : null}
+            {validation.duration_ms !== null ? (
+              <Badge variant="outline">{Math.round(validation.duration_ms)} ms</Badge>
+            ) : null}
           </div>
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">发起人</p>
-            <p className="text-body-sm font-medium text-text-primary">
-              {session.created_by_username ?? "system"}
-            </p>
-            <p className="text-body-xs text-text-secondary">
-              委托自 {session.delegated_from_username ?? session.created_by_username ?? "system"}
-            </p>
+          <div className="space-y-2">
+            <p className="text-body-sm font-medium text-text-primary">{validation.headline}</p>
+            <p className="text-body-sm text-text-secondary">{validation.detail}</p>
           </div>
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">耗时</p>
-            <p className="text-body-sm font-medium text-text-primary">
-              {formatSessionDuration(session.started_at, session.completed_at)}
-            </p>
-            <p className="text-body-xs text-text-secondary">
-              开始于 {formatRelativeTime(session.started_at)}
-            </p>
-          </div>
-          <div className="panel-inset-compact space-y-1">
-            <p className="text-label-xs text-text-supporting">执行轮次</p>
-            <p className="text-body-sm font-medium text-text-primary">{detail.attempts.length}</p>
-            <p className="text-body-xs text-text-secondary">
-              最新 {detail.latestAttempt ? `#${detail.latestAttempt.attempt_number}` : "-"}
-            </p>
-          </div>
+
+          {validation.checks.length > 0 ? (
+            <div className="space-y-2">
+              {validation.checks.map((check) => (
+                <div
+                  key={`${check.kind}-${check.command}-${check.scope ?? "default"}`}
+                  className="rounded-[12px] bg-surface-base px-3 py-2"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-body-xs text-text-secondary">
+                    <Badge variant="outline">{check.label}</Badge>
+                    {check.scope ? <Badge variant="outline">{check.scope}</Badge> : null}
+                    <Badge variant="outline">{check.status}</Badge>
+                    <span className="text-body-sm font-medium text-text-primary">
+                      {check.command}
+                    </span>
+                    <span>{check.summary}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="panel-inset space-y-3">
-            <p className="text-label-xs text-text-supporting">执行轮次</p>
-            {detail.attempts.length === 0 ? (
-              <p className="text-body-sm text-text-secondary">还没有执行轮次记录。</p>
-            ) : (
-              <ol className="space-y-3">
-                {detail.attempts.map((attempt) => (
-                  <li key={attempt.id} className="rounded-[14px] bg-surface-base px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">#{attempt.attempt_number}</Badge>
-                      <Badge variant={attemptStatusVariant(attempt.status)}>
-                        {attemptStatusLabel(attempt.status)}
-                      </Badge>
-                      <Badge variant="outline">{attempt.instance_type}</Badge>
-                    </div>
-                    <div className="mt-2 space-y-1 text-body-xs text-text-secondary">
-                      <p>创建于 {formatDateTime(attempt.created_at)}</p>
-                      <p>容器 {attempt.container_instance ?? "-"}</p>
-                      <p>失败原因 {attempt.failure_reason ?? "-"}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div className="segmented-control w-full sm:w-fit" role="tablist" aria-label="会话工作区视图">
-              <button
-                type="button"
-                className="segmented-control__item"
-                data-active={activeView === "prompt"}
-                onClick={() => setActiveView("prompt")}
-              >
-                Prompt
-              </button>
-              <button
-                type="button"
-                className="segmented-control__item"
-                data-active={activeView === "validation"}
-                onClick={() => setActiveView("validation")}
-              >
-                验证
-              </button>
-              <button
-                type="button"
-                className="segmented-control__item"
-                data-active={activeView === "artifacts"}
-                onClick={() => setActiveView("artifacts")}
-              >
-                产物
-              </button>
+        <div className="space-y-3">
+          <p className="text-label-xs text-text-supporting">执行轮次</p>
+          {detail.attempts.length === 0 ? (
+            <div className="panel-inset-compact text-body-sm text-text-secondary">
+              还没有执行轮次记录。
             </div>
-
-            {activeView === "prompt" ? (
-              <div className="space-y-4">
-                <div className="panel-inset space-y-3">
-                  <p className="text-label-xs text-text-supporting">Prompt</p>
-                  <MonacoTextViewer
-                    value={session.prompt || "（空 Prompt）"}
-                    path={`agent-session/${session.id}/prompt.txt`}
-                    scope="agent-session-prompt"
-                    minHeight={180}
-                    maxHeight={420}
-                    wrap="on"
-                  />
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="panel-inset-compact space-y-2">
-                    <p className="text-label-xs text-text-supporting">分支</p>
-                    <p className="text-body-sm font-medium text-text-primary">
-                      {session.branch_ref ?? "-"}
-                    </p>
-                    <p className="text-body-xs text-text-secondary">
-                      触发 ref {session.trigger_ref ?? "-"}
-                    </p>
+          ) : (
+            <ol className="flex flex-wrap gap-2">
+              {detail.attempts.map((attempt) => (
+                <li key={attempt.id} className="rounded-[12px] bg-surface-base px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">#{attempt.attempt_number}</Badge>
+                    <Badge variant={attemptStatusVariant(attempt.status)}>
+                      {attemptStatusLabel(attempt.status)}
+                    </Badge>
+                    <Badge variant="outline">{attempt.instance_type}</Badge>
                   </div>
-                  <div className="panel-inset-compact space-y-2">
-                    <p className="text-label-xs text-text-supporting">运行时</p>
-                    <p className="text-body-sm font-medium text-text-primary">
-                      {session.container_instance ?? "等待容器分配"}
+                  {attempt.failure_reason !== null ? (
+                    <p className="mt-2 text-body-xs text-text-secondary">
+                      失败原因 {attempt.failure_reason}
                     </p>
-                    <p className="text-body-xs text-text-secondary">
-                      触发 sha {session.trigger_sha ?? "-"}
-                    </p>
-                  </div>
-                </div>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={onOpenSessionsList}>
+            切换会话
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPromptSheetOpen(true)}>
+            查看 Prompt
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setLogsSheetOpen(true)}>
+            日志与产物
+          </Button>
+        </div>
+      </div>
+
+      <Sheet open={promptSheetOpen} onOpenChange={setPromptSheetOpen}>
+        <SheetContent side="right" className="w-full max-w-2xl">
+          <SheetHeader className="border-b border-border-subtle px-6 py-5 pr-14">
+            <SheetTitle>Prompt</SheetTitle>
+            <SheetDescription>查看本次会话的输入内容与运行上下文。</SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 space-y-4 overflow-y-auto p-6">
+            <MonacoTextViewer
+              value={session.prompt || "（空 Prompt）"}
+              path={`agent-session/${session.id}/prompt.txt`}
+              scope="agent-session-prompt"
+              minHeight={180}
+              maxHeight={420}
+              wrap="on"
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={logsSheetOpen} onOpenChange={setLogsSheetOpen}>
+        <SheetContent side="right" className="w-full max-w-3xl">
+          <SheetHeader className="border-b border-border-subtle px-6 py-5 pr-14">
+            <SheetTitle>日志与产物</SheetTitle>
+            <SheetDescription>查看最新事件、切换产物并按需加载完整输出。</SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 space-y-4 overflow-y-auto p-6">
+            {detail.events.length > 0 ? (
+              <div className="panel-inset space-y-3">
+                <p className="text-label-xs text-text-supporting">最新事件</p>
+                <ol className="space-y-3">
+                  {detail.events
+                    .slice()
+                    .reverse()
+                    .slice(0, 8)
+                    .map((event) => (
+                      <li key={event.id} className="rounded-[14px] bg-surface-base px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{event.type.replaceAll("_", " ")}</Badge>
+                            <Badge variant="outline">{eventStreamLabel(event.stream)}</Badge>
+                          </div>
+                          <p className="text-body-xs text-text-secondary">
+                            {formatDateTime(event.created_at)}
+                          </p>
+                        </div>
+                        <p className="mt-2 text-body-sm text-text-primary">{event.message}</p>
+                      </li>
+                    ))}
+                </ol>
               </div>
             ) : null}
 
-            {activeView === "validation" ? (
-              <div className="space-y-4">
-                <div className="panel-inset space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <ActionStatusBadge status={validation.status ?? session.status} />
-                    {validation.exit_code !== null ? (
-                      <Badge variant="outline">exit {validation.exit_code}</Badge>
-                    ) : null}
-                    {validation.duration_ms !== null ? (
-                      <Badge variant="outline">{Math.round(validation.duration_ms)} ms</Badge>
-                    ) : null}
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-body-sm font-medium text-text-primary">
-                      {validation.headline}
-                    </p>
-                    <p className="text-body-sm text-text-secondary">{validation.detail}</p>
-                  </div>
-                </div>
+            <div className="panel-inset space-y-3">
+              <div className="space-y-1">
+                <p className="text-label-xs text-text-supporting">产物</p>
+                <p className="text-body-xs text-text-secondary">
+                  选择一个产物查看输出内容。
+                </p>
+              </div>
 
-                {validation.checks.length > 0 ? (
-                  <div className="grid gap-3">
-                    {validation.checks.map((check) => (
-                      <div
-                        key={`${check.kind}-${check.command}-${check.scope ?? "default"}`}
-                        className="panel-inset-compact space-y-2"
+              {detail.artifacts.length === 0 ? (
+                <p className="text-body-sm text-text-secondary">当前会话还没有产物。</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {detail.artifacts.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`rounded-[12px] border px-3 py-2 text-left transition-colors duration-100 ease-in-out ${
+                          selectedArtifactId === item.id
+                            ? "border-border-default bg-surface-base text-text-primary"
+                            : "border-border-subtle bg-surface-focus text-text-secondary hover:bg-surface-base hover:text-text-primary"
+                        }`}
+                        onClick={() => setSelectedArtifactId(item.id)}
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{check.label}</Badge>
-                          {check.scope ? <Badge variant="outline">{check.scope}</Badge> : null}
-                          <Badge variant="outline">{check.status}</Badge>
+                          <Badge variant="outline">{item.kind}</Badge>
+                          <span className="text-body-sm font-medium">{item.title}</span>
                         </div>
-                        <p className="text-body-sm font-medium text-text-primary">{check.command}</p>
-                        <p className="text-body-xs text-text-secondary">{check.summary}</p>
-                      </div>
+                        <p className="mt-1 text-body-xs text-text-secondary">
+                          更新于 {formatRelativeTime(item.updated_at)}
+                        </p>
+                      </button>
                     ))}
                   </div>
-                ) : (
-                  <div className="panel-inset-compact text-body-sm text-text-secondary">
-                    当前还没有结构化验证检查。
-                  </div>
-                )}
 
-                <div className="panel-inset space-y-3">
-                  <p className="text-label-xs text-text-supporting">最新事件</p>
-                  {detail.events.length === 0 ? (
-                    <p className="text-body-sm text-text-secondary">还没有执行事件。</p>
-                  ) : (
-                    <ol className="space-y-3">
-                      {detail.events
-                        .slice()
-                        .reverse()
-                        .slice(0, 8)
-                        .map((event) => (
-                          <li key={event.id} className="rounded-[14px] bg-surface-base px-4 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline">
-                                  {event.type.replaceAll("_", " ")}
-                                </Badge>
-                                <Badge variant="outline">{eventStreamLabel(event.stream)}</Badge>
-                              </div>
-                              <p className="text-body-xs text-text-secondary">
-                                {formatDateTime(event.created_at)}
-                              </p>
-                            </div>
-                            <p className="mt-2 text-body-sm text-text-primary">{event.message}</p>
-                          </li>
-                        ))}
-                    </ol>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {activeView === "artifacts" ? (
-              <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-                <div className="panel-inset space-y-3">
-                  <p className="text-label-xs text-text-supporting">产物</p>
-                  {detail.artifacts.length === 0 ? (
-                    <p className="text-body-sm text-text-secondary">当前会话还没有产物。</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {detail.artifacts.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`w-full rounded-[12px] px-4 py-3 text-left transition-colors ${
-                            selectedArtifactId === item.id
-                              ? "bg-surface-base text-text-primary"
-                              : "bg-transparent text-text-secondary hover:bg-surface-base hover:text-text-primary"
-                          }`}
-                          onClick={() => setSelectedArtifactId(item.id)}
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">{item.kind}</Badge>
-                          </div>
-                          <p className="mt-2 text-body-sm font-medium">{item.title}</p>
-                          <p className="mt-1 text-body-xs text-text-secondary">
-                            更新于 {formatRelativeTime(item.updated_at)}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="panel-inset space-y-3">
                   {artifact ? (
-                    <>
+                    <div className="space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -475,18 +426,14 @@ export function RepositoryActionsSessionWorkspace({
                         maxHeight={620}
                         wrap="on"
                       />
-                    </>
-                  ) : (
-                    <p className="text-body-sm text-text-secondary">
-                      选择一个产物查看输出内容。
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : null}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        </SheetContent>
+      </Sheet>
     </section>
   );
 }
