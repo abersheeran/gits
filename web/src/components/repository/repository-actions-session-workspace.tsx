@@ -23,7 +23,16 @@ import {
   sessionSourceLabel,
   sessionWorkflowLabel
 } from "@/lib/agent-session-utils";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
+
+function formatRelativeTime(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
 
 type RepositoryActionsSessionWorkspaceProps = {
   owner: string;
@@ -150,6 +159,7 @@ export function RepositoryActionsSessionWorkspace({
   }
 
   const session = detail.session;
+  const latestAttempt = detail.latestAttempt;
   const validation = detail.validationSummary;
   const artifact = selectedArtifact;
   const artifactContent = artifact
@@ -166,6 +176,14 @@ export function RepositoryActionsSessionWorkspace({
               <Badge variant="outline">{sessionSourceLabel(session)}</Badge>
               <Badge variant="outline">{session.agent_type}</Badge>
               <Badge variant="outline">{session.instance_type}</Badge>
+              <Badge variant="outline">{session.runner_type === "local" ? "Local" : "Cloud"}</Badge>
+              {session.runner_type === "local" &&
+              session.status === "running" &&
+              latestAttempt?.updated_at ? (
+                <Badge variant="outline" className="text-text-tertiary">
+                  heartbeat {formatRelativeTime(latestAttempt.updated_at)}
+                </Badge>
+              ) : null}
               <Badge variant="outline">{sessionWorkflowLabel(session)}</Badge>
             </div>
             <div className="space-y-1">

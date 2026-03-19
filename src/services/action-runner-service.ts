@@ -13,6 +13,10 @@ import {
   ISSUE_REPLY_TOKEN_PLACEHOLDER
 } from "./action-runner-prompt-tokens";
 import {
+  buildActionRunnerConfigFiles,
+  buildActionRunnerEnv
+} from "./action-runner-config-service";
+import {
   classifyAttemptFailure,
   nextInstanceType
 } from "./action-container-callback-service";
@@ -26,8 +30,6 @@ import { WorkflowTaskFlowService } from "./workflow-task-flow-service";
 
 const DEFAULT_ACTION_CONTAINER_INSTANCE_TYPE = "lite";
 const MAX_SESSION_LOG_CHARS = 120_000;
-const CODEX_CONFIG_FILE_PATH = "/home/rootless/.codex/config.toml";
-const CLAUDE_CODE_CONFIG_FILE_PATH = "/home/rootless/.claude/settings.json";
 
 function normalizeCloneOrigin(input: { requestOrigin: string }): string {
   return input.requestOrigin;
@@ -190,6 +192,7 @@ export async function executeActionRun(input: {
       attempt_number: 1,
       status: "queued",
       instance_type: input.session.instance_type,
+      runner_type: input.session.runner_type,
       promoted_from_instance_type: null,
       container_instance: input.session.container_instance,
       exit_code: input.session.exit_code,
@@ -416,31 +419,15 @@ export async function executeActionRun(input: {
       (input.session.source_type === "issue" ||
         input.session.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER));
 
-    const envVars: Record<string, string> = {
-      GITS_ACTION_RUN_ID: sessionId,
-      GITS_ACTION_RUN_NUMBER: String(sessionNumber),
-      GITS_ACTION_ATTEMPT_ID: attempt.id,
-      GITS_ACTION_ATTEMPT_NUMBER: String(attempt.attempt_number),
-      GITS_REPOSITORY: `${input.repository.owner_username}/${input.repository.name}`,
-      GITS_PLATFORM_API_BASE: repositoryOrigin,
-      GITS_REPOSITORY_OWNER: input.repository.owner_username,
-      GITS_REPOSITORY_NAME: input.repository.name,
-      ...(input.session.source_type === "issue" && input.session.source_number !== null
-        ? { GITS_TRIGGER_ISSUE_NUMBER: String(input.session.source_number) }
-        : {}),
-      GITS_AGENT_SESSION_ID: input.session.id,
-      GITS_AGENT_SESSION_ORIGIN: input.session.origin,
-      GITS_AGENT_SESSION_STATUS: input.session.status,
-      GITS_AGENT_SESSION_BRANCH_REF: input.session.branch_ref ?? ""
-    };
-
-    const configFiles: Record<string, string> = {};
-    if (repositoryConfig.codexConfigFileContent.length > 0) {
-      configFiles[CODEX_CONFIG_FILE_PATH] = repositoryConfig.codexConfigFileContent;
-    }
-    if (repositoryConfig.claudeCodeConfigFileContent.length > 0) {
-      configFiles[CLAUDE_CODE_CONFIG_FILE_PATH] = repositoryConfig.claudeCodeConfigFileContent;
-    }
+    const envVars = buildActionRunnerEnv({
+      repository: input.repository,
+      session: input.session,
+      sessionNumber,
+      attemptId: attempt.id,
+      attemptNumber: attempt.attempt_number,
+      requestOrigin: repositoryOrigin
+    });
+    const configFiles = buildActionRunnerConfigFiles(repositoryConfig);
 
     const runnerResponse = await actionsRunner
       .getByName(containerInstance)

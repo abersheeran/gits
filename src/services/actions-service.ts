@@ -1,6 +1,7 @@
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
+  ActionRunnerType,
   ActionsGlobalConfig,
   RepositoryActionsConfig,
   ActionWorkflowRecord,
@@ -20,6 +21,7 @@ type GlobalSettingsRow = {
 type RepositoryActionsConfigRow = {
   repository_id: string;
   instance_type: ActionContainerInstanceType | null;
+  runner_type: ActionRunnerType | null;
   codex_config_file_content: string | null;
   claude_code_config_file_content: string | null;
   updated_at: number;
@@ -122,6 +124,7 @@ export class ActionsService {
         `SELECT
           repository_id,
           instance_type,
+          runner_type,
           codex_config_file_content,
           claude_code_config_file_content,
           updated_at
@@ -148,6 +151,7 @@ export class ActionsService {
 
     return {
       instanceType: repositoryConfig?.instance_type ?? "lite",
+      runnerType: repositoryConfig?.runner_type ?? "cloud",
       codexConfigFileContent:
         repositoryConfig?.codex_config_file_content ?? globalConfig.codexConfigFileContent,
       claudeCodeConfigFileContent:
@@ -162,6 +166,7 @@ export class ActionsService {
     repositoryId: string,
     patch: {
       instanceType?: ActionContainerInstanceType | null;
+      runnerType?: ActionRunnerType | null;
       codexConfigFileContent?: string | null;
       claudeCodeConfigFileContent?: string | null;
     }
@@ -171,6 +176,8 @@ export class ActionsService {
       patch.instanceType !== undefined
         ? patch.instanceType
         : (existing?.instance_type ?? null);
+    const nextRunnerType =
+      patch.runnerType !== undefined ? patch.runnerType : (existing?.runner_type ?? null);
     const nextCodexConfigFileContent =
       patch.codexConfigFileContent !== undefined
         ? patch.codexConfigFileContent
@@ -182,6 +189,7 @@ export class ActionsService {
 
     if (
       nextInstanceType === null &&
+      nextRunnerType === null &&
       nextCodexConfigFileContent === null &&
       nextClaudeCodeConfigFileContent === null
     ) {
@@ -197,13 +205,15 @@ export class ActionsService {
         `INSERT INTO repository_actions_configs (
           repository_id,
           instance_type,
+          runner_type,
           codex_config_file_content,
           claude_code_config_file_content,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(repository_id)
         DO UPDATE SET
           instance_type = excluded.instance_type,
+          runner_type = excluded.runner_type,
           codex_config_file_content = excluded.codex_config_file_content,
           claude_code_config_file_content = excluded.claude_code_config_file_content,
           updated_at = excluded.updated_at`
@@ -211,6 +221,7 @@ export class ActionsService {
       .bind(
         repositoryId,
         nextInstanceType,
+        nextRunnerType,
         nextCodexConfigFileContent,
         nextClaudeCodeConfigFileContent,
         Date.now()

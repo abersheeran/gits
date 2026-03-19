@@ -16,6 +16,7 @@ function buildSessionRow(overrides?: Partial<Record<string, unknown>>) {
     status: "queued",
     agent_type: "codex",
     instance_type: "lite",
+    runner_type: "cloud",
     prompt: "Please fix the issue",
     branch_ref: "refs/heads/agent/session-1",
     trigger_ref: "refs/heads/main",
@@ -50,6 +51,7 @@ function buildAttemptRow(overrides?: Partial<Record<string, unknown>>) {
     attempt_number: 1,
     status: "queued",
     instance_type: "lite",
+    runner_type: "cloud",
     promoted_from_instance_type: null,
     container_instance: null,
     exit_code: null,
@@ -75,6 +77,8 @@ describe("AgentSessionService", () => {
       .mockReturnValueOnce("attempt-created");
 
     const insertedEvents: Array<{ type: unknown; message: unknown }> = [];
+    const insertedSessions: unknown[][] = [];
+    const insertedAttempts: unknown[][] = [];
     const db = createMockD1Database([
       {
         when: "RETURNING session_number_seq AS session_number",
@@ -82,11 +86,17 @@ describe("AgentSessionService", () => {
       },
       {
         when: "INSERT INTO agent_sessions",
-        run: () => ({ success: true })
+        run: (params) => {
+          insertedSessions.push(params);
+          return { success: true };
+        }
       },
       {
         when: "INSERT INTO agent_session_attempts",
-        run: () => ({ success: true })
+        run: (params) => {
+          insertedAttempts.push(params);
+          return { success: true };
+        }
       },
       {
         when: "INSERT INTO agent_session_attempt_events",
@@ -119,6 +129,7 @@ describe("AgentSessionService", () => {
       origin: "issue_assign",
       agentType: "codex",
       instanceType: "lite",
+      runnerType: "local",
       prompt: "Please fix the issue",
       triggerRef: "refs/heads/main",
       triggerSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -130,6 +141,8 @@ describe("AgentSessionService", () => {
     expect(session.id).toBe("session-created");
     expect(session.active_attempt_id).toBe("attempt-created");
     expect(session.latest_attempt_id).toBe("attempt-created");
+    expect(insertedSessions[0]?.[10]).toBe("local");
+    expect(insertedAttempts[0]?.[6]).toBe("local");
     expect(insertedEvents).toEqual([
       {
         type: "attempt_created",
@@ -140,6 +153,7 @@ describe("AgentSessionService", () => {
 
   it("creates retry attempts against the same session and promotes the next active attempt", async () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue("attempt-retry");
+    const insertedAttempts: unknown[][] = [];
 
     const db = createMockD1Database([
       {
@@ -147,8 +161,21 @@ describe("AgentSessionService", () => {
         first: () => ({ attempt_number: 2 })
       },
       {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () =>
+          buildSessionRow({
+            id: "session-1",
+            runner_type: "local",
+            active_attempt_id: "attempt-1",
+            latest_attempt_id: "attempt-1"
+          })
+      },
+      {
         when: "INSERT INTO agent_session_attempts",
-        run: () => ({ success: true })
+        run: (params) => {
+          insertedAttempts.push(params);
+          return { success: true };
+        }
       },
       {
         when: "UPDATE agent_sessions",
@@ -182,6 +209,7 @@ describe("AgentSessionService", () => {
     expect(attempt.id).toBe("attempt-retry");
     expect(attempt.attempt_number).toBe(2);
     expect(attempt.promoted_from_instance_type).toBe("lite");
+    expect(insertedAttempts[0]?.[5]).toBe("local");
   });
 
   it("records attempt artifacts and a structured result_reported event", async () => {

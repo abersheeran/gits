@@ -50,6 +50,7 @@ export function buildAgentSessionRow(overrides?: Partial<Record<string, unknown>
     status: "queued",
     agent_type: "codex",
     instance_type: "lite",
+    runner_type: "cloud",
     prompt: "请执行测试并修复失败。",
     branch_ref: "refs/heads/agent/session-1",
     trigger_ref: "refs/heads/feature",

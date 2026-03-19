@@ -278,6 +278,7 @@ export function registerPlatformRoutes(router: ApiRouter): void {
     return c.json({
       config: {
         instanceType: config.instanceType,
+        runnerType: config.runnerType,
         codexConfigFileContent: config.codexConfigFileContent,
         claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
         inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
@@ -298,6 +299,15 @@ export function registerPlatformRoutes(router: ApiRouter): void {
         instanceType === null
           ? null
           : assertActionContainerInstanceType(instanceType, "instanceType");
+    }
+    if (payload.runnerType !== undefined) {
+      const runnerType = payload.runnerType;
+      if (runnerType !== null && runnerType !== "cloud" && runnerType !== "local") {
+        throw new HTTPException(400, {
+          message: "Field 'runnerType' must be 'cloud', 'local', or null"
+        });
+      }
+      patch.runnerType = runnerType;
     }
     if (payload.codexConfigFileContent !== undefined) {
       const codexConfigFileContent = assertOptionalNullableRawString(
@@ -333,6 +343,7 @@ export function registerPlatformRoutes(router: ApiRouter): void {
 
     if (
       patch.instanceType === undefined &&
+      patch.runnerType === undefined &&
       patch.codexConfigFileContent === undefined &&
       patch.claudeCodeConfigFileContent === undefined
     ) {
@@ -357,6 +368,7 @@ export function registerPlatformRoutes(router: ApiRouter): void {
     return c.json({
       config: {
         instanceType: config.instanceType,
+        runnerType: config.runnerType,
         codexConfigFileContent: config.codexConfigFileContent,
         claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
         inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,

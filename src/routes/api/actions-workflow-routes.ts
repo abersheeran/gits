@@ -224,6 +224,7 @@ export function registerActionsWorkflowRoutes(router: ApiRouter): void {
         origin: "dispatch",
         agentType: workflow.agent_type,
         instanceType: repositoryConfig.instanceType,
+        runnerType: repositoryConfig.runnerType,
         prompt: workflow.prompt,
         ...(input.ref ? { triggerRef: input.ref } : {}),
         ...(input.sha ? { triggerSha: input.sha } : {}),
@@ -232,14 +233,16 @@ export function registerActionsWorkflowRoutes(router: ApiRouter): void {
         delegatedFromUserId: sessionUser.id
       });
 
-      await scheduleActionRunExecution({
-        env: c.env,
-        ...executionCtxArg(c),
-        repository,
-        session,
-        triggeredByUser: sessionUser,
-        requestOrigin: new URL(c.req.url).origin
-      });
+      if (repositoryConfig.runnerType === "cloud") {
+        await scheduleActionRunExecution({
+          env: c.env,
+          ...executionCtxArg(c),
+          repository,
+          session,
+          triggeredByUser: sessionUser,
+          requestOrigin: new URL(c.req.url).origin
+        });
+      }
 
       return c.json({ session }, 202);
     });

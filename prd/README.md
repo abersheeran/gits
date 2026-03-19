@@ -27,7 +27,7 @@
 - Git 对象与引用存储在 `GIT_BUCKET` R2。
 - run/session 日志与 artifact 全部存储在 `ACTION_LOGS_BUCKET` R2；D1 只保留状态与元数据索引，不存日志内容。
 - 每个仓库由一个 `RepositoryObject` Durable Object 负责 hydrate、Git 协议处理、浏览缓存和 squash merge。
-- Agent 执行通过 Queue + Cloudflare Containers 调度，支持多种容器实例规格。
+- Agent 执行通过 Queue + Cloudflare Containers 调度，支持多种容器实例规格；同时支持本地 runner 模式，将 session 分发到用户自管计算机执行。
 
 ## 3. 核心对象
 

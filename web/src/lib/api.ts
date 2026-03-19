@@ -433,6 +433,8 @@ export type ActionContainerInstanceType =
   | "standard-3"
   | "standard-4";
 
+export type ActionRunnerType = "cloud" | "local";
+
 export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 
 export type ActionWorkflowRecord = {
@@ -504,6 +506,7 @@ export type ActionsGlobalConfig = {
 
 export type RepositoryActionsConfig = {
   instanceType: ActionContainerInstanceType;
+  runnerType: ActionRunnerType;
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
   inheritsGlobalCodexConfig: boolean;
@@ -522,6 +525,7 @@ export type AgentSessionRecord = {
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
@@ -587,6 +591,7 @@ export type AgentSessionAttemptRecord = {
   attempt_number: number;
   status: AgentSessionAttemptStatus;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   promoted_from_instance_type: ActionContainerInstanceType | null;
   container_instance: string | null;
   exit_code: number | null;
@@ -1313,6 +1318,7 @@ export async function updateRepositoryActionsConfig(
   repo: string,
   input: {
     instanceType?: ActionContainerInstanceType | null;
+    runnerType?: ActionRunnerType | null;
     codexConfigFileContent?: string | null;
     claudeCodeConfigFileContent?: string | null;
   }

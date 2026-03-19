@@ -48,6 +48,7 @@ import { WorkflowTaskFlowService } from "../../services/workflow-task-flow-servi
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
+  ActionRunnerType,
   ActionWorkflowTrigger,
   AgentSessionExecutionSourceType,
   AgentSessionRecord,
@@ -177,6 +178,7 @@ export type UpdateActionsGlobalConfigInput = {
 
 export type UpdateRepositoryActionsConfigInput = {
   instanceType?: ActionContainerInstanceType | null;
+  runnerType?: ActionRunnerType | null;
   codexConfigFileContent?: string | null;
   claudeCodeConfigFileContent?: string | null;
 };

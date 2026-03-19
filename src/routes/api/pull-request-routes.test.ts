@@ -1776,7 +1776,7 @@ describe("API pull request routes", () => {
       {
         when: "INSERT INTO agent_sessions",
         run: (params) => {
-          insertedPrompt = String(params[10] ?? "");
+          insertedPrompt = String(params[11] ?? "");
           return { success: true };
         }
       },

@@ -199,6 +199,7 @@ describe("API actions and session routes", () => {
       | {
           repository_id: string;
           instance_type: string | null;
+          runner_type: string | null;
           codex_config_file_content: string | null;
           claude_code_config_file_content: string | null;
           updated_at: number;
@@ -224,11 +225,12 @@ describe("API actions and session routes", () => {
           repositoryConfigRow = {
             repository_id: String(params[0]),
             instance_type: params[1] === null ? null : String(params[1]),
+            runner_type: params[2] === null ? null : String(params[2]),
             codex_config_file_content:
-              params[2] === null ? null : String(params[2]),
-            claude_code_config_file_content:
               params[3] === null ? null : String(params[3]),
-            updated_at: Number(params[4])
+            claude_code_config_file_content:
+              params[4] === null ? null : String(params[4]),
+            updated_at: Number(params[5])
           };
           return { success: true };
         }
@@ -1422,6 +1424,110 @@ describe("API actions and session routes", () => {
     expect(stopFetch).toHaveBeenCalledWith("https://actions-container.internal/stop", {
       method: "POST"
     });
+  });
+
+  it("cancels a running local runner session without stopping a container DO", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
+      id: "user-2",
+      username: "bob"
+    });
+    let sessionReadCount = 0;
+    const stopFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow()
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: () => ({ permission: "read" })
+      },
+      {
+        when: "WHERE s.repository_id = ? AND s.id = ?",
+        first: () => {
+          sessionReadCount += 1;
+          return buildAgentSessionRow({
+            id: "session-cancel-local",
+            status: sessionReadCount >= 2 ? "cancelled" : "running",
+            runner_type: "local",
+            active_attempt_id: "attempt-cancel-local",
+            latest_attempt_id: "attempt-cancel-local",
+            container_instance: "local-runner-user-2",
+            completed_at: sessionReadCount >= 2 ? Date.now() : null
+          });
+        }
+      },
+      {
+        when: "WHERE repository_id = ? AND id = ?",
+        first: () => ({
+          id: "attempt-cancel-local",
+          session_id: "session-cancel-local",
+          repository_id: "repo-1",
+          attempt_number: 1,
+          status: "running",
+          instance_type: "lite",
+          runner_type: "local",
+          promoted_from_instance_type: null,
+          container_instance: "local-runner-user-2",
+          exit_code: null,
+          failure_reason: null,
+          failure_stage: null,
+          created_at: Date.now(),
+          claimed_at: Date.now() - 2_000,
+          started_at: Date.now() - 1_500,
+          completed_at: null,
+          updated_at: Date.now() - 500
+        })
+      },
+      {
+        when: "UPDATE agent_session_attempts",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      },
+      {
+        when: "UPDATE agent_sessions",
+        run: () => ({
+          success: true,
+          meta: {
+            changes: 1
+          }
+        })
+      },
+      {
+        when: "INSERT INTO agent_session_attempt_events",
+        run: () => ({ success: true })
+      }
+    ]);
+
+    const response = await createApp().fetch(
+      new Request(
+        "http://localhost/api/repos/alice/demo/agent-sessions/session-cancel-local/cancel",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer session-ok"
+          }
+        }
+      ),
+      {
+        ...createBaseEnv(db),
+        ACTIONS_RUNNER: {
+          getByName: () => ({
+            fetch: stopFetch
+          })
+        } as unknown as DurableObjectNamespace
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { session: { status: string } };
+    expect(body.session.status).toBe("cancelled");
+    expect(stopFetch).not.toHaveBeenCalled();
   });
 
   it("allows collaborators to create actions workflows", async () => {

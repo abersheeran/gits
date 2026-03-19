@@ -32,6 +32,7 @@ import {
   updateActionWorkflow,
   updateRepositoryActionsConfig,
   type ActionContainerInstanceType,
+  type ActionRunnerType,
   type ActionWorkflowRecord,
   type AgentSessionDetail,
   type AgentSessionRecord,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/api";
 import {
   ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS,
+  ACTION_RUNNER_TYPE_OPTIONS,
   applyAgentSessionStreamEvent,
   insertOrReplaceSession,
   isPendingAgentSession,
@@ -103,6 +105,9 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   const [savingRunnerConfig, setSavingRunnerConfig] = useState(false);
   const [runnerConfigAction, setRunnerConfigAction] = useState<"save" | "reset" | null>(null);
   const [runnerConfigEditing, setRunnerConfigEditing] = useState(false);
+  const [runnerType, setRunnerType] = useState<ActionRunnerType>(
+    ACTION_RUNNER_TYPE_OPTIONS[0].value
+  );
   const [runnerInstanceType, setRunnerInstanceType] =
     useState<ActionContainerInstanceType>(ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS[0].value);
   const [codexConfigFileContent, setCodexConfigFileContent] = useState("");
@@ -137,6 +142,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
   }, []);
 
   const resetRunnerConfigDraft = useCallback((nextConfig: RepositoryActionsConfig) => {
+    setRunnerType(nextConfig.runnerType);
     setRunnerInstanceType(nextConfig.instanceType);
     setCodexConfigFileContent(nextConfig.codexConfigFileContent);
     setClaudeCodeConfigFileContent(nextConfig.claudeCodeConfigFileContent);
@@ -248,6 +254,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     if (!canManageActions) {
       setRunnerConfig(null);
       setRunnerConfigEditing(false);
+      setRunnerType(ACTION_RUNNER_TYPE_OPTIONS[0].value);
+      setRunnerInstanceType(ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS[0].value);
       setCodexConfigFileContent("");
       setClaudeCodeConfigFileContent("");
       return;
@@ -546,6 +554,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setError(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        runnerType,
         instanceType: runnerInstanceType,
         codexConfigFileContent,
         claudeCodeConfigFileContent
@@ -577,6 +586,7 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
     setError(null);
     try {
       const nextConfig = await updateRepositoryActionsConfig(owner, repo, {
+        runnerType: null,
         instanceType: null,
         codexConfigFileContent: null,
         claudeCodeConfigFileContent: null
@@ -601,7 +611,8 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
 
   const runnerConfigDirty =
     !!runnerConfig &&
-    (runnerInstanceType !== runnerConfig.instanceType ||
+    (runnerType !== runnerConfig.runnerType ||
+      runnerInstanceType !== runnerConfig.instanceType ||
       codexConfigFileContent !== runnerConfig.codexConfigFileContent ||
       claudeCodeConfigFileContent !== runnerConfig.claudeCodeConfigFileContent);
 
@@ -742,9 +753,11 @@ export function RepositoryActionsPage({ user }: RepositoryActionsPageProps) {
           dirty={runnerConfigDirty}
           saving={savingRunnerConfig}
           action={runnerConfigAction}
+          runnerType={runnerType}
           instanceType={runnerInstanceType}
           codexConfigFileContent={codexConfigFileContent}
           claudeCodeConfigFileContent={claudeCodeConfigFileContent}
+          onRunnerTypeChange={setRunnerType}
           onInstanceTypeChange={setRunnerInstanceType}
           onCodexConfigChange={setCodexConfigFileContent}
           onClaudeCodeConfigChange={setClaudeCodeConfigFileContent}

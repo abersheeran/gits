@@ -8,6 +8,7 @@ import {
 } from "./actions/actions-container";
 import app from "./app";
 import { consumeActionRunQueueBatch } from "./services/action-run-queue-service";
+import { sweepStaleLocalRunnerSessions } from "./services/local-runner-sweep-service";
 import { RepositoryObject } from "./services/repository-object";
 import type { AppBindings } from "./types";
 
@@ -28,5 +29,8 @@ export default {
       batch,
       env
     });
+  },
+  async scheduled(_event, env, _ctx) {
+    await sweepStaleLocalRunnerSessions(env);
   }
 } satisfies ExportedHandler<AppBindings>;

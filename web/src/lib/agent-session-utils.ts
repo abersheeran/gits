@@ -1,8 +1,14 @@
 import type {
   ActionContainerInstanceType,
+  ActionRunnerType,
   AgentSessionLogStreamEvent,
   AgentSessionRecord
 } from "@/lib/api";
+
+export const ACTION_RUNNER_TYPE_OPTIONS: Array<{ value: ActionRunnerType; label: string }> = [
+  { value: "cloud", label: "Cloud" },
+  { value: "local", label: "Local" }
+];
 
 export const ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS: Array<{
   value: ActionContainerInstanceType;

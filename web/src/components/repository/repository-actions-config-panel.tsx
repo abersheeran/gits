@@ -6,8 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
-import type { ActionContainerInstanceType, RepositoryActionsConfig } from "@/lib/api";
-import { ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS } from "@/lib/agent-session-utils";
+import type {
+  ActionContainerInstanceType,
+  ActionRunnerType,
+  RepositoryActionsConfig
+} from "@/lib/api";
+import {
+  ACTION_CONTAINER_INSTANCE_TYPE_OPTIONS,
+  ACTION_RUNNER_TYPE_OPTIONS
+} from "@/lib/agent-session-utils";
 import { formatDateTime } from "@/lib/format";
 
 type RepositoryActionsConfigPanelProps = {
@@ -17,9 +24,11 @@ type RepositoryActionsConfigPanelProps = {
   dirty: boolean;
   saving: boolean;
   action: "save" | "reset" | null;
+  runnerType: ActionRunnerType;
   instanceType: ActionContainerInstanceType;
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
+  onRunnerTypeChange: (value: ActionRunnerType) => void;
   onInstanceTypeChange: (value: ActionContainerInstanceType) => void;
   onCodexConfigChange: (value: string) => void;
   onClaudeCodeConfigChange: (value: string) => void;
@@ -41,9 +50,11 @@ export function RepositoryActionsConfigPanel({
   dirty,
   saving,
   action,
+  runnerType,
   instanceType,
   codexConfigFileContent,
   claudeCodeConfigFileContent,
+  onRunnerTypeChange,
   onInstanceTypeChange,
   onCodexConfigChange,
   onClaudeCodeConfigChange,
@@ -119,6 +130,26 @@ export function RepositoryActionsConfigPanel({
             className="space-y-4"
             onSubmit={onSubmit}
           >
+            <section className="panel-inset space-y-4">
+              <div className="space-y-1">
+                <h3 className="text-body-sm font-medium text-text-primary">Runner type</h3>
+                <p className="text-body-sm text-text-secondary">
+                  选择 session 的执行环境：Cloud 使用云端容器，Local 使用本地计算机。
+                </p>
+              </div>
+              <LabeledSelectField<ActionRunnerType>
+                id="repository-runner-type"
+                label="执行环境"
+                value={runnerType}
+                onValueChange={onRunnerTypeChange}
+                options={ACTION_RUNNER_TYPE_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label
+                }))}
+                triggerClassName="bg-surface-base"
+              />
+            </section>
+
             <section className="panel-inset space-y-4">
               <div className="space-y-1">
                 <h3 className="text-body-sm font-medium text-text-primary">Instance type</h3>

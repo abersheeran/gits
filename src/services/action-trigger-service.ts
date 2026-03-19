@@ -241,13 +241,16 @@ export async function triggerMentionActionRun(input: {
   requestOrigin: string;
 }): Promise<AgentSessionRecord | null> {
   const prompt = input.prompt.trim();
-  if (!prompt || !canScheduleActionRun(input.env)) {
+  if (!prompt) {
     return null;
   }
 
   const actionsService = new ActionsService(input.env.DB);
-  const workflow = await ensureMentionWorkflow(actionsService, input.repository);
   const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
+  if (repositoryConfig.runnerType === "cloud" && !canScheduleActionRun(input.env)) {
+    return null;
+  }
+  const workflow = await ensureMentionWorkflow(actionsService, input.repository);
   const agentSessionService = new AgentSessionService(input.env.DB);
   const session = await agentSessionService.createSessionExecution({
     repositoryId: input.repository.id,
@@ -257,6 +260,7 @@ export async function triggerMentionActionRun(input: {
     origin: "mention",
     agentType: workflow.agent_type,
     instanceType: repositoryConfig.instanceType,
+    runnerType: repositoryConfig.runnerType,
     prompt,
     triggerRef: input.triggerRef ?? null,
     triggerSha: input.triggerSha ?? null,
@@ -265,14 +269,16 @@ export async function triggerMentionActionRun(input: {
     delegatedFromUserId: input.triggeredByUser?.id ?? null
   });
 
-  await scheduleActionRunExecution({
-    env: input.env,
-    ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
-    repository: input.repository,
-    session,
-    ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
-    requestOrigin: input.requestOrigin
-  });
+  if (repositoryConfig.runnerType === "cloud") {
+    await scheduleActionRunExecution({
+      env: input.env,
+      ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
+      repository: input.repository,
+      session,
+      ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
+      requestOrigin: input.requestOrigin
+    });
+  }
   return session;
 }
 
@@ -303,11 +309,11 @@ export async function triggerActionWorkflows(input: {
   requestOrigin: string;
   buildPrompt?: (workflow: ActionWorkflowRecord) => string;
 }): Promise<AgentSessionRecord[]> {
-  if (!canScheduleActionRun(input.env)) {
+  const actionsService = new ActionsService(input.env.DB);
+  const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
+  if (repositoryConfig.runnerType === "cloud" && !canScheduleActionRun(input.env)) {
     return [];
   }
-
-  const actionsService = new ActionsService(input.env.DB);
   let workflows = await actionsService.listEnabledWorkflowsByEvent(
     input.repository.id,
     input.triggerEvent
@@ -320,7 +326,6 @@ export async function triggerActionWorkflows(input: {
     input.triggerEvent === "push"
       ? workflows.filter((workflow) => matchesPushWorkflow(workflow, input.triggerRef ?? null))
       : workflows;
-  const repositoryConfig = await actionsService.getRepositoryConfig(input.repository.id);
   const agentSessionService = new AgentSessionService(input.env.DB);
 
   const sessions: AgentSessionRecord[] = [];
@@ -334,6 +339,7 @@ export async function triggerActionWorkflows(input: {
       origin: "workflow",
       agentType: workflow.agent_type,
       instanceType: repositoryConfig.instanceType,
+      runnerType: repositoryConfig.runnerType,
       prompt,
       triggerRef: input.triggerRef ?? null,
       triggerSha: input.triggerSha ?? null,
@@ -342,14 +348,16 @@ export async function triggerActionWorkflows(input: {
       delegatedFromUserId: input.triggeredByUser?.id ?? null
     });
     sessions.push(session);
-    await scheduleActionRunExecution({
-      env: input.env,
-      ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
-      repository: input.repository,
-      session,
-      ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
-      requestOrigin: input.requestOrigin
-    });
+    if (repositoryConfig.runnerType === "cloud") {
+      await scheduleActionRunExecution({
+        env: input.env,
+        ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
+        repository: input.repository,
+        session,
+        ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
+        requestOrigin: input.requestOrigin
+      });
+    }
   }
 
   return sessions;
@@ -403,6 +411,7 @@ export async function triggerInteractiveAgentSession(input: {
     origin: input.origin,
     agentType: input.agentType,
     instanceType: repositoryConfig.instanceType,
+    runnerType: repositoryConfig.runnerType,
     prompt: input.prompt,
     triggerRef: input.triggerRef ?? null,
     triggerSha: input.triggerSha ?? null,
@@ -412,14 +421,16 @@ export async function triggerInteractiveAgentSession(input: {
     delegatedFromUserId: input.triggeredByUser?.id ?? null
   });
 
-  await scheduleActionRunExecution({
-    env: input.env,
-    ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
-    repository: input.repository,
-    session,
-    ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
-    requestOrigin: input.requestOrigin
-  });
+  if (repositoryConfig.runnerType === "cloud") {
+    await scheduleActionRunExecution({
+      env: input.env,
+      ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}),
+      repository: input.repository,
+      session,
+      ...(input.triggeredByUser ? { triggeredByUser: input.triggeredByUser } : {}),
+      requestOrigin: input.requestOrigin
+    });
+  }
 
   return { session };
 }

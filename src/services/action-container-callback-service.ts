@@ -498,13 +498,39 @@ export async function handleContainerCompletion(input: {
     return;
   }
 
+  await processCompletionCallback({
+    env: input.env,
+    payload: input.payload,
+    requestOrigin: input.requestOrigin
+  });
+  await notifyContainerCompletion(input.env, input.payload);
+}
+
+export async function processCompletionCallback(input: {
+  env: Pick<
+    AppBindings,
+    | "DB"
+    | "GIT_BUCKET"
+    | "ACTION_LOGS_BUCKET"
+    | "REPOSITORY_OBJECTS"
+    | "JWT_SECRET"
+    | "ACTIONS_QUEUE"
+  >;
+  payload: CompletionCallbackPayload;
+  requestOrigin: string;
+  secretsToRedact?: string[];
+}): Promise<void> {
   const actionLogStorage = new ActionLogStorageService(input.env.ACTION_LOGS_BUCKET ?? input.env.GIT_BUCKET);
   const agentSessionService = new AgentSessionService(input.env.DB, actionLogStorage);
   const workflowTaskFlowService = new WorkflowTaskFlowService(
     input.env.DB,
     createRepositoryObjectClient(input.env)
   );
-  const redactText = createSecretRedactor([input.payload.callbackSecret]);
+  const redactText = createSecretRedactor(
+    [input.payload.callbackSecret, ...(input.secretsToRedact ?? [])].filter(
+      (value): value is string => value.length > 0
+    )
+  );
 
   const session = await agentSessionService.findSessionById(
     input.payload.repositoryId,
@@ -574,7 +600,6 @@ export async function handleContainerCompletion(input: {
     input.payload.attemptId
   );
   if (latestAttempt?.status === "cancelled") {
-    await notifyContainerCompletion(input.env, input.payload);
     return;
   }
 
@@ -619,7 +644,6 @@ export async function handleContainerCompletion(input: {
       updatedAt: completedAt
     });
 
-    await notifyContainerCompletion(input.env, input.payload);
     return;
   }
 
@@ -686,8 +710,6 @@ export async function handleContainerCompletion(input: {
       updatedAt: completedAt
     });
   }
-
-  await notifyContainerCompletion(input.env, input.payload);
 }
 
 async function verifyCallbackSecret(

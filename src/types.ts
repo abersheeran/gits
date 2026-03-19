@@ -83,6 +83,8 @@ export type ActionContainerInstanceType =
   | "standard-3"
   | "standard-4";
 
+export type ActionRunnerType = "cloud" | "local";
+
 export type AgentSessionStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type AgentSessionExecutionSourceType = "issue" | "pull_request";
 
@@ -106,6 +108,7 @@ export type AgentSessionAttemptFailureStage =
 
 export type AgentSessionAttemptFailureReason =
   | "boot_timeout"
+  | "heartbeat_timeout"
   | "container_error"
   | "dockerd_bootstrap_failed"
   | "stream_disconnected"
@@ -334,6 +337,7 @@ export type ActionsGlobalConfig = {
 
 export type RepositoryActionsConfig = {
   instanceType: ActionContainerInstanceType;
+  runnerType: ActionRunnerType;
   codexConfigFileContent: string;
   claudeCodeConfigFileContent: string;
   inheritsGlobalCodexConfig: boolean;
@@ -352,6 +356,7 @@ export type AgentSessionRecord = {
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
@@ -389,6 +394,7 @@ export type AgentSessionAttemptRecord = {
   attempt_number: number;
   status: AgentSessionAttemptStatus;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   promoted_from_instance_type: ActionContainerInstanceType | null;
   container_instance: string | null;
   exit_code: number | null;

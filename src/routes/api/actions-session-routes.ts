@@ -552,6 +552,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
       }
 
       if (
+        session.runner_type === "cloud" &&
         cancelResult.attemptStatus !== "queued" &&
         cancelResult.containerInstance &&
         cancelResult.instanceType
@@ -616,6 +617,7 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
         origin: "rerun",
         agentType: sourceSession.agent_type,
         instanceType: sourceSession.instance_type,
+        runnerType: sourceSession.runner_type,
         prompt: sourceSession.prompt,
         triggerRef: sourceSession.trigger_ref ?? null,
         triggerSha: sourceSession.trigger_sha ?? null,
@@ -626,14 +628,16 @@ export function registerActionsSessionRoutes(router: ApiRouter): void {
           sourceSession.delegated_from_user_id ?? sourceSession.created_by ?? sessionUser.id
       });
 
-      await scheduleActionRunExecution({
-        env: c.env,
-        ...executionCtxArg(c),
-        repository,
-        session,
-        triggeredByUser: sessionUser,
-        requestOrigin: new URL(c.req.url).origin
-      });
+      if (sourceSession.runner_type === "cloud") {
+        await scheduleActionRunExecution({
+          env: c.env,
+          ...executionCtxArg(c),
+          repository,
+          session,
+          triggeredByUser: sessionUser,
+          requestOrigin: new URL(c.req.url).origin
+        });
+      }
 
       return c.json(
         {

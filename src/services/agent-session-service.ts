@@ -1,6 +1,7 @@
 import type {
   ActionAgentType,
   ActionContainerInstanceType,
+  ActionRunnerType,
   AgentSessionArtifactKind,
   AgentSessionArtifactRecord,
   AgentSessionAttemptEventRecord,
@@ -53,6 +54,7 @@ type SessionRow = {
   status: AgentSessionStatus;
   agent_type: ActionAgentType;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   prompt: string;
   branch_ref: string | null;
   trigger_ref: string | null;
@@ -84,6 +86,7 @@ type AttemptRow = {
   attempt_number: number;
   status: AgentSessionAttemptStatus;
   instance_type: ActionContainerInstanceType;
+  runner_type: ActionRunnerType;
   promoted_from_instance_type: ActionContainerInstanceType | null;
   container_instance: string | null;
   exit_code: number | null;
@@ -131,6 +134,7 @@ export type CreateAgentSessionInput = {
   status?: AgentSessionStatus;
   agentType: ActionAgentType;
   instanceType: ActionContainerInstanceType;
+  runnerType?: ActionRunnerType;
   prompt: string;
   triggerRef?: string | null;
   triggerSha?: string | null;
@@ -223,6 +227,7 @@ export class AgentSessionService {
       s.status,
       s.agent_type,
       s.instance_type,
+      s.runner_type,
       s.prompt,
       s.branch_ref,
       s.trigger_ref,
@@ -257,6 +262,7 @@ export class AgentSessionService {
       attempt_number,
       status,
       instance_type,
+      runner_type,
       promoted_from_instance_type,
       container_instance,
       exit_code,
@@ -319,6 +325,7 @@ export class AgentSessionService {
       status: row.status,
       agent_type: row.agent_type,
       instance_type: row.instance_type,
+      runner_type: row.runner_type,
       prompt: row.prompt,
       branch_ref: row.branch_ref,
       trigger_ref: row.trigger_ref,
@@ -352,6 +359,7 @@ export class AgentSessionService {
       attempt_number: row.attempt_number,
       status: row.status,
       instance_type: row.instance_type,
+      runner_type: row.runner_type,
       promoted_from_instance_type: row.promoted_from_instance_type,
       container_instance: row.container_instance,
       exit_code: row.exit_code,
@@ -403,6 +411,7 @@ export class AgentSessionService {
     const now = Date.now();
     const sessionNumber = await this.nextSessionNumber(input.repositoryId);
     const branchRef = this.buildBranchRef(sessionId);
+    const runnerType = input.runnerType ?? "cloud";
 
     await this.db
       .prepare(
@@ -417,6 +426,7 @@ export class AgentSessionService {
           status,
           agent_type,
           instance_type,
+          runner_type,
           prompt,
           branch_ref,
           trigger_ref,
@@ -436,7 +446,7 @@ export class AgentSessionService {
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         sessionId,
@@ -449,6 +459,7 @@ export class AgentSessionService {
         input.status ?? "queued",
         input.agentType,
         input.instanceType,
+        runnerType,
         input.prompt,
         branchRef,
         input.triggerRef ?? null,
@@ -480,6 +491,7 @@ export class AgentSessionService {
           attempt_number,
           status,
           instance_type,
+          runner_type,
           promoted_from_instance_type,
           container_instance,
           exit_code,
@@ -490,7 +502,7 @@ export class AgentSessionService {
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         attemptId,
@@ -499,6 +511,7 @@ export class AgentSessionService {
         1,
         "queued",
         input.instanceType,
+        runnerType,
         null,
         null,
         null,
@@ -546,6 +559,10 @@ export class AgentSessionService {
     const createdAt = input.createdAt ?? Date.now();
     const attemptId = crypto.randomUUID();
     const attemptNumber = await this.nextAttemptNumber(input.sessionId);
+    const session = await this.findSessionById(input.repositoryId, input.sessionId);
+    if (!session) {
+      throw new Error("Agent session not found");
+    }
     await this.db
       .prepare(
         `INSERT INTO agent_session_attempts (
@@ -555,6 +572,7 @@ export class AgentSessionService {
           attempt_number,
           status,
           instance_type,
+          runner_type,
           promoted_from_instance_type,
           container_instance,
           exit_code,
@@ -565,7 +583,7 @@ export class AgentSessionService {
           started_at,
           completed_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, 'queued', ?, ?, NULL, NULL, NULL, NULL, ?, NULL, NULL, NULL, ?)`
+        ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, NULL, NULL, NULL, NULL, ?, NULL, NULL, NULL, ?)`
       )
       .bind(
         attemptId,
@@ -573,6 +591,7 @@ export class AgentSessionService {
         input.repositoryId,
         attemptNumber,
         input.instanceType,
+        session.runner_type,
         input.promotedFromInstanceType ?? null,
         createdAt,
         createdAt

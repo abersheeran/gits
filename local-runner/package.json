@@ -1,0 +1,12 @@
+{
+  "name": "gits-local-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx runner.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.0.0"
+  }
+}
