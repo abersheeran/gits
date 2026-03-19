@@ -28,6 +28,7 @@ import {
   createWorkflowTaskFlowService,
   executionCtxArg,
   findReadableRepositoryOr404,
+  getOptionalExecutionCtx,
   parseIssueListState,
   parseJsonObject,
   parseLimit,
@@ -395,70 +396,79 @@ export function registerIssueRoutes(router: ApiRouter): void {
       authorId: commentAuthorId,
       body: input.body
     });
-    const comments = await issueService.listIssueComments(repository.id, issue.number);
-    const issueConversationHistory = buildIssueConversationHistory({
-      issueAuthorUsername: issue.author_username,
-      issueBody: issue.body,
-      issueAcceptanceCriteria: issue.acceptance_criteria,
-      comments
-    });
-    const repositoryClient = createRepositoryObjectClient(c.env);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
     const requestOrigin = new URL(c.req.url).origin;
+    const runCommentTriggers = async () => {
+      const comments = await issueService.listIssueComments(repository.id, issue.number);
+      const issueConversationHistory = buildIssueConversationHistory({
+        issueAuthorUsername: issue.author_username,
+        issueBody: issue.body,
+        issueAcceptanceCriteria: issue.acceptance_criteria,
+        comments
+      });
+      const repositoryClient = createRepositoryObjectClient(c.env);
+      const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
 
-    if (!isActionsComment) {
-      await triggerActionWorkflows({
-        env: c.env,
-        ...executionCtxArg(c),
-        repository,
-        triggerEvent: "issue_created",
-        ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
-        ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
-        triggerSourceType: "issue",
-        triggerSourceNumber: issue.number,
-        triggerSourceCommentId: comment.id,
-        triggeredByUser: sessionUser,
-        requestOrigin,
-        buildPrompt: (workflow) =>
-          buildIssueCreatedAgentPrompt({
-            workflowPrompt: workflow.prompt,
-            owner,
-            repo,
+      if (!isActionsComment) {
+        await triggerActionWorkflows({
+          env: c.env,
+          ...executionCtxArg(c),
+          repository,
+          triggerEvent: "issue_created",
+          ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
+          ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
+          triggerSourceType: "issue",
+          triggerSourceNumber: issue.number,
+          triggerSourceCommentId: comment.id,
+          triggeredByUser: sessionUser,
+          requestOrigin,
+          buildPrompt: (workflow) =>
+            buildIssueCreatedAgentPrompt({
+              workflowPrompt: workflow.prompt,
+              owner,
+              repo,
+              issueNumber: issue.number,
+              issueTitle: issue.title,
+              issueBody: issue.body,
+              acceptanceCriteria: issue.acceptance_criteria,
+              issueConversationHistory,
+              triggerReason: "issue_comment_added",
+              triggerCommentId: comment.id,
+              triggerCommentAuthorUsername: comment.author_username,
+              defaultBranchRef: defaultBranchTarget.ref,
+              requestOrigin,
+              triggeredByUsername: sessionUser.username
+            })
+        });
+      }
+
+      if (!isActionsComment && containsActionsMention({ title: issue.title, body: comment.body })) {
+        await triggerMentionActionRun({
+          env: c.env,
+          ...executionCtxArg(c),
+          repository,
+          prompt: buildIssueCommentMentionPrompt({
             issueNumber: issue.number,
             issueTitle: issue.title,
-            issueBody: issue.body,
-            acceptanceCriteria: issue.acceptance_criteria,
-            issueConversationHistory,
-            triggerReason: "issue_comment_added",
-            triggerCommentId: comment.id,
-            triggerCommentAuthorUsername: comment.author_username,
-            defaultBranchRef: defaultBranchTarget.ref,
-            requestOrigin,
-            triggeredByUsername: sessionUser.username
-          })
-      });
+            issueConversationHistory
+          }),
+          ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
+          ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
+          triggerSourceType: "issue",
+          triggerSourceNumber: issue.number,
+          triggerSourceCommentId: comment.id,
+          triggeredByUser: sessionUser,
+          requestOrigin
+        });
+      }
+    };
+
+    const executionCtx = getOptionalExecutionCtx(c);
+    if (executionCtx) {
+      executionCtx.waitUntil(runCommentTriggers());
+      return c.json({ comment }, 201);
     }
 
-    if (!isActionsComment && containsActionsMention({ title: issue.title, body: comment.body })) {
-      await triggerMentionActionRun({
-        env: c.env,
-        ...executionCtxArg(c),
-        repository,
-        prompt: buildIssueCommentMentionPrompt({
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          issueConversationHistory
-        }),
-        ...(defaultBranchTarget.ref ? { triggerRef: defaultBranchTarget.ref } : {}),
-        ...(defaultBranchTarget.sha ? { triggerSha: defaultBranchTarget.sha } : {}),
-        triggerSourceType: "issue",
-        triggerSourceNumber: issue.number,
-        triggerSourceCommentId: comment.id,
-        triggeredByUser: sessionUser,
-        requestOrigin
-      });
-    }
-
+    await runCommentTriggers();
     return c.json({ comment }, 201);
   });
 

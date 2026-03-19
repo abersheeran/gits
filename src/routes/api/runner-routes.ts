@@ -16,6 +16,10 @@ import {
 import { processCompletionCallback, type CompletionCallbackPayload } from "../../services/action-container-callback-service";
 import { buildActionRunnerEnv } from "../../services/action-runner-config-service";
 import {
+  ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
+  ISSUE_REPLY_TOKEN_PLACEHOLDER
+} from "../../services/action-runner-prompt-tokens";
+import {
   ACTIONS_SYSTEM_EMAIL,
   ACTIONS_SYSTEM_USERNAME
 } from "../../services/auth-service";
@@ -383,6 +387,39 @@ export function registerRunnerRoutes(router: ApiRouter): void {
       name: `local-runner-clone-${session.id}`,
       expiresAt: claimedAt + 15 * 60 * 1000
     });
+    const needsIssueReplyToken =
+      session.source_type === "issue" || session.prompt.includes(ISSUE_REPLY_TOKEN_PLACEHOLDER);
+    const needsPrCreateToken =
+      session.source_type === "issue" || session.prompt.includes(ISSUE_PR_CREATE_TOKEN_PLACEHOLDER);
+    const issueReplyToken = needsIssueReplyToken
+      ? await authService.createAccessToken({
+          userId: sessionUser.id,
+          name: `local-runner-issue-reply-${session.id}`,
+          displayAsActions: true,
+          expiresAt: claimedAt + 20 * 60 * 1000
+        })
+      : null;
+    const prCreateToken = needsPrCreateToken
+      ? await authService.createAccessToken({
+          userId: sessionUser.id,
+          name: `local-runner-pr-create-${session.id}`,
+          displayAsActions: true,
+          expiresAt: claimedAt + 20 * 60 * 1000
+        })
+      : null;
+    let runtimePrompt = session.prompt;
+    if (issueReplyToken) {
+      runtimePrompt = runtimePrompt.replaceAll(
+        ISSUE_REPLY_TOKEN_PLACEHOLDER,
+        issueReplyToken.token
+      );
+    }
+    if (prCreateToken) {
+      runtimePrompt = runtimePrompt.replaceAll(
+        ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
+        prCreateToken.token
+      );
+    }
     const callbackToken = await new SignJWT({
       sessionId: session.id,
       attemptId: session.attempt_id,
@@ -405,28 +442,32 @@ export function registerRunnerRoutes(router: ApiRouter): void {
       gitCommitName: ACTIONS_SYSTEM_USERNAME,
       gitCommitEmail: ACTIONS_SYSTEM_EMAIL,
       agentType: session.agent_type,
-      prompt: session.prompt,
+      prompt: runtimePrompt,
       triggerRef: session.trigger_ref,
       triggerSha: session.trigger_sha,
-      env: buildActionRunnerEnv({
-        repository: {
-          id: session.repository_id,
-          owner_username: session.owner_username,
-          name: session.repo_name
-        },
-        session: {
-          id: session.id,
-          origin: session.origin,
-          status: "running",
-          branch_ref: session.branch_ref,
-          source_type: session.source_type,
-          source_number: session.source_number
-        },
-        sessionNumber: session.session_number,
-        attemptId: session.attempt_id,
-        attemptNumber: session.attempt_number,
-        requestOrigin
-      }),
+      env: {
+        ...buildActionRunnerEnv({
+          repository: {
+            id: session.repository_id,
+            owner_username: session.owner_username,
+            name: session.repo_name
+          },
+          session: {
+            id: session.id,
+            origin: session.origin,
+            status: "running",
+            branch_ref: session.branch_ref,
+            source_type: session.source_type,
+            source_number: session.source_number
+          },
+          sessionNumber: session.session_number,
+          attemptId: session.attempt_id,
+          attemptNumber: session.attempt_number,
+          requestOrigin
+        }),
+        ...(issueReplyToken ? { GITS_ISSUE_REPLY_TOKEN: issueReplyToken.token } : {}),
+        ...(prCreateToken ? { GITS_PR_CREATE_TOKEN: prCreateToken.token } : {})
+      },
       sessionId: session.id,
       attemptId: session.attempt_id,
       sessionNumber: session.session_number,

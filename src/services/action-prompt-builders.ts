@@ -1,7 +1,4 @@
-import {
-  ISSUE_PR_CREATE_TOKEN_PLACEHOLDER,
-  ISSUE_REPLY_TOKEN_PLACEHOLDER
-} from "./action-runner-prompt-tokens";
+import { ISSUE_PR_CREATE_TOKEN_PLACEHOLDER } from "./action-runner-prompt-tokens";
 import { createRepositoryObjectClient } from "./repository-object";
 import type {
   IssueCommentRecord,
@@ -78,14 +75,20 @@ export function buildInteractiveIssueAgentPrompt(input: {
       ? "You are taking ownership of a repository issue."
       : "Continue the existing work for this repository issue.",
     `Repository: ${input.owner}/${input.repo}`,
-    "[Acceptance Criteria]",
-    input.acceptanceCriteria.trim() || "(none)",
     "",
     buildIssueCommentMentionPrompt({
       issueNumber: input.issueNumber,
       issueTitle: input.issueTitle,
       issueConversationHistory: input.issueConversationHistory
     }),
+    "",
+    "[Platform Tools]",
+    "If MCP tools are available, prefer them for platform interaction:",
+    "- gits_issue_reply: reply to this issue",
+    "- gits_create_pull_request: create a pull request (supports closeIssueNumbers)",
+    "",
+    "[Branch Naming]",
+    `Use the pattern: fix/issue-${input.issueNumber} or feat/issue-${input.issueNumber} based on the task type.`,
     "",
     "[Instruction]",
     taskInstruction
@@ -251,6 +254,11 @@ export function buildInteractivePullRequestAgentPrompt(input: {
           ""
         ]
       : []),
+    "[Platform Tools]",
+    "If MCP tools are available, prefer them for platform interaction:",
+    "- gits_issue_reply: reply to related issues",
+    "- gits_create_pull_request: create a pull request (supports closeIssueNumbers)",
+    "",
     "[Instruction]",
     taskInstruction
   ].join("\n");
@@ -287,8 +295,6 @@ export function buildIssueCreatedAgentPrompt(input: {
   requestOrigin: string;
   triggeredByUsername: string;
 }): string {
-  const issueCommentsApi = `${input.requestOrigin}/api/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`;
-  const pullsApi = `${input.requestOrigin}/api/repos/${input.owner}/${input.repo}/pulls`;
   const defaultBranchName = input.defaultBranchRef?.replace(/^refs\/heads\//, "") ?? "main";
   const triggerCommentLines = [
     input.triggerCommentId ? `trigger_comment_id: ${input.triggerCommentId}` : "",
@@ -307,48 +313,28 @@ repository: ${input.owner}/${input.repo}
 issue_number: #${input.issueNumber}
 issue_title: ${input.issueTitle}
 trigger_reason: ${input.triggerReason}
-${triggerCommentLines ? `${triggerCommentLines}\n` : ""}issue_body:
-${input.issueBody || "(empty)"}
-acceptance_criteria:
-${input.acceptanceCriteria || "(none)"}
-issue_conversation_history:
-${input.issueConversationHistory}
-default_branch_ref: ${input.defaultBranchRef ?? "(not found)"}
+${triggerCommentLines ? `${triggerCommentLines}\n` : ""}default_branch: ${defaultBranchName}
 
-[History Handling]
-The conversation history above is complete and may be long.
-Before deciding, summarize/compress it into key facts for yourself, then proceed.
+[Issue Body]
+${input.issueBody || "(empty)"}
+
+[Acceptance Criteria]
+${input.acceptanceCriteria || "(none)"}
+
+[Conversation History]
+${input.issueConversationHistory}
 
 [Required Decision]
-You are handling an issue trigger.
-1. If the issue information is sufficient to implement a fix, start coding, push a branch, and create a PR that closes #${input.issueNumber}.
-2. If information is insufficient, reply to this issue with concrete follow-up questions.
+1. If the issue is actionable, implement a fix, push a branch, and create a PR that closes #${input.issueNumber}.
+2. If information is missing, reply with concrete follow-up questions.
 
-[Preferred MCP Tools]
-If MCP tools are available, use them before raw HTTP:
-- gits_issue_reply: post an issue comment reply
-- gits_create_pull_request: create a pull request with closeIssueNumbers
+[Platform Tools]
+Use the registered MCP tools to interact with the platform:
+- gits_issue_reply: reply to this issue
+- gits_create_pull_request: create a pull request (supports closeIssueNumbers)
 
-[Issue Reply API]
-method: POST
-url: ${issueCommentsApi}
-headers:
-  Authorization: Bearer ${ISSUE_REPLY_TOKEN_PLACEHOLDER}
-  Content-Type: application/json
-body example:
-  {"body":"Thanks for the report. Please provide steps, expected behavior, and logs."}
-
-[Create Closing PR API]
-method: POST
-url: ${pullsApi}
-headers:
-  Authorization: Bearer ${ISSUE_PR_CREATE_TOKEN_PLACEHOLDER}
-  Content-Type: application/json
-body example:
-  {"title":"fix: ...","body":"Closes #${input.issueNumber}","baseRef":"${defaultBranchName}","headRef":"<your-branch>","closeIssueNumbers":[${input.issueNumber}]}
-
-[Error Handling]
-If any API call or MCP tool call fails with HTTP 522 (connection timeout), retry up to 3 times with a 5-second delay between attempts before giving up.
+[Branch Naming]
+Use the pattern: fix/issue-${input.issueNumber} or feat/issue-${input.issueNumber} based on the task type.
 
 [Git Push Credentials]
 username: ${input.triggeredByUsername}
