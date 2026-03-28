@@ -1,30 +1,33 @@
-# Git Service (Workers + D1 + R2)
+# gits
 
-Minimal personal Git hosting service scaffold.
-Current code includes:
+A personal Git hosting and AI agent collaboration platform built on Cloudflare Workers. It brings together repositories, issues, pull requests, code reviews, and AI-powered automation into a single workflow.
 
-- Hono app structure (`routes`, `services`, `middleware`, `views`)
-- D1 schema and initial migration
-- JWT session + PAT verification skeleton
-- Smart HTTP endpoints for Git (`info/refs`, `upload-pack`, `receive-pack`)
-- R2-based storage adapter for Git object/ref paths
-- Repository APIs:
-  - `GET /api/repos`
-  - `POST /api/repos`
-  - `PATCH /api/repos/:owner/:repo`
-  - `DELETE /api/repos/:owner/:repo`
-  - `GET /api/repos/:owner/:repo`
-  - `GET /api/repos/:owner/:repo/branches`
-  - `GET /api/repos/:owner/:repo/commits`
-  - `GET|PUT|DELETE /api/repos/:owner/:repo/collaborators*`
-- Auth/PAT APIs:
-  - `POST /api/auth/register`
-  - `POST /api/auth/login`
-  - `POST /api/auth/tokens`
-  - `GET /api/auth/tokens`
-  - `DELETE /api/auth/tokens/:tokenId`
+**Core loop:** Issue → Agent Session → Pull Request → Code Review → Merge
 
-## Quick start
+## Features
+
+- **Git Hosting** — Smart HTTP endpoints (`clone`, `push`, `fetch`) with shallow clone and object filtering support, backed by Cloudflare R2 storage.
+- **Issues** — Task tracking with acceptance criteria. Issues can be assigned to AI agents that work autonomously and report back.
+- **Pull Requests** — Branch comparison, line-anchored review threads, suggested code changes, squash merge.
+- **Actions & AI Automation** — Workflows triggered by events (`issue_created`, `pull_request_created`, `push`, mentions). Agents run in Cloudflare Containers or on a self-hosted local runner.
+- **MCP Integration** — Agents interact with the platform through Model Context Protocol tools.
+- **Authentication** — JWT sessions and Personal Access Tokens (PAT) with Git Basic Auth.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Runtime | Cloudflare Workers |
+| Backend | Hono, TypeScript |
+| Database | Cloudflare D1 (SQLite) |
+| Object Storage | Cloudflare R2 |
+| Durable Objects | Repository state, Container execution |
+| Queue | Cloudflare Queues |
+| Frontend | React 19, React Router v7, Vite |
+| UI | shadcn/ui, Tailwind CSS, Monaco Editor |
+| Git | isomorphic-git |
+
+## Quick Start
 
 ```bash
 npm install
@@ -32,21 +35,19 @@ cp .env.example .env
 npm run dev
 ```
 
-`npm run dev` now applies local D1 migrations automatically and starts the Worker in local mode.
+In a separate terminal, start the frontend:
 
-## Documentation
+```bash
+npm --prefix web run dev
+```
 
-- Chinese usage guide: `docs/USAGE.zh-CN.md`
-- MCP usage guide: `docs/MCP.zh-CN.md`
+`npm run dev` applies local D1 migrations automatically and starts the Worker in local mode. The frontend dev server proxies API and Git requests to the Worker on port 8787.
 
-## Configure Cloudflare resources
+## Configuration
 
-Local development variables are loaded from `.env` (via `wrangler --env-file .env` in `npm run dev`).
+### Environment Variables
 
-1. Update `wrangler.jsonc`:
-   - `d1_databases[0].database_id`
-   - `r2_buckets[0].bucket_name`
-2. Configure local `.env` (development only):
+Set in `.env` for local development:
 
 ```bash
 APP_ORIGIN=auto
@@ -54,85 +55,110 @@ JWT_SECRET=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
-1. Configure remote non-secret variables (for example `APP_ORIGIN`, `ALLOW_USER_REGISTRATION`, optional body-limit vars).
-   - Dashboard: Worker Settings -> Variables / Environment Variables
-   - Wrangler CLI (set/update during deployment):
+### Cloudflare Bindings
+
+Update `wrangler.jsonc`:
+
+- `d1_databases[0].database_id` — your D1 database ID
+- `r2_buckets[0].bucket_name` — your R2 bucket name
+
+## Deployment
+
+### Deploy to Cloudflare
 
 ```bash
-wrangler deploy --minify \
-  --var APP_ORIGIN:https://gits.example.com \
-  --var ALLOW_USER_REGISTRATION:true \
-  --var UPLOAD_PACK_MAX_BODY_BYTES:8388608 \
-  --var RECEIVE_PACK_MAX_BODY_BYTES:33554432 \
-  --keep-vars
+npm run deploy
 ```
 
-If you deploy with npm script, you can pass the same flags:
+With custom variables:
 
 ```bash
 npm run deploy -- \
   --var APP_ORIGIN:https://gits.example.com \
+  --var ALLOW_USER_REGISTRATION:true \
   --keep-vars
 ```
 
-4. Set remote secrets with Wrangler:
+### Set Secrets
 
 ```bash
 wrangler secret put JWT_SECRET
 ```
 
-5. Apply migration:
+### Apply Migrations
 
 ```bash
+# Local
 npm run db:migrate:local
-# or
+
+# Remote (production)
 npm run db:migrate
 ```
 
 ## Scripts
 
-```bash
-npm run dev
-npm run deploy
-npm run typecheck
-npm run test
-npm run cf-typegen
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start local Worker with auto-migration |
+| `npm run deploy` | Deploy Worker to Cloudflare |
+| `npm run build` | Build frontend |
+| `npm run typecheck` | TypeScript validation |
+| `npm run test` | Run tests |
+| `npm run cf-typegen` | Generate Cloudflare binding types |
+| `npm run db:migrate:local` | Apply D1 migrations locally |
+| `npm run db:migrate` | Apply D1 migrations remotely |
+
+## Project Structure
+
+```
+gits/
+├── src/                    # Backend (Cloudflare Worker)
+│   ├── routes/api/         # REST API routes
+│   ├── routes/git.ts       # Smart HTTP Git endpoints
+│   ├── services/           # Business logic
+│   ├── middleware/          # Auth, error handling
+│   ├── db/migrations/      # SQL schema migrations
+│   └── actions/            # Container Durable Object
+├── web/                    # Frontend (React + Vite)
+│   ├── src/pages/          # Route pages
+│   ├── src/components/     # UI components
+│   └── src/lib/            # API client, utilities
+├── containers/             # Docker image for agent runtime
+│   └── actions-runner/
+├── prd/                    # Product requirements docs
+└── wrangler.jsonc          # Cloudflare Worker config
 ```
 
-## Current scope
+## API Overview
 
-- Fetch path via `git-upload-pack`, including:
-  - `want/have/done` negotiation-only round (`done` missing => ACK/NAK + flush)
-  - pack generation with commit/tree/blob object closure
-  - `deepen <n>`, `deepen-since <ts>`, `deepen-not <ref>` handling
-  - object filtering support for `filter blob:none` and `filter blob:limit=<n>`
-  - protocol `ERR` responses for unknown/unsupported filter specs
-- Push path via `git-receive-pack`, including:
-  - pkt-line command parsing + pack ingestion (`indexPack`)
-  - ref update validation (`old/new oid`, branch commit type checks)
-  - report-status response (`unpack/ok/ng`) with side-band compatibility
-  - storage sync back to R2
-- Repository storage initialization on create (`HEAD -> refs/heads/main`)
-- Basic repository detail web page with branches, recent commits, and README rendering.
+### Auth & Tokens
 
-## Unit tests
+- `POST /api/auth/register` — Create account
+- `POST /api/auth/login` — Sign in
+- `POST /api/auth/tokens` — Create PAT
+- `GET /api/auth/tokens` — List PATs
+- `DELETE /api/auth/tokens/:tokenId` — Revoke PAT
 
-Current unit test coverage includes:
+### Repositories
 
-- API input validation and password-handling behavior
-- API token lifecycle and repository-create initialization behavior
-- Session middleware token fallback behavior
-- Git Basic Auth middleware challenge/credential validation behavior
-- Git protocol parsing and upload-pack/receive-pack response encoding
-- Git service permission checks and advertisement behavior
-- Git route validation (`invalid service`, body limits, content type checks)
-- Auth service token metadata and revoke behavior
-- Repository service collaborator/admin permission behavior
-- Repository lifecycle + collaborator permission matrix (`PATCH` rename rollback, `DELETE`, collaborator admin checks)
-- Integration tests on Hono app with mock D1 + mock R2 for:
-  - repository detail API
-  - commit history API
-  - upload-pack result output
-  - isomorphic-git fetch compatibility
-  - authenticated push to private repository
-- Black-box `git` CLI interoperability tests (`git clone`, `git push`) against the HTTP endpoints
+- `GET /api/repos` — List repositories
+- `POST /api/repos` — Create repository
+- `GET /api/repos/:owner/:repo` — Repository detail
+- `PATCH /api/repos/:owner/:repo` — Update repository
+- `DELETE /api/repos/:owner/:repo` — Delete repository
+- `GET /api/repos/:owner/:repo/branches` — List branches
+- `GET /api/repos/:owner/:repo/commits` — Commit history
+
+### Git (Smart HTTP)
+
+- `GET /:owner/:repo.git/info/refs` — Reference discovery
+- `POST /:owner/:repo.git/git-upload-pack` — Fetch
+- `POST /:owner/:repo.git/git-receive-pack` — Push
+
+## Documentation
+
+- Product requirements: [`prd/`](prd/)
+
+## License
+
+Private
