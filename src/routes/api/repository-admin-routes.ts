@@ -5,6 +5,7 @@ import {
   mustSessionUser,
   requireSession
 } from "./deps";
+import { RepositoryRefService } from "../../services/repository-ref-service";
 
 import {
   assertCollaboratorPermission,
@@ -25,6 +26,7 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     assertRepositoryName(name);
     const repositoryService = new RepositoryService(c.env.DB);
     const repositoryClient = createRepositoryObjectClient(c.env);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
     const sessionUser = mustSessionUser(c);
     let createdRepoId: string | null = null;
 
@@ -56,6 +58,19 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
         owner: sessionUser.username,
         repo: name
       });
+      const [initRefs, initDefaultTarget] = await Promise.all([
+        repositoryClient.listHeadRefs({
+          repositoryId: created.id,
+          owner: sessionUser.username,
+          repo: name
+        }),
+        repositoryClient.resolveDefaultBranchTarget({
+          repositoryId: created.id,
+          owner: sessionUser.username,
+          repo: name
+        })
+      ]);
+      await repositoryRefService.syncRefs(created.id, initRefs, initDefaultTarget.ref);
     } catch (error) {
       if (createdRepoId) {
         await repositoryService.deleteRepositoryById(createdRepoId).catch(() => undefined);
@@ -177,6 +192,7 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     const sessionUser = mustSessionUser(c);
     const repositoryService = new RepositoryService(c.env.DB);
     const repositoryClient = createRepositoryObjectClient(c.env);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
 
     const repository = await repositoryService.findRepository(owner, repoName);
     if (!repository) {
@@ -199,6 +215,11 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       branchName,
       sourceOid
     });
+    await repositoryRefService.syncRefs(
+      repository.id,
+      result.branches,
+      result.defaultBranch ? `refs/heads/${result.defaultBranch}` : null
+    );
     return c.json(result, 201);
   });
 
@@ -209,6 +230,7 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     const sessionUser = mustSessionUser(c);
     const repositoryService = new RepositoryService(c.env.DB);
     const repositoryClient = createRepositoryObjectClient(c.env);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
 
     const repository = await repositoryService.findRepository(owner, repoName);
     if (!repository) {
@@ -225,6 +247,11 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       repo: repoName,
       branchName
     });
+    await repositoryRefService.syncRefs(
+      repository.id,
+      result.branches,
+      result.defaultBranch ? `refs/heads/${result.defaultBranch}` : null
+    );
     return c.json(result);
   });
 
@@ -235,6 +262,7 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     const sessionUser = mustSessionUser(c);
     const repositoryService = new RepositoryService(c.env.DB);
     const repositoryClient = createRepositoryObjectClient(c.env);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
 
     const repository = await repositoryService.findRepository(owner, repoName);
     if (!repository) {
@@ -251,6 +279,11 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       repo: repoName,
       branchName
     });
+    await repositoryRefService.syncRefs(
+      repository.id,
+      result.branches,
+      result.defaultBranch ? `refs/heads/${result.defaultBranch}` : null
+    );
     return c.json(result);
   });
 

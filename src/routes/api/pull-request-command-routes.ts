@@ -39,6 +39,7 @@ import {
   type TriggerRepositoryAgentInput,
   type UpdatePullRequestInput
 } from "./shared";
+import { RepositoryRefService } from "../../services/repository-ref-service";
 
 export function registerPullRequestCommandRoutes(router: ApiRouter): void {
     const unsupportedPullRequestMetadataMessage =
@@ -191,12 +192,8 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
         throw new HTTPException(403, { message: "Forbidden" });
       }
 
-      const repositoryClient = createRepositoryObjectClient(c.env);
-      const branchRefs = await repositoryClient.listHeadRefs({
-        repositoryId: repository.id,
-        owner,
-        repo
-      });
+      const repositoryRefService = new RepositoryRefService(c.env.DB);
+      const branchRefs = await repositoryRefService.listHeadRefs(repository.id);
       const baseRef = branchRefs.find((item) => item.name === input.baseRef);
       if (!baseRef) {
         throw new HTTPException(400, { message: "Base branch not found" });
@@ -426,6 +423,23 @@ export function registerPullRequestCommandRoutes(router: ApiRouter): void {
             });
           } catch {}
         }
+        const [mergeRefs, mergeDefaultTarget] = await Promise.all([
+          repositoryClient.listHeadRefs({
+            repositoryId: repository.id,
+            owner,
+            repo
+          }),
+          repositoryClient.resolveDefaultBranchTarget({
+            repositoryId: repository.id,
+            owner,
+            repo
+          })
+        ]);
+        await new RepositoryRefService(c.env.DB).syncRefs(
+          repository.id,
+          mergeRefs,
+          mergeDefaultTarget.ref
+        );
       }
       if (patch.closeIssueNumbers !== undefined) {
         await pullRequestService.replacePullRequestClosingIssueNumbers({

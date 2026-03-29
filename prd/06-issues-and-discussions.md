@@ -57,6 +57,7 @@ Issue 是当前产品里的任务入口、对话面和状态中心。
 - `@actions` mention
 - Issue 新建后可触发 `issue_created` workflow
 - 普通 issue comment 也会继续触发 issue workflow，以便让同一任务对话继续推进
+- Issue 新建、评论继续、assign/resume agent 时所需的默认分支目标优先从 D1 `repository_refs` 读取，不再直接依赖仓库 DO。
 
 ## 3. 当前状态回流规则
 

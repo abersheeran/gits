@@ -5,8 +5,8 @@ import {
 } from "../../services/auth-service";
 
 import {
-  RepositoryObjectClient
-} from "../../services/repository-object";
+  RepositoryRefService
+} from "../../services/repository-ref-service";
 
 import {
   WorkflowTaskFlowService
@@ -680,7 +680,7 @@ describe("API issue routes", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
+    vi.spyOn(RepositoryRefService.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
       ref: "refs/heads/main",
       sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     });
@@ -832,11 +832,12 @@ describe("API issue routes", () => {
     expect(enqueueRun).toHaveBeenCalledTimes(1);
     expect(createdRunPrompt).toContain("trigger_reason: issue_comment_added");
     expect(createdRunPrompt).toContain("trigger_comment_id: comment-2");
-    expect(createdRunPrompt).toContain("issue_conversation_history:");
+    expect(createdRunPrompt).toContain("[Conversation History]");
+    expect(createdRunPrompt).toContain("[Comments]");
     expect(createdRunPrompt).toContain("Initial issue details");
     expect(createdRunPrompt).toContain("Can you share stack trace?");
     expect(createdRunPrompt).toContain("Added logs below");
-    expect(createdRunPrompt).toContain("summarize/compress");
+    expect(createdRunPrompt).toContain("gits_create_pull_request");
   });
 
   it("reconciles issue task status after assigning an issue agent", async () => {
@@ -863,7 +864,7 @@ describe("API issue routes", () => {
     const reconcileIssueTaskStatus = vi
       .spyOn(WorkflowTaskFlowService.prototype, "reconcileIssueTaskStatus")
       .mockResolvedValue(reconciledIssue);
-    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
+    vi.spyOn(RepositoryRefService.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
       ref: "refs/heads/main",
       sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     });

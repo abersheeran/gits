@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
 import { createRepositoryObjectClient } from "../services/repository-object";
+import { RepositoryRefService } from "../services/repository-ref-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
@@ -199,6 +200,8 @@ describe("Git smart-http compatibility with git CLI", () => {
   it(
     "supports authenticated git push to private repositories",
     async () => {
+      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
+
       const bucket = new MockR2Bucket();
       const storage = new StorageService(bucket as unknown as R2Bucket);
       await storage.initializeRepository("alice", "private-demo");
@@ -245,6 +248,8 @@ describe("Git smart-http compatibility with git CLI", () => {
   it(
     "supports authenticated git pull from private repositories",
     async () => {
+      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
+
       const bucket = new MockR2Bucket();
       await seedSampleRepositoryToR2(bucket, "alice", "private-pull");
       const db = createPrivateOwnedRepositoryDb("alice", "private-pull");
@@ -297,6 +302,8 @@ describe("Git smart-http compatibility with git CLI", () => {
   it(
     "supports git pull after a server-side squash merged pull request",
     async () => {
+      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
+
       const bucket = new MockR2Bucket();
       await seedSampleRepositoryToR2(bucket, "alice", "squash-pull");
       const storage = new StorageService(bucket as unknown as R2Bucket);

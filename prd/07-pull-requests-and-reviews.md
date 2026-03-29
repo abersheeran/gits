@@ -20,6 +20,7 @@ PR 是当前产品里的交付中心和评审中心。
 - PR 列表与详情
 - PR 列表页使用 URL `page` 参数管理分页，默认第 1 页，每页 20 条；切换 `open / closed / merged / all` 筛选会回到第 1 页
 - 选择 `baseRef / headRef`
+- PR 创建时 `baseRef / headRef` 的存在性校验读取 D1 `repository_refs` 缓存，不直接依赖仓库 DO
 - draft
 - closing issues
 - 阻止同一 `head/base` 组合的重复 open PR
@@ -80,6 +81,7 @@ PR 是当前产品里的交付中心和评审中心。
 - 当前只支持 squash merge
 - 合并后自动关闭关联 closing issues
 - 合并后自动删除 head 分支（head 与 base 相同时跳过，删除失败不影响合并结果）
+- merge 完成后会把 base/head ref 变化和默认分支状态同步回 D1 `repository_refs`
 - merge 成功会触发对应 `push` workflow
 
 ## 3. 当前 handoff 与状态语义

@@ -4,7 +4,6 @@ import {
   IssueService,
   RepositoryService,
   containsActionsMention,
-  createRepositoryObjectClient,
   mustSessionUser,
   optionalSession,
   requireSession,
@@ -34,13 +33,13 @@ import {
   parseLimit,
   parsePage,
   reconcileIssueRecords,
-  resolveDefaultBranchTarget,
   type ApiRouter,
   type CreateIssueCommentInput,
   type CreateIssueInput,
   type TriggerRepositoryAgentInput,
   type UpdateIssueInput
 } from "./shared";
+import { RepositoryRefService } from "../../services/repository-ref-service";
 
 export function registerIssueRoutes(router: ApiRouter): void {
   const unsupportedIssueMetadataMessage =
@@ -195,8 +194,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
       issueAcceptanceCriteria: issue.acceptance_criteria,
       comments: []
     });
-    const repositoryClient = createRepositoryObjectClient(c.env);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
+    const defaultBranchTarget = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
     const requestOrigin = new URL(c.req.url).origin;
 
     await triggerActionWorkflows({
@@ -330,8 +329,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
     }
     const hasActionsMention = containsActionsMention({ title: issue.title, body: issue.body });
     if (!hadActionsMention && hasActionsMention) {
-      const repositoryClient = createRepositoryObjectClient(c.env);
-      const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
+      const repositoryRefService = new RepositoryRefService(c.env.DB);
+      const defaultBranchTarget = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
       await triggerMentionActionRun({
         env: c.env,
         ...executionCtxArg(c),
@@ -405,8 +404,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
         issueAcceptanceCriteria: issue.acceptance_criteria,
         comments
       });
-      const repositoryClient = createRepositoryObjectClient(c.env);
-      const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
+      const repositoryRefService = new RepositoryRefService(c.env.DB);
+      const defaultBranchTarget = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
 
       if (!isActionsComment) {
         await triggerActionWorkflows({
@@ -523,8 +522,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
       issueAcceptanceCriteria: issue.acceptance_criteria,
       comments
     });
-    const repositoryClient = createRepositoryObjectClient(c.env);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
+    const defaultBranchTarget = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
     const agentType = input.agentType ?? "codex";
 
     const execution = await triggerInteractiveAgentSession({
@@ -607,8 +606,8 @@ export function registerIssueRoutes(router: ApiRouter): void {
       issueAcceptanceCriteria: issue.acceptance_criteria,
       comments
     });
-    const repositoryClient = createRepositoryObjectClient(c.env);
-    const defaultBranchTarget = await resolveDefaultBranchTarget(repositoryClient, repository);
+    const repositoryRefService = new RepositoryRefService(c.env.DB);
+    const defaultBranchTarget = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
     const agentType = input.agentType ?? "codex";
 
     const execution = await triggerInteractiveAgentSession({

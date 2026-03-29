@@ -3,6 +3,7 @@ import { Volume, createFsFromVolume } from "memfs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
+import { RepositoryRefService } from "../services/repository-ref-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
@@ -517,6 +518,8 @@ describe("Git smart-http integration", () => {
   });
 
   it("supports authenticated push to private repository", async () => {
+    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
+
     const bucket = new MockR2Bucket();
     const listSpy = vi.spyOn(bucket, "list");
     const storage = new StorageService(bucket as unknown as R2Bucket);
@@ -602,6 +605,7 @@ describe("Git smart-http integration", () => {
       id: "user-1",
       username: "alice"
     });
+    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
 
     const bucket = new MockR2Bucket();
     await seedSampleRepositoryToR2(bucket, "alice", "demo");

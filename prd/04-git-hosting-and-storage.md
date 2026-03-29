@@ -31,6 +31,7 @@ Git 托管与存储层是整个平台的底座，职责是：
 ### 2.2 存储介质
 
 - D1 保存仓库元数据与协作对象。
+- D1 中的 `repository_refs` 维护当前 head refs 与默认分支缓存，作为 Issue / PR 创建等读路径的轻量 ref 视图。
 - `GIT_BUCKET` R2 保存 `HEAD`、`refs/*`、`objects/*`。
 - `RepositoryObject` 的 DO storage 保存仓库快照，用于实例回收后的快速恢复。
 - DO 实例内存仍保留当前热缓存；R2 继续作为长期持久化存储。
@@ -94,7 +95,8 @@ Git 托管与存储层是整个平台的底座，职责是：
 3. DO 在内存仓库上执行 `receive-pack`。
 4. DO 收集本次 push 新增的 pack/idx、变更的 refs，以及必要时更新的 HEAD。
 5. 仅把这些变更文件增量持久化回 R2，并同步更新 DO storage 快照。
-6. Worker 根据更新后的 ref 触发 `push` workflows。
+6. Worker 将最新 refs 全量同步到 D1 `repository_refs`，默认分支沿用当前缓存值。
+7. Worker 根据更新后的 ref 触发 `push` workflows。
 
 ### 5.3 代码浏览/PR compare
 
@@ -153,6 +155,11 @@ Git 托管与存储层是整个平台的底座，职责是：
 
 - push 可以触发 workflow。
 - 但“这次 push 产出了哪组验证结果、解决了哪些 review 反馈”还没有在 Git 视角下形成稳定摘要。
+
+### 8.5 ref 读路径已经从 DO 部分下沉到 D1
+
+- 分支创建、删除、默认分支切换、仓库初始化、push、squash merge 等写路径都会把最新 refs 回写到 `repository_refs`。
+- Issue / PR 创建等需要默认分支或分支存在性校验的入口优先读取 D1 缓存，而不是直接依赖仓库 DO 在线响应。
 
 ## 9. 下一步优先级
 

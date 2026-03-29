@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { optionalSession, requireGitBasicAuth } from "../middleware/auth";
 import { isZeroOid, parseReceivePackRequest } from "../services/git-protocol";
+import { RepositoryRefService } from "../services/repository-ref-service";
 import { triggerActionWorkflows } from "../services/action-trigger-service";
 import { createRepositoryObjectClient } from "../services/repository-object";
 import { RepositoryService } from "../services/repository-service";
@@ -234,6 +235,14 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
   ) {
     return response;
   }
+
+  const repositoryRefService = new RepositoryRefService(c.env.DB);
+  const currentDefault = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
+  await repositoryRefService.syncRefs(
+    repository.id,
+    receivePackResult.updatedRefs,
+    currentDefault.ref
+  );
 
   const refsByName = new Map(
     receivePackResult.updatedRefs.map((ref) => [ref.name, ref.oid] as const)

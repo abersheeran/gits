@@ -13,6 +13,10 @@ import {
 } from "../../services/repository-object";
 
 import {
+  RepositoryRefService
+} from "../../services/repository-ref-service";
+
+import {
   WorkflowTaskFlowService
 } from "../../services/workflow-task-flow-service";
 
@@ -74,7 +78,7 @@ describe("API pull request routes", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryRefService.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -312,7 +316,7 @@ describe("API pull request routes", () => {
       id: "actions-system-user",
       username: "actions"
     });
-    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryRefService.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -2194,7 +2198,7 @@ describe("API pull request routes", () => {
       id: "user-2",
       username: "bob"
     });
-    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
+    vi.spyOn(RepositoryRefService.prototype, "listHeadRefs").mockResolvedValue([
       { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       { name: "refs/heads/feature", oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
     ]);
@@ -2275,6 +2279,14 @@ describe("API pull request routes", () => {
     vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue({
       id: "owner-1",
       username: "alice"
+    });
+    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue();
+    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
+      { name: "refs/heads/main", oid: "cccccccccccccccccccccccccccccccccccccccc" }
+    ]);
+    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
+      ref: "refs/heads/main",
+      sha: "cccccccccccccccccccccccccccccccccccccccc"
     });
     vi.spyOn(RepositoryObjectClient.prototype, "squashMergePullRequest").mockResolvedValue({
       baseOid: "cccccccccccccccccccccccccccccccccccccccc",
