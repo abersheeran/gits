@@ -3,14 +3,12 @@ import { Badge } from "@/components/ui/badge";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { estimateMonacoHeight } from "@/lib/monaco";
 import type { RepositoryCommitChange, RepositoryDiffHunk } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 const DIFF_CONTEXT_LINE_COUNT = 5;
 const HIDDEN_REGION_CONTROL_LINE_COUNT = 2;
 
 type RepositoryDiffViewProps = {
   changes: RepositoryCommitChange[];
-  activePath?: string | null;
   onChangeActivate?: (change: RepositoryCommitChange) => void;
   sectionIdForPath?: (path: string) => string;
 };
@@ -132,7 +130,7 @@ function RepositoryDiffEditorFallback(props: { height: number }) {
     <div className="min-w-0 overflow-hidden">
       <div className="min-w-0">
         <div
-          className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
+          className="flex items-center justify-center px-3 py-2 text-body-micro text-text-secondary"
           style={{ height: props.height }}
         >
           正在加载…
@@ -144,30 +142,24 @@ function RepositoryDiffEditorFallback(props: { height: number }) {
 
 export function RepositoryDiffView({
   changes,
-  activePath,
   onChangeActivate,
   sectionIdForPath
 }: RepositoryDiffViewProps) {
   if (changes.length === 0) {
-    return <p className="text-body-sm text-text-secondary">没有文件改动。</p>;
+    return <p className="text-body-xs text-text-secondary">没有文件改动。</p>;
   }
 
   return (
     <div className="space-y-4">
       {changes.map((change) => {
-        const isActive = activePath === change.path;
-
         return (
           <section
             key={`${{ added: "新增", modified: "修改", deleted: "删除" }[change.status]}:${change.path}`}
             id={sectionIdForPath?.(change.path)}
-            className={cn(
-              "scroll-mt-4 overflow-hidden rounded-lg border border-border bg-surface-base transition-colors",
-              isActive ? "border-text-secondary" : ""
-            )}
+            className="scroll-mt-4 overflow-hidden rounded-lg border border-border bg-surface-base"
             onMouseDownCapture={() => onChangeActivate?.(change)}
           >
-            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-surface-focus px-4 py-3">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-surface-canvas px-4 py-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <Badge variant={changeBadgeVariant(change.status)}>
                   {{ added: "新增", modified: "修改", deleted: "删除" }[change.status]}
@@ -176,18 +168,18 @@ export function RepositoryDiffView({
                   {change.path}
                 </span>
                 {change.previousPath && change.previousPath !== change.path ? (
-                  <span className="font-mono text-xs text-text-secondary">
+                  <span className="font-mono text-body-micro text-text-secondary">
                     原路径：{change.previousPath}
                   </span>
                 ) : null}
               </div>
-              <div className="flex items-center gap-2 text-xs text-text-secondary">
-                <span>+{change.additions}</span>
-                <span>-{change.deletions}</span>
+              <div className="flex items-center gap-2 text-body-micro text-text-secondary">
+                <span className="text-success">+{change.additions}</span>
+                <span className="text-danger-text">-{change.deletions}</span>
               </div>
             </header>
             {change.isBinary ? (
-              <div className="px-4 py-3 text-body-sm text-text-secondary">
+              <div className="px-4 py-3 text-body-xs text-text-secondary">
                 二进制文件无法显示文本差异。
               </div>
             ) : change.oldContent !== null || change.newContent !== null ? (
@@ -213,7 +205,7 @@ export function RepositoryDiffView({
                 />
               </div>
             ) : (
-              <div className="px-4 py-3 text-body-sm text-text-secondary">
+              <div className="px-4 py-3 text-body-xs text-text-secondary">
                 此文件暂无可显示的差异。
               </div>
             )}

@@ -15,11 +15,19 @@ export function Panel({
       {...props}
     >
       {header && (
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 font-display text-heading-3-16-semibold">
-          {header}
+        <header className="flex min-h-[52px] flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
+          {typeof header === "string" ? <PanelTitle>{header}</PanelTitle> : header}
         </header>
       )}
       {children}
     </section>
+  );
+}
+
+export function PanelTitle({ className, children, ...props }: HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h2 className={cn("font-display text-heading-3-16-semibold", className)} {...props}>
+      {children}
+    </h2>
   );
 }

@@ -2,7 +2,7 @@ import { useRef, useState, type UIEvent } from "react";
 import { ChangesWorkspace } from "@/components/common/changes-workspace";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { RepositoryDiffView } from "@/components/repository/repository-diff-view";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/common/error-alert";
 import { ShaCopyButton } from "@/components/common/sha-copy-button";
 import { Button } from "@/components/ui/button";
 import { InlineLoadingState } from "@/components/ui/loading-state";
@@ -44,6 +44,7 @@ export function RepositoryCommitDetailSheet({
   const previousScrollTopRef = useRef(0);
   const headerHiddenRef = useRef(false);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
+  const messageBody = detail?.commit.message.split("\n").slice(1).join("\n").trim();
   const authoredAt = detail ? formatDateTime(detail.commit.author.timestamp * 1000) : null;
   const title = detail
     ? commitTitle(detail.commit.message)
@@ -99,7 +100,7 @@ export function RepositoryCommitDetailSheet({
       >
         <SheetHeader
           className={cn(
-            "overflow-hidden bg-surface-focus pl-4 pr-16 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:pl-4 sm:pr-16",
+            "overflow-hidden bg-surface-base pl-4 pr-16 text-left transition-[max-height,opacity,transform,padding,border-color] duration-200 ease-out sm:pl-4 sm:pr-16",
             isHeaderHidden
               ? "max-h-0 -translate-y-3 border-b-0 py-0 opacity-0"
               : "max-h-56 border-b border-border-subtle py-4 opacity-100"
@@ -136,9 +137,9 @@ export function RepositoryCommitDetailSheet({
             {detail ? (
               <div className="flex flex-wrap items-center gap-3 text-body-micro text-text-secondary">
                 <ShaCopyButton oid={detail.commit.oid} />
-                <span>{detail.filesChanged} 个文件</span>
-                <span>+{detail.additions}</span>
-                <span>-{detail.deletions}</span>
+                <span className="text-text-tertiary">{detail.filesChanged} 个文件</span>
+                <span className="text-success">+{detail.additions}</span>
+                <span className="text-danger-text">-{detail.deletions}</span>
               </div>
             ) : null}
           </div>
@@ -150,23 +151,19 @@ export function RepositoryCommitDetailSheet({
         >
           {loading ? <InlineLoadingState /> : null}
 
-          {!loading && error ? (
-            <Alert variant="destructive">
-              <AlertTitle>加载失败</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
+          {!loading && error ? <ErrorAlert error={error} title="加载失败" /> : null}
 
           {!loading && !error && detail ? (
             <>
-              <p className="mb-4 whitespace-pre-wrap break-words text-body-xs text-text-secondary">
-                {detail.commit.message.split("\n").slice(1).join("\n").trim()}
-              </p>
+              {messageBody && (
+                <p className="mb-4 whitespace-pre-wrap break-words text-body-xs text-text-secondary">
+                  {messageBody}
+                </p>
+              )}
               <ChangesWorkspace changes={detail.changes}>
-                {({ activePath, setActivePath, sectionIdForPath }) => (
+                {({ setActivePath, sectionIdForPath }) => (
                   <RepositoryDiffView
                     changes={detail.changes}
-                    activePath={activePath}
                     onChangeActivate={(change) => setActivePath(change.path)}
                     sectionIdForPath={sectionIdForPath}
                   />

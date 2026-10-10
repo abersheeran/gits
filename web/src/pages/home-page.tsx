@@ -32,7 +32,7 @@ export function HomePage() {
     <>
       <PageHeader title="探索" />
       <Panel>
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {loading ? (
           <InlineLoadingState />
         ) : (

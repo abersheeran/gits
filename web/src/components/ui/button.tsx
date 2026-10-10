@@ -13,6 +13,8 @@ const buttonVariants = cva(
           "bg-action-primaryBg text-text-inverse hover:bg-text-supportingStrong",
         destructive:
           "bg-danger text-danger-foreground hover:bg-danger-text",
+        destructiveOutline:
+          "border border-danger-border bg-surface-base text-danger-text hover:bg-danger-surface",
         outline:
           "border border-border bg-surface-base text-text-primary hover:bg-surface-hover",
         secondary:
@@ -22,9 +24,9 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-10 md:h-9 px-4 text-body-xs",
-        sm: "h-10 md:h-9 px-[14px] text-body-xs",
+        sm: "h-10 md:h-8 px-3 text-body-xs",
         lg: "h-10 px-5 text-body-xs",
-        icon: "size-10 p-0",
+        icon: "size-10 md:size-8 p-0",
       },
     },
     defaultVariants: {

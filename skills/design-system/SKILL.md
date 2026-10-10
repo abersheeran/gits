@@ -25,13 +25,15 @@ Token 定义在 `web/src/index.css`（CSS 变量）与 `web/tailwind.config.js`�
 | --- | --- |
 | 页面画布 | `bg-surface-canvas` |
 | 面板、表格、输入框底色 | `bg-surface-base` |
-| 面板内次级区域（表头、工具栏、代码行号区） | `bg-surface-focus` |
+| 面板内次级区域（表头、工具栏、代码行号区） | `bg-surface-canvas` |
 | 行悬停 | `hover:bg-surface-hover` |
 | 主文字 / 次要文字 / 弱化文字 | `text-text-primary` / `text-text-secondary` / `text-text-tertiary` |
 | 默认边框 / 分隔线 | `border-border` / `border-border-subtle` |
 | 主操作按钮 | `bg-action-primaryBg text-text-inverse` |
 | 危险操作 | `danger` 系列 |
 | 成功状态 | `success` 系列 |
+
+`bg-surface-focus` 只用于选中态（当前导航项、当前文件树项、Select 高亮项）。
 
 暗色 token 已在 `.dark` 中定义，当前未启用；新增颜色时必须同时给出亮色和暗色值。
 
@@ -63,7 +65,9 @@ README 等 Markdown 正文沿用 `markdown-body` 的排版，不受上表约束�
 | Badge、头像 | `rounded-full` |
 
 - 间距用 4px 网格；面板内边距 16px（`p-4`），面板之间 16px（`space-y-4`）。页面区块之间最多 24px。
-- 控件高度：桌面 36px（`h-9`），移动端 40px（`h-10`）。
+- 默认控件 `h-10 md:h-9`：表单控件、页头主操作。
+- `sm` 控件 `h-10 md:h-8`：面板头操作、表格行内操作、分页、工具栏。
+- 图标按钮 `size-10 md:size-8`。
 - 页面元素不加阴影；浮层用 `shadow-overlay`。
 
 ## 3. 布局
@@ -80,12 +84,13 @@ README 等 Markdown 正文沿用 `markdown-body` 的排版，不受上表约束�
 
 - 内容区使用 `.app-container`（最大宽度 `max-w-page`，移动端左右 16px），上下留白 `py-6 md:py-8`。
 - **页头（PageHeader）**：左侧 `h1` 加最多一行说明，右侧放本页主操作，下方 `mb-6`。页头不放 Badge 标签、统计数字或 HelpTip 堆叠。
-- 表单类页面（登录、注册、新建仓库）居中、单列，`max-w-md` 或 `max-w-xl`。
+- 表单类页面居中、单列；登录、注册用 `max-w-md`，新建仓库用 `max-w-xl`。登录 / 注册页的互相跳转是面板下方居中的一行文字链接，不是按钮。
 
 ### 3.3 面板（Panel）
 
 - 结构：`rounded-lg border border-border bg-surface-base`，无阴影。
-- 可选面板头：标题 + 右侧操作，`px-4 py-3 border-b border-border-subtle`。
+- 可选面板头：标题 + 右侧操作，统一 `min-h-[52px] px-4 py-2.5 border-b border-border-subtle`，有无按钮高度一致；面板头操作一律用 `size="sm"`。
+- 面板顶部错误提示使用 `ErrorAlert inset`：通栏，只有底部分隔线，无圆角、无左右上边框。
 - 列表行之间用 `border-b border-border-subtle`，最后一行无分隔线。
 - 面板内不再嵌套 Card、`panel-inset`、`panel-card` 之类带底色或边框的容器。需要分组时用分隔线或小标题。
 
@@ -94,8 +99,15 @@ README 等 Markdown 正文沿用 `markdown-body` 的排版，不受上表约束�
 所有 `/repo/:owner/:repo/*` 页面共用同一个仓库布局：
 
 1. **仓库头**：`owner / name`（name 加粗，可点击回仓库首页）、可见性 Badge（公开/私有）、描述（无描述则不显示）。
-2. **标签导航**：下划线式标签——代码、提交、分支；仓库所有者额外看到**设置**。当前标签用 `text-text-primary` 加 2px 底边，其余 `text-text-secondary`。标签栏底部一条贯通分隔线。
+2. **标签导航**：下划线式标签——代码（`Code2`）、提交（`History`）、分支（`GitBranch`）；仓库所有者额外看到**设置**（`Settings`）。当前标签用 `text-text-primary` 加 2px 底边，其余 `text-text-secondary`。标签栏底部一条贯通分隔线。
 3. **设置**内部用二级导航切换**常规**和**协作者**（桌面为左侧竖排，移动端为顶部横排）。
+
+「代码」标签页结构：
+
+- 工具栏：左侧分支选择 + 路径面包屑（仅在子路径下显示，以仓库名为根；根目录不显示），右侧 Clone 地址（CopyField）。
+- 文件面板：面板头是最近提交摘要（头像、作者、提交标题、短 SHA、相对时间、「历史」）；下面是目录表格（不显示表头）或文件元信息条 + 代码。
+- README 面板。
+- 空仓库（没有任何分支）不显示分支选择和文件面板，改为显示推送指引（EmptyRepositoryGuide）。
 
 不允许某个仓库子页面自己再造一套头部样式。
 
@@ -105,25 +117,28 @@ README 等 Markdown 正文沿用 `markdown-body` 的排版，不受上表约束�
 
 | 组件 | 规则 |
 | --- | --- |
-| Button | 变体：`default`（每个区域最多一个主操作）、`outline`（次要操作）、`ghost`（行内/工具栏操作）、`destructive`（只在确认 Dialog 内使用）。图标按钮必须带 `aria-label` 和 Tooltip。 |
-| Badge | 只表达状态或属性：公开/私有、默认分支、令牌状态（有效/已过期/已撤销）、文件变更类型。不用 Badge 做页面标签。 |
-| Table | 桌面端列表的首选。表头 `bg-surface-focus text-body-micro text-text-secondary`，行高 44–48px，行悬停变色。移动端隐藏次要列，或改为两行堆叠，不出现横向滚动。 |
+| Button | 变体：`default`（每个区域最多一个主操作）、`outline`（次要操作）、`ghost`（行内/工具栏操作）、`destructiveOutline`（危险区域里进入破坏性流程的入口，如「删除仓库」）、`destructive`（实心，只在确认 Dialog 内使用）。图标按钮必须带 `aria-label` 和 Tooltip。 |
+| Badge | 高 20px（`px-2 py-0.5`），默认分支用 `outline`。只表达状态或属性：公开/私有、默认分支、令牌状态（有效/已过期/已撤销）、文件变更类型。不用 Badge 做页面标签。 |
+| Table | 桌面端列表的首选。表头 `h-10 bg-surface-canvas text-body-micro text-text-tertiary`；单元格 `px-4 py-2`；行最小高 44px（移动端 48px），行悬停变色。行内主链接通过 `-my-2 py-2 block` 等方式把点击区扩展到单元格高度，不再用 `min-h-10` 撑高行。移动端隐藏次要列，或改为两行堆叠，不出现横向滚动。 |
 | Dialog | 短表单与所有二次确认（删除仓库、删除分支、撤销令牌、移除协作者、创建令牌、添加协作者）。底部按钮右对齐：「取消」+ 主操作。删除仓库要求输入仓库名才能确认。 |
 | Sheet | 需要较多空间、且要对照当前页面查看的内容：提交详情、路径历史、移动端导航。 |
 | Select | 选项有限的选择：分支、权限、令牌有效期。 |
 | HelpTip | 只在概念确实不直观时使用（例如 PAT 的用途），每个面板最多一个。 |
 | EmptyState | 面板内居中：图标 + 一行标题 + 可选一行说明 + 可选主操作。 |
-| CopyButton | SHA、Clone URL、新生成的令牌旁使用；复制成功给出短暂反馈。 |
+| ShaCopyButton | 短 SHA 使用无底色的 ghost 等宽文字，悬停才显示底色；复制成功给出短暂反馈。 |
+| CopyField | 带边框的只读等宽值 + 右侧相连的复制图标按钮，用于 Clone 地址和新令牌。 |
+| VisibilityField | 私有 / 公开单选，每项带图标和一行说明；新建仓库和仓库设置共用。 |
 
 ## 5. 交互模式
 
 - **对象即链接。** 仓库行、文件行、提交标题本身就是链接，不再额外放「查看」按钮。
-- **行内操作。** 行尾放 ghost 图标按钮（带 Tooltip）。破坏性操作一律先弹确认 Dialog。
+- **行内操作。** 破坏性操作一律用带 Tooltip 的 IconButton，并先弹确认 Dialog；非破坏、语义不直观的操作（「设为默认」）用 `ghost` + `size="sm"` 文字按钮。
 - **长列表。** 必须分页或「加载更多」，且不挤压主内容宽度。路径历史放进 Sheet，不常驻在代码旁边。
 - **时间。** 显示相对时间（「3 分钟前」），完整时间放在 `title` 属性里。
 - **SHA。** 显示 7 位短 SHA，等宽字体，可复制。
 - **令牌有效期。** 用预设选项（不过期、7 天、30 天、90 天、1 年），不让用户输入时间戳。新令牌只显示一次，创建成功后在 Dialog 中展示并提供复制。
-- **加载。** 面板内用骨架行占位；整页加载只显示一个简洁的骨架，不描述技术过程。
+- **增删行数。** `+N` 用 `text-success`，`-N` 用 `text-danger-text`。
+- **加载。** 文案统一使用 `…`（单个省略号字符）。面板内用骨架行占位；整页加载只显示一个简洁的骨架，不描述技术过程。
 - **错误。** 在对应面板顶部用 Alert 显示可读的错误信息，并保留用户已输入的内容。
 - **表单。** 标签在上，说明文字在下（`text-text-tertiary`），提交中按钮显示加载态并禁用。
 

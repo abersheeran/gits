@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
+import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { UserMinus } from "lucide-react";
 import { useRepository } from "@/hooks/use-repository";
 import { RepositoryLayout } from "@/components/common/repository-layout";
-import { Panel } from "@/components/common/panel";
+import { Panel, PanelTitle } from "@/components/common/panel";
 import { EmptyState } from "@/components/common/empty-state";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ErrorAlert } from "@/components/common/error-alert";
@@ -97,8 +98,9 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
       <Panel
         header={
           <>
-            <span>协作者</span>
+            <PanelTitle>协作者</PanelTitle>
             <Button
+              size="sm"
               onClick={() => {
                 setFormError(null);
                 setOpen(true);
@@ -109,7 +111,7 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
           </>
         }
       >
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {loading ? (
           <InlineLoadingState />
         ) : !error && items.length === 0 ? (
@@ -120,7 +122,7 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
               <TableHeader>
                 <TableRow>
                   <TableHead>用户名</TableHead>
-                  <TableHead className="w-28">权限</TableHead>
+                  <TableHead className="w-32">权限</TableHead>
                   <TableHead className="hidden md:table-cell">添加时间</TableHead>
                   <TableHead className="w-16">
                     <span className="sr-only">操作</span>
@@ -130,9 +132,15 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
               <TableBody>
                 {items.slice((page - 1) * 20, page * 20).map((item) => (
                   <TableRow key={item.user_id}>
-                    <TableCell className="truncate">{item.username}</TableCell>
+                    <TableCell>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <AuthorAvatar name={item.username} className="h-6 w-6 shrink-0" />
+                        <span className="truncate">{item.username}</span>
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <PermissionSelect
+                        className="h-8 w-24 md:h-8"
                         value={item.permission}
                         disabled={pending}
                         label={`${item.username} 的权限`}

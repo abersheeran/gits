@@ -3,12 +3,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useCommitDetail } from "@/hooks/use-commit-detail";
 import { RepositoryLayout } from "@/components/common/repository-layout";
 import { RepositoryContents } from "@/components/common/repository-contents";
+import { PathBreadcrumbs } from "@/components/common/path-breadcrumbs";
 import { PathHistorySheet } from "@/components/common/path-history-sheet";
 import { BranchSelect } from "@/components/common/branch-select";
-import { CommitRow } from "@/components/common/commit-row";
+import { EmptyRepositoryGuide } from "@/components/common/empty-repository-guide";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { Panel } from "@/components/common/panel";
-import { CopyButton } from "@/components/copy-button";
+import { CopyField } from "@/components/common/copy-field";
 import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
 import {
@@ -89,47 +90,50 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
     });
   }
   const cloneUrl = `${window.location.origin}/${owner}/${repo}.git`;
-  if (!detail || !contents) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
+  if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
   return (
     <RepositoryLayout detail={detail} user={user}>
-      <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <BranchSelect
-          detail={detail}
-          disabled={loading}
-          onChange={(value) => navigate(link(kind, path ?? "", value))}
+      {detail.branches.length === 0 && !loading && !error ? (
+        <EmptyRepositoryGuide
+          cloneUrl={cloneUrl}
+          defaultBranch={detail.defaultBranch}
+          user={user}
         />
-        <div className="flex min-w-0 items-center gap-2">
-          <code
-            title={cloneUrl}
-            className="min-w-0 flex-1 truncate font-mono text-[13px] text-text-secondary"
-          >
-            {cloneUrl}
-          </code>
-          <CopyButton value={cloneUrl} idleLabel="复制地址" />
-        </div>
-      </div>
-      <ErrorAlert error={error} />
-      {loading ? (
-        <Panel>
-          <InlineLoadingState />
-        </Panel>
       ) : (
-        !error && (
-          <>
-            {latest && (
-              <Panel>
-                <CommitRow commit={latest} onOpen={setOid} />
-              </Panel>
-            )}
-            <RepositoryContents
-              key={`${ref}/${path}`}
-              contents={contents}
-              link={link}
-              onHistory={() => setHistoryOpen(true)}
-              onCommit={setOid}
+        <>
+          <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+              <BranchSelect
+                detail={detail}
+                disabled={loading}
+                onChange={(value) => navigate(link(kind, path ?? "", value))}
+              />
+              <PathBreadcrumbs repositoryName={repo} path={path ?? ""} kind={kind} link={link} />
+            </div>
+            <CopyField
+              className="md:ml-auto md:w-96 md:shrink-0"
+              value={cloneUrl}
+              label="Clone 地址"
             />
-          </>
-        )
+          </div>
+          {loading || error ? (
+            <Panel>
+              <ErrorAlert inset error={error} />
+              {loading && <InlineLoadingState />}
+            </Panel>
+          ) : (
+            contents && (
+              <RepositoryContents
+                key={`${ref}/${path}`}
+                contents={contents}
+                latest={latest}
+                link={link}
+                onHistory={() => setHistoryOpen(true)}
+                onCommit={setOid}
+              />
+            )
+          )}
+        </>
       )}
       <PathHistorySheet
         key={`${ref}/${path}`}

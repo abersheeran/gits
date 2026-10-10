@@ -26,7 +26,7 @@ const TableHeader = React.forwardRef<
   <thead
     ref={ref}
     className={cn(
-      "bg-surface-focus [&_tr]:border-b [&_tr]:border-border-subtle",
+      "bg-surface-canvas [&_tr]:h-10 [&_tr]:border-b [&_tr]:border-border-subtle",
       className
     )}
     {...props}
@@ -53,7 +53,7 @@ const TableFooter = React.forwardRef<
   <tfoot
     ref={ref}
     className={cn(
-      "border-t border-border-subtle bg-surface-focus font-medium [&>tr]:last:border-b-0",
+      "border-t border-border-subtle bg-surface-canvas font-medium [&>tr]:last:border-b-0",
       className
     )}
     {...props}
@@ -68,7 +68,7 @@ const TableRow = React.forwardRef<
   <tr
     ref={ref}
     className={cn(
-      "border-b border-border-subtle transition-colors duration-100 ease-in-out hover:bg-surface-hover data-[state=selected]:bg-surface-focus",
+      "h-12 md:h-11 border-b border-border-subtle transition-colors duration-100 ease-in-out hover:bg-surface-hover data-[state=selected]:bg-surface-focus",
       className
     )}
     {...props}
@@ -83,7 +83,7 @@ const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-11 px-3 text-left align-middle font-sans text-body-micro text-text-secondary [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+      "h-10 px-4 text-left align-middle font-sans text-body-micro font-medium text-text-tertiary [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
       className
     )}
     {...props}
@@ -98,7 +98,7 @@ const TableCell = React.forwardRef<
   <td
     ref={ref}
     className={cn(
-      "px-3 py-3 align-middle text-body-xs [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+      "px-4 py-2 align-middle text-body-xs [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
       className
     )}
     {...props}

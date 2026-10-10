@@ -11,12 +11,14 @@ export function PermissionSelect({
   onChange,
   disabled,
   id,
+  className,
   label = "权限"
 }: {
   value: CollaboratorPermission;
   onChange: (value: CollaboratorPermission) => void;
   disabled?: boolean;
   id?: string;
+  className?: string;
   label?: string;
 }) {
   return (
@@ -25,7 +27,7 @@ export function PermissionSelect({
       onValueChange={(value) => onChange(value as CollaboratorPermission)}
       disabled={disabled}
     >
-      <SelectTrigger id={id} aria-label={label}>
+      <SelectTrigger className={className} id={id} aria-label={label}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

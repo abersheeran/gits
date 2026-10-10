@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { EmptyState } from "@/components/common/empty-state";
@@ -7,7 +8,9 @@ import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { RelativeTime } from "@/components/common/relative-time";
 import { Pagination } from "@/components/common/pagination";
-import { CopyButton } from "@/components/copy-button";
+import { CopyField } from "@/components/common/copy-field";
+import { IconButton } from "@/components/common/icon-button";
+import { Ban, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -126,19 +129,21 @@ export function TokensPage({ user }: { user: AuthUser | null }) {
         }
       />
       <Panel>
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {loading ? (
           <InlineLoadingState />
         ) : tokens.length === 0 ? (
-          <EmptyState title="还没有访问令牌" description="创建令牌以通过 Git 客户端访问仓库。" />
+          <EmptyState
+            icon={KeyRound}
+            title="还没有访问令牌"
+            description="创建令牌以通过 Git 客户端访问仓库。"
+          />
         ) : (
           <>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>名称</TableHead>
-                  <TableHead className="hidden md:table-cell">前缀</TableHead>
-                  <TableHead className="hidden lg:table-cell">创建时间</TableHead>
                   <TableHead className="hidden md:table-cell">过期时间</TableHead>
                   <TableHead className="hidden lg:table-cell">最近使用</TableHead>
                   <TableHead className="w-20">状态</TableHead>
@@ -148,47 +153,55 @@ export function TokensPage({ user }: { user: AuthUser | null }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tokens.slice((page - 1) * 20, page * 20).map((token) => (
-                  <TableRow key={token.id}>
-                    <TableCell>
-                      <span className="block truncate">{token.name}</span>
-                      <span className="mt-1 block text-body-micro text-text-tertiary md:hidden">
-                        {token.expires_at === null ? (
-                          "不过期"
-                        ) : (
-                          <>
-                            过期：
-                            <RelativeTime timestamp={token.expires_at} />
-                          </>
+                {tokens.slice((page - 1) * 20, page * 20).map((token) => {
+                  const status = tokenStatus(token);
+                  return (
+                    <TableRow key={token.id}>
+                      <TableCell>
+                        <span
+                          className={cn("block truncate", status !== "有效" && "text-text-tertiary")}
+                        >
+                          {token.name}
+                        </span>
+                        <span className="mt-1 hidden text-body-micro text-text-tertiary md:block">
+                          <span className="font-mono">{token.token_prefix}</span> · 创建于{" "}
+                          <RelativeTime timestamp={token.created_at} />
+                        </span>
+                        <span className="mt-1 block text-body-micro text-text-tertiary md:hidden">
+                          {token.expires_at === null ? (
+                            "不过期"
+                          ) : (
+                            <>
+                              过期：
+                              <RelativeTime timestamp={token.expires_at} />
+                            </>
+                          )}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <RelativeTime timestamp={token.expires_at} fallback="不过期" />
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <RelativeTime timestamp={token.last_used_at} fallback="尚未使用" />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={status === "有效" ? "success" : "outline"}>
+                          {status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {token.revoked_at === null && (
+                          <IconButton
+                            label={`撤销令牌 ${token.name}`}
+                            onClick={() => setTarget(token)}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </IconButton>
                         )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden truncate font-mono text-[13px] md:table-cell">
-                      {token.token_prefix}
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RelativeTime timestamp={token.created_at} />
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <RelativeTime timestamp={token.expires_at} fallback="不过期" />
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RelativeTime timestamp={token.last_used_at} fallback="尚未使用" />
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={tokenStatus(token) === "有效" ? "success" : "secondary"}>
-                        {tokenStatus(token)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {token.revoked_at === null && (
-                        <Button variant="ghost" onClick={() => setTarget(token)}>
-                          撤销
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             <Pagination page={page} hasNext={page * 20 < tokens.length} onChange={setPage} />
@@ -263,11 +276,12 @@ export function TokensPage({ user }: { user: AuthUser | null }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>令牌已创建</DialogTitle>
-            <DialogDescription>请复制并妥善保存，关闭后无法再次查看。</DialogDescription>
+            <DialogDescription>
+              请立即复制并妥善保存，关闭后将无法再次查看。在 Git 要求输入密码时使用此令牌。
+            </DialogDescription>
           </DialogHeader>
-          <code className="block break-all font-mono text-[13px]">{createdToken}</code>
+          <CopyField value={createdToken ?? ""} label="令牌" />
           <DialogFooter>
-            <CopyButton value={createdToken ?? ""} />
             <Button onClick={() => setCreatedToken(null)}>完成</Button>
           </DialogFooter>
         </DialogContent>

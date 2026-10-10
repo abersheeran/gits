@@ -21,7 +21,7 @@ export function BranchSelect({
   const branches = detail.branches.map((branch) => selectedBranchName(branch.name) ?? branch.name);
   return (
     <Select value={selected} onValueChange={onChange} disabled={disabled || !selected}>
-      <SelectTrigger aria-label="选择分支" className="w-full min-w-0 font-mono text-[13px] md:w-56">
+      <SelectTrigger aria-label="选择分支" className="w-full min-w-0 shrink-0 font-mono text-[13px] md:w-56">
         <SelectValue placeholder="暂无分支" />
       </SelectTrigger>
       <SelectContent>

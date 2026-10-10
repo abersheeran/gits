@@ -44,20 +44,16 @@ export function ChangesWorkspace({ changes, children }: ChangesWorkspaceProps) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(240px,280px)_minmax(0,1fr)]">
       <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">
-        <div className="min-w-0">
-          <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
-            <div className="space-y-1">
-              <h3 className="font-display text-heading-4 text-text-primary">变更文件</h3>
-            </div>
-            <span className="text-body-micro text-text-tertiary">{changes.length}</span>
-          </div>
-          <ChangesFileTree
-            changes={changes}
-            activePath={activePath}
-            onSelectPath={scrollToPath}
-            className="max-h-[28rem] xl:max-h-[calc(100dvh-12rem)]"
-          />
+        <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+          <h3 className="text-body-xs font-medium text-text-primary">变更文件</h3>
+          <span className="text-body-micro text-text-tertiary">{changes.length}</span>
         </div>
+        <ChangesFileTree
+          changes={changes}
+          activePath={activePath}
+          onSelectPath={scrollToPath}
+          className="max-h-[28rem] xl:max-h-[calc(100dvh-12rem)]"
+        />
       </aside>
 
       <div className="min-w-0">

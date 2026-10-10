@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Trash2 } from "lucide-react";
 import { useRepository } from "@/hooks/use-repository";
 import { RepositoryLayout } from "@/components/common/repository-layout";
-import { Panel } from "@/components/common/panel";
+import { Panel, PanelTitle } from "@/components/common/panel";
 import { EmptyState } from "@/components/common/empty-state";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ErrorAlert } from "@/components/common/error-alert";
@@ -96,9 +96,10 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
       <Panel
         header={
           <>
-            <span>分支</span>
+            <PanelTitle>分支</PanelTitle>
             {isOwner && (
               <Button
+                size="sm"
                 onClick={() => {
                   setSource(
                     branches.find((branch) => branch.shortName === detail.defaultBranch)?.name ??
@@ -115,7 +116,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
           </>
         }
       >
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {branches.length === 0 ? (
           <EmptyState title="暂无分支" description="推送首次提交后即可浏览和管理分支。" />
         ) : (
@@ -124,34 +125,40 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>分支名</TableHead>
-                  <TableHead className="hidden md:table-cell">提交</TableHead>
-                  {isOwner && <TableHead className="w-40 text-right">操作</TableHead>}
+                  <TableHead className="hidden md:table-cell">最新提交</TableHead>
+                  {isOwner && (
+                    <TableHead className="w-40 text-right">
+                      <span className="sr-only">操作</span>
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {branches.slice((page - 1) * 20, page * 20).map((branch) => (
                   <TableRow key={branch.name}>
                     <TableCell>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <Link
-                          className="gh-link break-all font-mono text-[13px]"
+                          className="gh-link -my-2 min-w-0 truncate py-2 font-mono text-[13px]"
+                          title={branch.shortName}
                           to={buildCodePath({ owner, repo, kind: "tree", ref: branch.shortName })}
                         >
                           {branch.shortName}
                         </Link>
                         {branch.shortName === detail.defaultBranch && (
-                          <Badge variant="secondary">默认</Badge>
+                          <Badge variant="outline">默认</Badge>
                         )}
                       </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      <ShaCopyButton oid={branch.oid} />
+                      <ShaCopyButton oid={branch.oid} className="-ml-2" />
                     </TableCell>
                     {isOwner && (
                       <TableCell className="text-right">
                         {branch.shortName !== detail.defaultBranch && (
                           <div className="flex items-center justify-end">
                             <Button
+                              size="sm"
                               variant="ghost"
                               disabled={pending}
                               onClick={async () => {

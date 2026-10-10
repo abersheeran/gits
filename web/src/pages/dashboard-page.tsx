@@ -44,7 +44,7 @@ export function MyRepositoriesPage({ user }: { user: AuthUser | null }) {
         }
       />
       <Panel>
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {loading ? (
           <InlineLoadingState />
         ) : (

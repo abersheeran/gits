@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -64,10 +65,17 @@ export function AppShell({
     <div className={cn("flex gap-3", mobile ? "flex-col items-stretch" : "flex-wrap items-center")}>
       {user ? (
         <>
-          <span className={cn("block truncate text-body-xs", mobile ? "px-3" : "max-w-40")}>
-            {user.username}
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-2 text-body-xs",
+              mobile ? "px-3" : "max-w-40"
+            )}
+          >
+            <AuthorAvatar name={user.username} className="h-7 w-7 shrink-0" />
+            <span className="truncate">{user.username}</span>
           </span>
           <Button
+            size="sm"
             variant="ghost"
             className={mobile ? "w-full justify-start px-3" : undefined}
             disabled={pending}
@@ -92,6 +100,7 @@ export function AppShell({
       ) : (
         <>
           <Button
+            size="sm"
             variant="ghost"
             className={mobile ? "w-full justify-start px-3" : undefined}
             asChild
@@ -100,7 +109,7 @@ export function AppShell({
               登录
             </Link>
           </Button>
-          <Button className={mobile ? "w-full justify-start px-3" : undefined} asChild>
+          <Button size="sm" className={mobile ? "w-full justify-start px-3" : undefined} asChild>
             <Link to="/register" onClick={() => setOpen(false)}>
               注册
             </Link>

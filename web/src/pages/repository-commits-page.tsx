@@ -75,7 +75,7 @@ export function RepositoryCommitsPage({ user }: { user: AuthUser | null }) {
         onChange={(value) => update({ ref: value, page: null, oid: null })}
       />
       <Panel>
-        <ErrorAlert error={error} />
+        <ErrorAlert inset error={error} />
         {loading ? (
           <InlineLoadingState />
         ) : history?.commits.length ? (

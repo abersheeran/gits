@@ -159,7 +159,7 @@ export function configureMonaco(instance: Monaco) {
     ? getComputedStyle(globalThis.document.documentElement)
     : null;
   const surfaceBase = readThemeColor(rootStyles, "--color-surface-base", "#ffffff");
-  const surfaceFocus = readThemeColor(rootStyles, "--color-surface-focus", "#f4eeeb");
+  const surfaceCanvas = readThemeColor(rootStyles, "--color-surface-canvas", "#f7f7f5");
   const surfaceHover = readThemeColor(rootStyles, "--color-surface-hover", "#f6f4f4");
   const fillPrimary = readThemeColor(rootStyles, "--color-fill-primary", "#ebe4e0");
   const fillSecondary = readThemeColor(rootStyles, "--color-fill-secondary", "#d1cecc");
@@ -218,10 +218,10 @@ export function configureMonaco(instance: Monaco) {
     colors: {
       "editor.foreground": textPrimary,
       "editor.background": surfaceBase,
-      "editorGutter.background": surfaceBase,
+      "editorGutter.background": surfaceCanvas,
       "editorLineNumber.foreground": textSecondary,
       "editorLineNumber.activeForeground": textSupportingStrong,
-      "editor.lineHighlightBackground": mixColor(surfaceFocus, 84),
+      "editor.lineHighlightBackground": mixColor(surfaceCanvas, 84),
       "editor.selectionBackground": mixColor(fillPrimary, 88),
       "editor.inactiveSelectionBackground": mixColor(fillPrimary, 56),
       "editor.selectionHighlightBackground": mixColor(fillPrimary, 34),
@@ -252,7 +252,7 @@ export function configureMonaco(instance: Monaco) {
       "diffEditor.removedTextBorder": transparentBorder,
       "diffEditorGutter.insertedLineBackground": blendColors(successMuted, 74, success),
       "diffEditorGutter.removedLineBackground": blendColors(dangerSurface, 76, dangerBorder),
-      "diffEditor.unchangedRegionBackground": blendColors(surfaceFocus, 82, surfaceBase),
+      "diffEditor.unchangedRegionBackground": blendColors(surfaceCanvas, 82, surfaceBase),
       "diffEditor.unchangedRegionForeground": textSecondary,
       "diffEditor.unchangedRegionShadow": mixColor(textPrimary, 16)
     },

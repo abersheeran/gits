@@ -64,7 +64,7 @@ export function MarkdownBody({ content, emptyText = "（无内容）", className
             />
           ),
           pre: (props) => (
-            <pre className="mb-4 overflow-x-auto rounded-lg bg-surface-focus p-4" {...props} />
+            <pre className="mb-4 overflow-x-auto rounded-lg bg-surface-canvas p-4" {...props} />
           ),
           code: (props) => {
             const className = props.className ?? "";
@@ -72,7 +72,7 @@ export function MarkdownBody({ content, emptyText = "（无内容）", className
             if (inline) {
               return (
                 <code
-                  className="rounded-md bg-surface-focus px-1.5 py-0.5 font-mono text-body-micro text-text-primary"
+                  className="rounded-md bg-surface-canvas px-1.5 py-0.5 font-mono text-body-micro text-text-primary"
                   {...props}
                 />
               );
@@ -82,11 +82,11 @@ export function MarkdownBody({ content, emptyText = "（无内容）", className
             );
           },
           table: (props) => (
-            <div className="mb-4 overflow-x-auto rounded-lg">
+            <div className="mb-4 overflow-x-auto">
               <table className="w-full border-collapse text-body-sm" {...props} />
             </div>
           ),
-          thead: (props) => <thead className="bg-surface-focus" {...props} />,
+          thead: (props) => <thead className="bg-surface-canvas" {...props} />,
           th: (props) => (
             <th
               className="border border-border-subtle px-3 py-2 text-left font-sans text-label-sm text-text-supporting"

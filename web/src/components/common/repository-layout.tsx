@@ -1,3 +1,4 @@
+import { Code2, History, GitBranch, Settings, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -24,12 +25,12 @@ export function RepositoryLayout({
         ? "commits"
         : "";
   const ref = detail.selectedRef?.replace(/^refs\/heads\//, "");
-  const tabs = [
-    ["", "代码"],
-    ["commits", "提交"],
-    ["branches", "分支"]
+  const tabs: Array<[string, string, LucideIcon]> = [
+    ["", "代码", Code2],
+    ["commits", "提交", History],
+    ["branches", "分支", GitBranch]
   ];
-  if (user?.username === repository.owner_username) tabs.push(["settings", "设置"]);
+  if (user?.username === repository.owner_username) tabs.push(["settings", "设置", Settings]);
   return (
     <div className="min-w-0 space-y-4">
       <header className="space-y-2">
@@ -46,8 +47,8 @@ export function RepositoryLayout({
           <p className="break-words text-body-xs text-text-secondary">{repository.description}</p>
         )}
       </header>
-      <nav aria-label="仓库导航" className="flex border-b border-border">
-        {tabs.map(([key, label]) => (
+      <nav aria-label="仓库导航" className="flex min-w-0 overflow-x-auto border-b border-border">
+        {tabs.map(([key, label, Icon]) => (
           <Link
             key={key}
             aria-current={tab === key ? "page" : undefined}
@@ -59,12 +60,13 @@ export function RepositoryLayout({
                   : base
             }
             className={cn(
-              "min-h-10 border-b-2 px-4 py-3 text-body-xs",
+              "inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-body-xs",
               tab === key
                 ? "border-text-primary text-text-primary"
                 : "border-transparent text-text-secondary hover:text-text-primary"
             )}
           >
+            <Icon className="h-4 w-4" aria-hidden="true" />
             {label}
           </Link>
         ))}

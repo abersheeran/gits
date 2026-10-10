@@ -1,62 +1,21 @@
 import { lazy, Suspense, useState } from "react";
 import { Link } from "react-router-dom";
-import { FileCode2, FolderOpen } from "lucide-react";
+import { BookOpen, FileCode2, FileX2, FolderOpen, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { InlineLoadingState } from "@/components/ui/loading-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import type { RepositoryContentsResponse } from "@/lib/api";
-import { commitTitle, type CodeViewKind } from "@/lib/repository-navigation";
-import { Panel } from "./panel";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import type { CommitSummary, RepositoryContentsResponse } from "@/lib/api";
+import { commitTitle } from "@/lib/repository-navigation";
+import { Panel, PanelTitle } from "./panel";
+import { CommitRow } from "./commit-row";
 import { EmptyState } from "./empty-state";
 import { Pagination } from "./pagination";
 import { RelativeTime } from "./relative-time";
+import type { LocationLink } from "./path-breadcrumbs";
 const ReadmeMarkdown = lazy(async () => ({
   default: (await import("@/components/readme-markdown")).ReadmeMarkdown
 }));
-type LocationLink = (kind: CodeViewKind, path: string) => string;
-function Breadcrumbs({
-  path,
-  kind,
-  link
-}: {
-  path: string;
-  kind: CodeViewKind;
-  link: LocationLink;
-}) {
-  const parts = path.split("/").filter(Boolean);
-  return (
-    <nav
-      aria-label="文件路径"
-      className="flex min-w-0 flex-1 flex-wrap items-center gap-1 break-all font-mono text-[13px] font-normal"
-    >
-      <Link className="gh-link inline-flex min-h-10 items-center" to={link("tree", "")}>
-        /
-      </Link>
-      {parts.map((part, index) => (
-        <span key={index} className="inline-flex min-w-0 items-center gap-1">
-          {index > 0 && <span className="text-text-tertiary">/</span>}
-          <Link
-            className="gh-link inline-flex min-h-10 items-center"
-            to={link(
-              index === parts.length - 1 ? kind : "tree",
-              parts.slice(0, index + 1).join("/")
-            )}
-          >
-            {part}
-          </Link>
-        </span>
-      ))}
-    </nav>
-  );
-}
 function formatBytes(value: number) {
   return value < 1024
     ? `${value} B`
@@ -66,45 +25,48 @@ function formatBytes(value: number) {
 }
 export function RepositoryContents({
   contents,
+  latest,
   link,
   onHistory,
   onCommit
 }: {
   contents: RepositoryContentsResponse;
+  latest: CommitSummary | null;
   link: LocationLink;
   onHistory: () => void;
   onCommit: (oid: string) => void;
 }) {
   const [page, setPage] = useState(1);
   const file = contents.file;
+  const history = (
+    <Button variant="ghost" size="sm" aria-label="历史" onClick={onHistory}>
+      <History className="h-4 w-4" />
+      <span className="hidden sm:inline">历史</span>
+    </Button>
+  );
   return (
     <>
       <Panel
         header={
-          <>
-            <Breadcrumbs path={contents.path} kind={contents.kind} link={link} />
-            {file && (
-              <span className="text-body-micro font-normal text-text-tertiary">
-                {formatBytes(file.size)}
-                {file.content !== null &&
-                  ` · ${file.content ? file.content.split("\n").length : 0} 行`}
-              </span>
-            )}
-            <Button variant="ghost" onClick={onHistory}>
-              历史
-            </Button>
-          </>
+          latest ? (
+            <CommitRow compact commit={latest} onOpen={onCommit} actions={history} />
+          ) : (
+            <div className="ml-auto">{history}</div>
+          )
         }
       >
         {contents.kind === "blob" && file ? (
           <>
-            {file.truncated && (
-              <p className="px-4 py-2 text-body-micro text-text-tertiary">
-                文件过大，仅显示部分内容。
-              </p>
-            )}
+            <div className="flex h-10 items-center gap-3 border-b border-border-subtle bg-surface-canvas px-4 text-body-micro text-text-tertiary">
+              <span>
+                {formatBytes(file.size)}
+                {file.content !== null &&
+                  ` · ${file.content ? file.content.split("\n").length : 0} 行`}
+              </span>
+              {file.truncated && <span>仅显示部分内容</span>}
+            </div>
             {file.isBinary ? (
-              <EmptyState title="二进制文件无法在线预览" />
+              <EmptyState icon={FileX2} title="二进制文件无法在线预览" />
             ) : (
               <MonacoTextViewer
                 value={file.content ?? ""}
@@ -117,23 +79,21 @@ export function RepositoryContents({
           </>
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>名称</TableHead>
-                  <TableHead className="hidden md:table-cell">最近提交</TableHead>
-                  <TableHead className="hidden w-32 md:table-cell">时间</TableHead>
-                </TableRow>
-              </TableHeader>
+            <Table aria-label="仓库文件">
+              <colgroup className="hidden md:table-column-group">
+                <col />
+                <col />
+                <col className="w-28" />
+              </colgroup>
               <TableBody>
                 {contents.path && (
                   <TableRow>
                     <TableCell colSpan={3}>
                       <Link
                         to={link("tree", contents.path.split("/").slice(0, -1).join("/"))}
-                        className="gh-link flex min-h-10 items-center gap-2"
+                        className="gh-link -my-2 flex items-center gap-2 py-2"
                       >
-                        <FolderOpen className="h-4 w-4" />
+                        <FolderOpen className="h-4 w-4 text-text-secondary" />
                         ..
                       </Link>
                     </TableCell>
@@ -154,10 +114,11 @@ export function RepositoryContents({
                           </span>
                         ) : (
                           <Link
-                            className="gh-link flex min-h-10 min-w-0 items-center font-mono md:min-h-0 text-[13px]"
+                            className="gh-link -my-2 block min-w-0 flex-1 truncate py-2 font-mono text-[13px]"
                             to={link(entry.type, entry.path)}
+                            title={entry.name}
                           >
-                            <span className="block truncate">{entry.name}</span>
+                            {entry.name}
                           </Link>
                         )}
                       </div>
@@ -165,14 +126,14 @@ export function RepositoryContents({
                     <TableCell className="hidden md:table-cell">
                       {entry.latestCommit && (
                         <button
-                          className="gh-link block max-w-full truncate text-left"
+                          className="gh-link -my-2 block max-w-full truncate py-2 text-left"
                           onClick={() => onCommit(entry.latestCommit!.oid)}
                         >
                           {commitTitle(entry.latestCommit.message)}
                         </button>
                       )}
                     </TableCell>
-                    <TableCell className="hidden text-body-micro text-text-tertiary md:table-cell">
+                    <TableCell className="hidden w-28 text-right text-body-micro text-text-tertiary md:table-cell">
                       {entry.latestCommit && (
                         <RelativeTime timestamp={entry.latestCommit.author.timestamp * 1000} />
                       )}
@@ -184,18 +145,25 @@ export function RepositoryContents({
             {contents.entries.length === 0 && (
               <EmptyState title="暂无文件" description="推送代码后即可浏览文件。" />
             )}
-            {contents.entries.length > 50 && (
-              <Pagination
-                page={page}
-                hasNext={page * 50 < contents.entries.length}
-                onChange={setPage}
-              />
-            )}
+            <Pagination
+              page={page}
+              hasNext={page * 50 < contents.entries.length}
+              onChange={setPage}
+            />
           </>
         )}
       </Panel>
       {contents.kind === "tree" && contents.readme && (
-        <Panel header={<span className="font-mono text-[13px]">{contents.readme.path}</span>}>
+        <Panel
+          header={
+            <PanelTitle className="flex min-w-0 items-center gap-2">
+              <BookOpen className="h-4 w-4 shrink-0" />
+              <span className="truncate font-mono text-[13px] font-normal">
+                {contents.readme.path}
+              </span>
+            </PanelTitle>
+          }
+        >
           <div className="min-w-0 overflow-hidden p-4">
             <Suspense fallback={<InlineLoadingState />}>
               <ReadmeMarkdown content={contents.readme.content} />

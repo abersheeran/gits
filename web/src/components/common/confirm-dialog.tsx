@@ -65,7 +65,9 @@ export function ConfirmDialog({
           <ErrorAlert error={error} />
           {confirmName !== undefined && (
             <div className="space-y-2">
-              <Label htmlFor="confirm-name">输入仓库名 {confirmName} 确认删除</Label>
+              <Label htmlFor="confirm-name">
+                输入 <code className="font-mono text-[13px]">{confirmName}</code> 以确认
+              </Label>
               <Input
                 id="confirm-name"
                 value={name}

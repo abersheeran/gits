@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useRepository } from "@/hooks/use-repository";
 import { RepositoryLayout } from "@/components/common/repository-layout";
-import { Panel } from "@/components/common/panel";
+import { Panel, PanelTitle } from "@/components/common/panel";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { Button } from "@/components/ui/button";
@@ -11,13 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
+import { VisibilityField } from "@/components/common/visibility-field";
+import { Check } from "lucide-react";
 import {
   deleteRepository,
   formatApiError,
@@ -40,7 +35,9 @@ function SettingsForm({
   const navigate = useNavigate();
   const [name, setName] = useState(repo);
   const [description, setDescription] = useState(repository.description ?? "");
-  const [visibility, setVisibility] = useState(repository.is_private ? "private" : "public");
+  const [visibility, setVisibility] = useState<"private" | "public">(
+    repository.is_private ? "private" : "public"
+  );
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,8 +69,8 @@ function SettingsForm({
   return (
     <>
       <Panel header="常规">
+        <ErrorAlert inset error={error} />
         <form className="space-y-4 p-4" onSubmit={save} onChange={() => setSaved(false)}>
-          <ErrorAlert error={error} />
           <div className="space-y-2">
             <Label htmlFor="repo-name">仓库名</Label>
             <Input
@@ -87,44 +84,38 @@ function SettingsForm({
             <Label htmlFor="repo-description">描述</Label>
             <Textarea
               id="repo-description"
+              rows={3}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="repo-visibility">可见性</Label>
-            <Select
-              value={visibility}
-              onValueChange={(value) => {
-                setVisibility(value);
-                setSaved(false);
-              }}
-            >
-              <SelectTrigger id="repo-visibility">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="private">私有</SelectItem>
-                <SelectItem value="public">公开</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <VisibilityField
+            value={visibility}
+            onChange={(value) => {
+              setVisibility(value);
+              setSaved(false);
+            }}
+          />
           <div className="flex items-center gap-3">
             <PendingButton type="submit" pending={pending} pendingText="保存中…">
               保存
             </PendingButton>
             {saved && (
-              <span role="status" className="text-body-xs text-text-secondary">
+              <span
+                role="status"
+                className="inline-flex items-center gap-1 text-body-xs text-success"
+              >
+                <Check className="h-4 w-4" />
                 已保存
               </span>
             )}
           </div>
         </form>
       </Panel>
-      <Panel header="危险操作">
+      <Panel header={<PanelTitle className="text-danger-text">危险操作</PanelTitle>}>
         <div className="flex flex-wrap items-center justify-between gap-4 p-4">
           <p className="text-body-xs text-text-secondary">删除仓库及其全部文件，此操作无法撤销。</p>
-          <Button variant="outline" onClick={() => setDeleting(true)}>
+          <Button variant="destructiveOutline" onClick={() => setDeleting(true)}>
             删除仓库
           </Button>
         </div>

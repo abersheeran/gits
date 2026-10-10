@@ -2,10 +2,11 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/common/page-header";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ErrorAlert } from "@/components/common/error-alert";
+import { PendingButton } from "@/components/ui/pending-button";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Panel } from "@/components/common/panel";
+import { VisibilityField } from "@/components/common/visibility-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +27,7 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
   if (!user) {
     return <Navigate to="/login" replace />;
   }
+  const owner = user.username;
 
   async function handleCreateRepository(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,7 +44,7 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
         ...(description.trim() ? { description: description.trim() } : {}),
         isPrivate
       });
-      navigate("/dashboard", { replace: true });
+      navigate(`/repo/${owner}/${repositoryName}`, { replace: true });
     } catch (submitError) {
       setCreateError(formatApiError(submitError));
     } finally {
@@ -53,55 +55,50 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
   return (
     <div className="mx-auto max-w-xl">
       <PageHeader title="新建仓库" />
-      <Card>
-        <CardContent>
+      <Panel>
+        <div className="p-4">
           <form className="space-y-4" onSubmit={handleCreateRepository}>
             <div className="space-y-2">
               <Label htmlFor="repo-name">仓库名</Label>
-              <Input
-                id="repo-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-              />
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 font-mono text-[13px] text-text-secondary">
+                  {user.username} /
+                </span>
+                <Input
+                  id="repo-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="repo-description">描述</Label>
+              <Label htmlFor="repo-description">描述（可选）</Label>
               <Textarea
                 id="repo-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="可选"
-                rows={4}
+                rows={3}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="is-private"
-                checked={isPrivate}
-                onCheckedChange={(checked) => setIsPrivate(checked === true)}
-              />
-              <Label htmlFor="is-private">私有仓库</Label>
-            </div>
+            <VisibilityField
+              value={isPrivate ? "private" : "public"}
+              onChange={(value) => setIsPrivate(value === "private")}
+            />
 
-            {createError ? (
-              <Alert variant="destructive">
-                <AlertTitle>创建失败</AlertTitle>
-                <AlertDescription>{createError}</AlertDescription>
-              </Alert>
-            ) : null}
+            <ErrorAlert error={createError} title="创建失败" />
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={createPending}>
-                {createPending ? "创建中..." : "创建仓库"}
-              </Button>
+            <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" asChild>
-                <Link to="/dashboard">返回仓库列表</Link>
+                <Link to="/dashboard">取消</Link>
               </Button>
+              <PendingButton type="submit" pending={createPending} pendingText="创建中…">
+                创建仓库
+              </PendingButton>
             </div>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
     </div>
   );
 }

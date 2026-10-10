@@ -138,7 +138,7 @@ function App() {
 
   if (authLoading) {
     return (
-      <div className="mx-auto w-[min(1080px,92vw)] py-10">
+      <div className="app-container py-6 md:py-8">
         <PageLoadingState />
       </div>
     );
@@ -146,13 +146,8 @@ function App() {
 
   return (
     <AppShell user={user} onAuthChanged={refreshAuth}>
-      <Suspense
-        fallback={
-          <div className="mx-auto w-[min(1080px,92vw)] py-10">
-            <PageLoadingState />
-          </div>
-        }
-      >
+      {/* AppShell 的 main 已提供 app-container 与页面留白。 */}
+      <Suspense fallback={<PageLoadingState />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
