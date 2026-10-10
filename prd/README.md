@@ -13,6 +13,10 @@
 - R2：`GIT_BUCKET` 保存 Git 对象、引用与 `HEAD`。
 - Durable Object：`REPOSITORY_OBJECTS` 绑定 `RepositoryObject`，按仓库 ID 处理 Git 请求、分支操作和代码浏览；内存缓存配合 DO storage 快照，缺失快照时从 R2 恢复。
 - 前端：React SPA，提供账户、仓库、代码浏览、提交历史、分支、设置和协作者页面。
+- 部署：Workers Builds 连接仓库根目录，选择生产分支，并为其余所有分支启用 Preview builds。Build command 为 `npm ci && npm --prefix web ci && npm run build`，Deploy command 为 `npm run deploy`，Preview command 为 `npm run preview`；项目 Wrangler 依赖需 >= 4.135.0。
+- 环境资源：生产 D1/R2 均为 `gits`；所有 Preview 共用 D1 `gits-preview` 和 R2 `gits-preview`，与生产隔离（绑定见 `wrangler.jsonc` 的 `previews`）。每个 Preview 自动获得独立 DO 命名空间和存储。
+- Preview 配置：`wrangler.jsonc` 的 `previews` 显式声明 `DB`、`GIT_BUCKET`、`REPOSITORY_OBJECTS` 及 `ALLOW_USER_REGISTRATION="true"`；静态资源、兼容设置与 DO 迁移保留在顶层。`npm run preview` 先通过 `wrangler.preview-migrations.jsonc` 迁移预览 D1，再执行 `wrangler preview`，地址为 `<branch>-gits.<subdomain>.workers.dev`。
+- 首次部署密钥：生产运行 `npm run secret:prod`，Preview 运行 `npx wrangler preview base-config secret put JWT_SECRET`（用于后续新建 Preview）。
 
 ## 3. 核心对象
 

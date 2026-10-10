@@ -8,8 +8,8 @@
 
 ## 2. 前置要求
 
-- Node.js 20.19+ 或 22.12+、npm、Git、curl。
-- Cloudflare 账号及可用的 D1、R2；Wrangler 由项目开发依赖提供。
+- Node.js 22.12+、npm、Git、curl。
+- Cloudflare 账号及可用的 D1、R2；Worker Previews 要求项目开发依赖 Wrangler >= 4.135.0，不使用全局安装版本。
 - 以下 API 示例使用 `jq` 提取 PAT。
 
 ## 3. 项目初始化
@@ -30,24 +30,30 @@ npm run build:web
 
 | 绑定 | 用途 | 默认配置 |
 | --- | --- | --- |
-| `DB` | D1 元数据 | 数据库 `gits` |
-| `GIT_BUCKET` | Git 对象与引用 | R2 桶 `gits`，只需这一个桶 |
-| `REPOSITORY_OBJECTS` | 仓库 Durable Object | `RepositoryObject` |
+| `DB` | D1 元数据 | 生产 `gits`；Preview `gits-preview`；ID 以 [wrangler.jsonc](../wrangler.jsonc) 为准 |
+| `GIT_BUCKET` | Git 对象与引用 | 生产 R2 桶 `gits`；Preview R2 桶 `gits-preview` |
+| `REPOSITORY_OBJECTS` | 仓库 Durable Object | `RepositoryObject`，每个 Preview 独立命名空间和存储 |
 | `ASSETS` | 前端静态文件 | `web/dist` |
 
-本地开发使用 Wrangler 本地资源；部署前创建远程 D1 和 R2。DO 由部署配置管理，无需手动创建命名空间。
+本地开发使用 Wrangler 本地资源。所有 Preview 分支共用上述预览 D1/R2，与生产隔离；DO 由部署配置管理。
 
 ### 4.2 创建远程资源
 
 ```bash
 npx wrangler login
+# 生产
 npm run d1:create:remote
 npx wrangler r2 bucket create gits
+# Preview
+npx wrangler d1 create gits-preview
+npx wrangler r2 bucket create gits-preview
 ```
 
-将 D1 输出的 `database_id` 填入 [wrangler.jsonc](../wrangler.jsonc) 的 `d1_databases[0].database_id`。自定义桶名时同步修改 `r2_buckets[0].bucket_name`。
+将返回的生产 D1 ID 填入 `wrangler.jsonc` 的 `d1_databases[0].database_id`。将 Preview D1 ID 同时填入 `wrangler.jsonc` 的 `previews.d1_databases[0].database_id` 和 `wrangler.preview-migrations.jsonc` 的 `d1_databases[0].database_id`；两处必须指向同一个预览数据库。
 
-### 4.3 本地与生产变量
+Preview 绑定与变量在 `previews` 中显式配置，不继承生产设置；`assets`、兼容日期与标志、DO 迁移仍在顶层。`REPOSITORY_OBJECTS` 在 Preview 中也必须声明。
+
+### 4.3 本地、生产与 Preview 变量
 
 本地 `.env` 模板：
 
@@ -62,16 +68,27 @@ ALLOW_USER_REGISTRATION=true
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
 
+生产与 Preview 首次部署前分别设置 JWT 密钥：
+
+```bash
+npm run secret:prod
+npx wrangler preview base-config secret put JWT_SECRET
+```
+
+Base 密钥用于新建的 Preview；已有 Preview 使用 `npx wrangler preview secret put JWT_SECRET --name <preview>` 更新。Preview 已在 `previews.vars` 中设置 `ALLOW_USER_REGISTRATION="true"`。
+
 ### 4.4 数据库迁移
 
 ```bash
 # 本地
 npm run db:migrate:local
-# 远程
+# 生产远程
 npm run db:migrate
+# Preview 远程
+npm run db:migrate:preview
 ```
 
-`npm run dev` 自动执行本地迁移；`npm run deploy` 自动执行远程迁移。
+`npm run dev` 自动执行本地迁移；`npm run deploy` 自动执行生产迁移；`npm run preview` 先通过 `wrangler.preview-migrations.jsonc` 迁移同一个 `gits-preview` 数据库，再运行 `wrangler preview`。
 
 ### 4.5 迁移历史重置与重新部署
 
@@ -80,6 +97,16 @@ npm run db:migrate
 旧部署不能原地升级：先删除旧 `gits` Worker（连同其 Durable Object 命名空间及存储）、D1 数据库、R2 数据、`gits-actions` 队列，以及旧 `gits-actionscontainer*` 容器应用和镜像，再从零部署。本地开发先删除 `.wrangler/state`，再运行 `npm run dev`。
 
 ## 5. 本地运行、部署与健康检查
+
+在 Workers Builds 中将仓库连接到 `gits` Worker，选择生产分支，为其余所有分支启用 **Preview builds**，根目录选择仓库根目录：
+
+| 设置 | 命令 |
+| --- | --- |
+| Build command | `npm ci && npm --prefix web ci && npm run build` |
+| Deploy command（生产分支） | `npm run deploy` |
+| Preview command（其余分支） | `npm run preview` |
+
+Preview 地址格式为 `<branch>-gits.<subdomain>.workers.dev`。手动运行 `npm run preview` 前需先构建前端。配置规则见 [Cloudflare Preview 文档](https://developers.cloudflare.com/workers/previews/configuration/)。
 
 两个终端分别运行：
 

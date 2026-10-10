@@ -27,7 +27,7 @@ Repositories belong to individuals. Git access is HTTP only; there is no SSH ser
 
 ## Quick Start
 
-Use Node.js 20.19+ or 22.12+ with npm and Git.
+Use Node.js 22.12+ with npm and Git.
 
 ```bash
 npm install
@@ -72,25 +72,53 @@ Local `.env` values are loaded by the development script. Configure production v
 
 | Binding | Configuration |
 | --- | --- |
-| `DB` | D1 database, default name `gits`; set your `database_id` in `wrangler.jsonc` |
-| `GIT_BUCKET` | One R2 bucket, default name `gits` |
-| `REPOSITORY_OBJECTS` | Durable Object namespace for `RepositoryObject` |
+| `DB` | Production D1 `gits`; Preview D1 `gits-preview`; IDs configured in [wrangler.jsonc](wrangler.jsonc) |
+| `GIT_BUCKET` | Production R2 `gits`; Previews use R2 `gits-preview` |
+| `REPOSITORY_OBJECTS` | `RepositoryObject`; each Preview gets its own namespace and storage |
 | `ASSETS` | Frontend build from `web/dist` |
 
 As of 2026-10, D1 and Durable Object migration histories each contain a single initial migration. Deployments from before this reset cannot be upgraded in place and must be recreated; for local development, delete `.wrangler/state` before running `npm run dev`.
 
 ## Deployment
 
-### Create Resources and Set Secrets
+### Resources and One-off Secrets
+
+Create separate production and Preview resources:
 
 ```bash
 npx wrangler login
+# Production
 npm run d1:create:remote
 npx wrangler r2 bucket create gits
-npm run secret:prod
+# Previews
+npx wrangler d1 create gits-preview
+npx wrangler r2 bucket create gits-preview
 ```
 
-Copy the returned D1 database ID into `wrangler.jsonc`. If using another R2 bucket name, update `r2_buckets[0].bucket_name`.
+Copy the returned production D1 ID into `wrangler.jsonc` → `d1_databases[0].database_id`. Copy the Preview D1 ID into both `wrangler.jsonc` → `previews.d1_databases[0].database_id` and `wrangler.preview-migrations.jsonc` → `d1_databases[0].database_id`; both Preview entries must point at the same database.
+
+Set separate JWT secrets once before deploying:
+
+```bash
+npm run secret:prod
+npx wrangler preview base-config secret put JWT_SECRET
+```
+
+The Preview base secret applies to new Previews. To update an existing Preview, use `npx wrangler preview secret put JWT_SECRET --name <preview>`.
+
+### Workers Builds + Worker Previews
+
+Connect this repository to the `gits` Worker in Workers Builds, select the production branch, and enable **Preview builds** for all other branches. Use the repository root and these commands:
+
+| Setting | Command |
+| --- | --- |
+| Build | `npm ci && npm --prefix web ci && npm run build` |
+| Deploy (production branch) | `npm run deploy` |
+| Preview (all other branches) | `npm run preview` |
+
+Worker Previews require the project's Wrangler dependency to be at least 4.135.0; a global installation is not used. Preview URLs use `<branch>-gits.<subdomain>.workers.dev`.
+
+`npm run preview` first migrates the preview D1 database using `wrangler.preview-migrations.jsonc`, then runs `wrangler preview`. All branches share the preview D1/R2 resources, isolated from production; DO storage is separate per Preview. The `previews` block explicitly sets `DB`, `GIT_BUCKET`, `REPOSITORY_OBJECTS`, and `ALLOW_USER_REGISTRATION="true"` because production settings are not inherited. Assets, compatibility settings, and DO migrations remain top-level. See [Cloudflare Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
 
 ### Deploy to Cloudflare
 
@@ -111,9 +139,10 @@ To close registration, remove or empty the production registration variable. Che
 ```bash
 npm run db:migrate:local
 npm run db:migrate
+npm run db:migrate:preview
 ```
 
-The first command targets local D1; the second targets production.
+These target local D1, production D1, and preview D1 respectively.
 
 ## Scripts
 
@@ -123,6 +152,8 @@ The first command targets local D1; the second targets production.
 | `npm run dev:web` | Start Vite |
 | `npm run build` / `npm run build:web` | Build the frontend |
 | `npm run deploy` | Apply remote migrations, build frontend, deploy Worker |
+| `npm run preview` | Apply preview D1 migrations, deploy Worker Preview (requires frontend build) |
+| `npm run db:migrate:preview` | Apply remote migrations to `gits-preview` |
 | `npm run typecheck` | Check backend TypeScript |
 | `npm run test` / `npm run test:watch` | Run tests once / watch for changes |
 | `npm run cf-typegen` | Generate Cloudflare binding types |

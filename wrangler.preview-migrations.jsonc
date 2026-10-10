@@ -1,0 +1,11 @@
+{
+	"name": "gits-preview-migrations",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "gits-preview",
+			"database_id": "05f28c85-89bc-4ba2-8ce9-fa8116b1ee61",
+			"migrations_dir": "src/db/migrations"
+		}
+	]
+}
