@@ -36,7 +36,7 @@
 		{
 			"binding": "DB",
 			"database_name": "gits",
-			"database_id": "ba88136f-88d3-4b71-95f4-682ffcf1cf72",
+			"database_id": "7c420328-21e3-409d-89f6-a3d50433d822",
 			"migrations_dir": "src/db/migrations"
 		}
 	],
