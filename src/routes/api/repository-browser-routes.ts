@@ -1,7 +1,5 @@
 import {
   HTTPException,
-  IssueService,
-  PullRequestService,
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError,
   RepositoryService,
@@ -64,8 +62,6 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     });
 
     const repositoryClient = createRepositoryObjectClient(c.env);
-    const issueService = new IssueService(c.env.DB);
-    const pullRequestService = new PullRequestService(c.env.DB);
     const detailInput: { owner: string; repo: string; ref?: string } = {
       owner,
       repo
@@ -74,32 +70,13 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     if (detailRef) {
       detailInput.ref = detailRef;
     }
-    const [
-      details,
-      openIssueCount,
-      openPullRequestCount,
-      canCreateIssueOrPullRequest,
-      canManageActions
-    ] = await Promise.all([
-      repositoryClient.getRepositoryDetail({
-        repositoryId: repository.id,
-        ...detailInput
-      }),
-      issueService.countOpenIssues(repository.id),
-      pullRequestService.countOpenPullRequests(repository.id),
-      repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id),
-      repositoryService.isOwnerOrCollaborator(repository, sessionUser?.id)
-    ]);
+    const details = await repositoryClient.getRepositoryDetail({
+      repositoryId: repository.id,
+      ...detailInput
+    });
 
     return c.json({
       repository,
-      openIssueCount,
-      openPullRequestCount,
-      permissions: {
-        canCreateIssueOrPullRequest,
-        canRunAgents: canCreateIssueOrPullRequest,
-        canManageActions
-      },
       ...details
     });
   });
@@ -201,38 +178,6 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
         throw new HTTPException(400, { message: "Invalid path" });
       }
       throw error;
-    }
-  });
-
-  router.get("/repos/:owner/:repo/compare", optionalSession, async (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const baseRef = assertString(c.req.query("baseRef"), "baseRef");
-    const headRef = assertString(c.req.query("headRef"), "headRef");
-    const repositoryService = new RepositoryService(c.env.DB);
-    const repository = await repositoryService.findRepository(owner, repo);
-    if (!repository) {
-      throw new HTTPException(404, { message: "Repository not found" });
-    }
-
-    const sessionUser = c.get("sessionUser");
-    const canRead = await repositoryService.canReadRepository(repository, sessionUser?.id);
-    if (!canRead) {
-      throw new HTTPException(404, { message: "Repository not found" });
-    }
-
-    try {
-      const repositoryClient = createRepositoryObjectClient(c.env);
-      const comparison = await repositoryClient.compareRefs({
-        repositoryId: repository.id,
-        owner,
-        repo,
-        baseRef,
-        headRef
-      });
-      return c.json(comparison);
-    } catch {
-      throw new HTTPException(404, { message: "Unable to compare refs" });
     }
   });
 

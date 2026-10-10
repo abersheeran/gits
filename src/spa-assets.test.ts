@@ -8,7 +8,6 @@ function createBaseEnv(overrides?: Partial<AppEnv["Bindings"]>): AppEnv["Binding
     DB: createMockD1Database([]),
     GIT_BUCKET: {} as R2Bucket,
     JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787",
     ...(overrides ?? {})
   };
 }

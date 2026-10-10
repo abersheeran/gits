@@ -132,34 +132,6 @@
     border-radius: 9999px;
   }
 
-  .monaco-editor .gits-monaco-selected-line {
-    background: color-mix(in srgb, var(--color-fill-primary) 58%, transparent);
-  }
-
-  .monaco-editor .gits-monaco-selected-line-number {
-    color: var(--text-primary);
-    font-weight: 600;
-  }
-
-  .monaco-editor .gits-monaco-selected-line-decoration {
-    border-left: 3px solid var(--text-supporting-strong);
-    margin-left: 2px;
-  }
-
-  .monaco-editor .gits-monaco-thread-line {
-    background: color-mix(in srgb, var(--color-surface-focus) 72%, transparent);
-  }
-
-  .monaco-editor .gits-monaco-thread-line-number {
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-
-  .monaco-editor .gits-monaco-thread-line-decoration {
-    border-left: 3px solid color-mix(in srgb, var(--color-fill-secondary) 84%, transparent);
-    margin-left: 2px;
-  }
-
   .monaco-editor .diff-hidden-lines .center {
     background: color-mix(
       in srgb,

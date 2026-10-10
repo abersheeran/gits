@@ -140,7 +140,7 @@ export function TokensPage({ user }: TokensPageProps) {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>创建 Access Token</CardTitle>
-            <HelpTip content="Token 只会在创建成功后显示一次。建议立即复制并保存到你的 Git 或本地 agent 配置里。" />
+            <HelpTip content="Token 仅在创建后显示一次，请复制并保存，用于 Git 访问。" />
           </div>
         </CardHeader>
         <CardContent>
@@ -183,7 +183,7 @@ export function TokensPage({ user }: TokensPageProps) {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>Token 列表</CardTitle>
-            <HelpTip content="active token 可用于 HTTP Git 认证或平台 MCP 接入；已撤销或过期的 token 会继续保留在历史列表中。" />
+            <HelpTip content="使用有效令牌进行 HTTP Git 认证；可查看已撤销或过期的令牌记录。" />
           </div>
           <p className="text-body-sm text-text-secondary">
             {hasActiveToken ? "当前存在可用 token。" : "当前没有 active token。"}

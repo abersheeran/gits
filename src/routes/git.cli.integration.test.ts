@@ -7,8 +7,6 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
-import { createRepositoryObjectClient } from "../services/repository-object";
-import { RepositoryRefService } from "../services/repository-ref-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
@@ -22,8 +20,7 @@ function createEnv(db: D1Database, bucket: R2Bucket): AppEnv["Bindings"] {
   const env = {
     DB: db,
     GIT_BUCKET: bucket,
-    JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787"
+    JWT_SECRET: "test-secret"
   } as AppEnv["Bindings"];
   env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
   return env;
@@ -200,8 +197,6 @@ describe("Git smart-http compatibility with git CLI", () => {
   it(
     "supports authenticated git push to private repositories",
     async () => {
-      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
-
       const bucket = new MockR2Bucket();
       const storage = new StorageService(bucket as unknown as R2Bucket);
       await storage.initializeRepository("alice", "private-demo");
@@ -248,8 +243,6 @@ describe("Git smart-http compatibility with git CLI", () => {
   it(
     "supports authenticated git pull from private repositories",
     async () => {
-      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
-
       const bucket = new MockR2Bucket();
       await seedSampleRepositoryToR2(bucket, "alice", "private-pull");
       const db = createPrivateOwnedRepositoryDb("alice", "private-pull");
@@ -291,91 +284,6 @@ describe("Git smart-http compatibility with git CLI", () => {
         expect(afterPull).not.toBe(beforePull);
         expect(afterPull).toBe(pushedCommit);
         expect(pulledReadme).toContain("update from mirror");
-      } finally {
-        await server.close();
-        await rm(tempRoot, { recursive: true, force: true });
-      }
-    },
-    30_000
-  );
-
-  it(
-    "supports git pull after a server-side squash merged pull request",
-    async () => {
-      vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
-
-      const bucket = new MockR2Bucket();
-      await seedSampleRepositoryToR2(bucket, "alice", "squash-pull");
-      const storage = new StorageService(bucket as unknown as R2Bucket);
-      const db = createPrivateOwnedRepositoryDb("alice", "squash-pull");
-      const env = createEnv(db, bucket as unknown as R2Bucket);
-      vi.spyOn(AuthService.prototype, "verifyAccessToken").mockImplementation(
-        async (token: string) => {
-          if (token === "pat-ok") {
-            return { id: "user-1", username: "alice" };
-          }
-          return null;
-        }
-      );
-      const server = await startAppServer(env);
-      const tempRoot = await mkdtemp(join(tmpdir(), "gits-cli-squash-pull-"));
-      const workDir = join(tempRoot, "work");
-      const mirrorDir = join(tempRoot, "mirror");
-
-      try {
-        const remoteUrl = `${server.origin.replace("http://", "http://alice:pat-ok@")}/alice/squash-pull.git`;
-        await runGit(["clone", remoteUrl, workDir], tempRoot);
-        const beforePull = (await runGit(["rev-parse", "HEAD"], workDir)).trim();
-
-        await runGit(["clone", remoteUrl, mirrorDir], tempRoot);
-        await runGit(["checkout", "-b", "feature"], mirrorDir);
-        await runGit(["config", "user.name", "Alice"], mirrorDir);
-        await runGit(["config", "user.email", "alice@example.com"], mirrorDir);
-        await writeFile(join(mirrorDir, "feature.txt"), "feature branch change\n", "utf8");
-        await runGit(["add", "feature.txt"], mirrorDir);
-        await runGit(["commit", "-m", "feature branch change"], mirrorDir);
-        const featureHead = (await runGit(["rev-parse", "HEAD"], mirrorDir)).trim();
-        await runGit(["push", "origin", "feature"], mirrorDir);
-
-        const refs = await storage.listHeadRefs("alice", "squash-pull");
-        const mainRef = refs.find((item) => item.name === "refs/heads/main");
-        expect(mainRef).toBeTruthy();
-
-        await createRepositoryObjectClient(env).squashMergePullRequest({
-          repositoryId: "repo-private-1",
-          owner: "alice",
-          repo: "squash-pull",
-          pullRequest: {
-            id: "pr-1",
-            repository_id: "repo-public-1",
-            number: 1,
-            author_id: "user-1",
-            author_username: "alice",
-            title: "Add feature file",
-            body: "Created on feature branch",
-            state: "open",
-            base_ref: "refs/heads/main",
-            head_ref: "refs/heads/feature",
-            base_oid: mainRef?.oid ?? "",
-            head_oid: featureHead,
-            merge_commit_oid: null,
-            created_at: Date.now(),
-            updated_at: Date.now(),
-            closed_at: null,
-            merged_at: null
-          },
-          mergedBy: {
-            id: "user-1",
-            username: "alice"
-          }
-        });
-
-        await runGit(["pull", "origin", "main"], workDir);
-        const afterPull = (await runGit(["rev-parse", "HEAD"], workDir)).trim();
-        const featureFile = await readFile(join(workDir, "feature.txt"), "utf8");
-
-        expect(afterPull).not.toBe(beforePull);
-        expect(featureFile).toBe("feature branch change\n");
       } finally {
         await server.close();
         await rm(tempRoot, { recursive: true, force: true });

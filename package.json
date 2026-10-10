@@ -10,7 +10,7 @@
     "build": "npm run build:web",
     "build:web": "npm --prefix web run build",
     "deploy": "npm run db:migrate && npm run build:web && wrangler deploy --minify --keep-vars",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings --env-file .env.example",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,16 +24,12 @@
     "secret:dev": "npm run secret:dev:jwt"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@aws-sdk/client-s3": "^3.888.0",
-    "@cloudflare/containers": "^0.0.25",
     "bcryptjs": "^2.4.3",
     "diff": "^8.0.3",
     "hono": "^4.12.3",
     "isomorphic-git": "^1.35.1",
     "jose": "^5.10.0",
-    "memfs": "^4.51.0",
-    "zod": "^3.25.76"
+    "memfs": "^4.51.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

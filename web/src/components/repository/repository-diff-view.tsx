@@ -1,39 +1,17 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { estimateMonacoHeight } from "@/lib/monaco";
-import type { RepositoryCompareChange, RepositoryDiffHunk, RepositoryDiffLine } from "@/lib/api";
+import type { RepositoryCommitChange, RepositoryDiffHunk } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const DIFF_CONTEXT_LINE_COUNT = 5;
 const HIDDEN_REGION_CONTROL_LINE_COUNT = 2;
 
-export type RepositoryDiffLineTarget = {
-  change: RepositoryCompareChange;
-  hunk: RepositoryDiffHunk;
-  line: RepositoryDiffLine;
-  side: "base" | "head";
-  lineNumber: number;
-};
-
-export type RepositoryDiffLineDecoration = {
-  id: string;
-  path: string;
-  side: "base" | "head";
-  lineNumber: number;
-  hoverMessage?: string;
-};
-
 type RepositoryDiffViewProps = {
-  changes: RepositoryCompareChange[];
-  className?: string;
-  onDiffLineClick?: (target: RepositoryDiffLineTarget) => void;
-  isDiffLineSelected?: (target: RepositoryDiffLineTarget) => boolean;
-  lineDecorations?: RepositoryDiffLineDecoration[];
-  renderChangeHeaderExtras?: (change: RepositoryCompareChange) => ReactNode;
-  renderChangeTopPanel?: (change: RepositoryCompareChange) => ReactNode;
+  changes: RepositoryCommitChange[];
   activePath?: string | null;
-  onChangeActivate?: (change: RepositoryCompareChange) => void;
+  onChangeActivate?: (change: RepositoryCommitChange) => void;
   sectionIdForPath?: (path: string) => string;
 };
 
@@ -42,7 +20,7 @@ const LazyRepositoryChangeDiffEditor = lazy(async () => {
   return { default: module.RepositoryChangeDiffEditor };
 });
 
-function changeBadgeVariant(status: RepositoryCompareChange["status"]) {
+function changeBadgeVariant(status: RepositoryCommitChange["status"]) {
   switch (status) {
     case "added":
       return "success";
@@ -123,7 +101,7 @@ function visibleLineCountForSide(
   return visibleLineCount + hiddenRegionCount * HIDDEN_REGION_CONTROL_LINE_COUNT;
 }
 
-function diffEditorHeight(change: RepositoryCompareChange): number {
+function diffEditorHeight(change: RepositoryCommitChange): number {
   const approximateVisibleLineCount = Math.max(
     visibleLineCountForSide(change.hunks, countTextLines(change.oldContent), "base"),
     visibleLineCountForSide(change.hunks, countTextLines(change.newContent), "head")
@@ -147,11 +125,10 @@ function diffEditorHeight(change: RepositoryCompareChange): number {
 }
 
 function RepositoryDiffEditorFallback(props: {
-  className?: string;
   height: number;
 }) {
   return (
-    <div className={cn("monaco-shell", props.className)}>
+    <div className="monaco-shell">
       <div className="monaco-shell__viewport">
         <div
           className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
@@ -166,12 +143,6 @@ function RepositoryDiffEditorFallback(props: {
 
 export function RepositoryDiffView({
   changes,
-  className,
-  onDiffLineClick,
-  isDiffLineSelected,
-  lineDecorations,
-  renderChangeHeaderExtras,
-  renderChangeTopPanel,
   activePath,
   onChangeActivate,
   sectionIdForPath
@@ -181,13 +152,8 @@ export function RepositoryDiffView({
   }
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className="space-y-4">
       {changes.map((change) => {
-        const changeLineDecorations = (lineDecorations ?? []).filter(
-          (decoration) => decoration.path === change.path
-        );
-        const changeHeaderExtras = renderChangeHeaderExtras?.(change) ?? null;
-        const changeTopPanel = renderChangeTopPanel?.(change) ?? null;
         const isActive = activePath === change.path;
 
         return (
@@ -211,16 +177,10 @@ export function RepositoryDiffView({
                 ) : null}
               </div>
               <div className="flex items-center gap-2 text-xs text-text-secondary">
-                {changeHeaderExtras}
                 <span>+{change.additions}</span>
                 <span>-{change.deletions}</span>
               </div>
             </header>
-            {changeTopPanel ? (
-              <div className="border-b border-border-subtle bg-surface-focus px-4 py-4">
-                {changeTopPanel}
-              </div>
-            ) : null}
             {change.isBinary ? (
               <div className="px-4 py-3 text-body-sm text-text-secondary">
                 Binary change. Inline diff is not available.
@@ -233,9 +193,6 @@ export function RepositoryDiffView({
                   <LazyRepositoryChangeDiffEditor
                     change={change}
                     height={diffEditorHeight(change)}
-                    onDiffLineClick={onDiffLineClick}
-                    isDiffLineSelected={isDiffLineSelected}
-                    lineDecorations={changeLineDecorations}
                   />
                 </Suspense>
               </div>

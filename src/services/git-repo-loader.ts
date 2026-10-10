@@ -356,7 +356,7 @@ export async function clearRepositorySnapshot(
   await snapshotStorage.delete(SNAPSHOT_META_KEY);
 }
 
-export async function persistRepositorySnapshot(args: {
+async function persistRepositorySnapshot(args: {
   snapshotStorage: RepositorySnapshotStorage;
   fs: MutableGitFs;
   gitdir: string;

@@ -102,7 +102,7 @@ async function peelTagToCommit(args: GitContext, oid: string): Promise<TagResolu
   };
 }
 
-export type ResolvedWants = {
+type ResolvedWants = {
   commitWants: string[];
   extraObjectWants: string[];
 };
@@ -287,7 +287,7 @@ async function resolveDeepenNotExcludeSet(
   return collectAncestors(args, commitRoots);
 }
 
-export type CommitPackSelection = {
+type CommitPackSelection = {
   commitOids: string[];
   shallowOids: string[];
 };

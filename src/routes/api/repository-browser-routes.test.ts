@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RepositoryObjectClient } from "../../services/repository-object";
+import { RepositoryObjectClient } from "../../services/repository-object-client";
 import { createMockD1Database } from "../../test-utils/mock-d1";
 import { buildRepositoryRow, createApp, createBaseEnv } from "./test-helpers";
 

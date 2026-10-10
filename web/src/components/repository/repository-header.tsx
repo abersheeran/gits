@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { GitBranch, Globe, History, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +14,6 @@ type RepositoryHeaderProps = {
   active: RepositorySection;
   commitCount?: number | null;
   selectedBranchLabel?: string | null;
-  extra?: ReactNode;
 };
 
 export function RepositoryHeader({
@@ -25,8 +23,7 @@ export function RepositoryHeader({
   user,
   active,
   commitCount = null,
-  selectedBranchLabel = null,
-  extra = null
+  selectedBranchLabel = null
 }: RepositoryHeaderProps) {
   const isPrivate = detail.repository.is_private === 1;
 
@@ -74,7 +71,6 @@ export function RepositoryHeader({
               : selectedBranchLabel}
           </Badge>
         ) : null}
-        {extra}
         {user?.username === detail.repository.owner_username ? (
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" className="bg-surface-base" asChild>
@@ -87,7 +83,7 @@ export function RepositoryHeader({
         ) : null}
       </div>
 
-      <RepositoryTabs owner={owner} repo={repo} detail={detail} active={active} />
+      <RepositoryTabs owner={owner} repo={repo} active={active} />
     </header>
   );
 }

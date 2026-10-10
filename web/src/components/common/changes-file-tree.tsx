@@ -1,14 +1,13 @@
 import { ChevronDown, ChevronRight, FileCode2, FolderOpen } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import type { RepositoryCompareChange } from "@/lib/api";
+import type { RepositoryCommitChange } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type ChangesFileTreeProps = {
-  changes: RepositoryCompareChange[];
+  changes: RepositoryCommitChange[];
   activePath: string | null;
   onSelectPath: (path: string) => void;
-  getFileBadges?: (change: RepositoryCompareChange) => ReactNode;
   className?: string;
 };
 
@@ -21,7 +20,7 @@ type TreeDirectoryNode = {
 
 type TreeFileNode = {
   kind: "file";
-  change: RepositoryCompareChange;
+  change: RepositoryCommitChange;
 };
 
 type TreeNode = TreeDirectoryNode | TreeFileNode;
@@ -30,7 +29,7 @@ type TreeDirectoryBuilder = {
   name: string;
   path: string;
   directories: Map<string, TreeDirectoryBuilder>;
-  files: Map<string, RepositoryCompareChange>;
+  files: Map<string, RepositoryCommitChange>;
   order: Array<
     | { kind: "directory"; key: string }
     | { kind: "file"; key: string }
@@ -42,7 +41,7 @@ function createDirectoryBuilder(name: string, path: string): TreeDirectoryBuilde
     name,
     path,
     directories: new Map<string, TreeDirectoryBuilder>(),
-    files: new Map<string, RepositoryCompareChange>(),
+    files: new Map<string, RepositoryCommitChange>(),
     order: []
   };
 }
@@ -78,7 +77,7 @@ function finalizeDirectory(builder: TreeDirectoryBuilder): TreeNode[] {
   return nodes;
 }
 
-function buildChangeTree(changes: RepositoryCompareChange[]): TreeNode[] {
+function buildChangeTree(changes: RepositoryCommitChange[]): TreeNode[] {
   const root = createDirectoryBuilder("", "");
 
   for (const change of changes) {
@@ -119,7 +118,7 @@ function collectDirectoryPaths(nodes: TreeNode[]): string[] {
   });
 }
 
-function changeStatusBadgeVariant(status: RepositoryCompareChange["status"]) {
+function changeStatusBadgeVariant(status: RepositoryCommitChange["status"]) {
   switch (status) {
     case "added":
       return "success";
@@ -130,7 +129,7 @@ function changeStatusBadgeVariant(status: RepositoryCompareChange["status"]) {
   }
 }
 
-function changeStatusShortLabel(status: RepositoryCompareChange["status"]): string {
+function changeStatusShortLabel(status: RepositoryCommitChange["status"]): string {
   switch (status) {
     case "added":
       return "A";
@@ -148,7 +147,6 @@ type TreeBranchProps = {
   expandedPaths: Set<string>;
   onToggleDirectory: (path: string) => void;
   onSelectPath: (path: string) => void;
-  getFileBadges?: (change: RepositoryCompareChange) => ReactNode;
 };
 
 function TreeBranch({
@@ -157,8 +155,7 @@ function TreeBranch({
   activePath,
   expandedPaths,
   onToggleDirectory,
-  onSelectPath,
-  getFileBadges
+  onSelectPath
 }: TreeBranchProps) {
   return (
     <ul className="space-y-1">
@@ -190,14 +187,12 @@ function TreeBranch({
                   expandedPaths={expandedPaths}
                   onToggleDirectory={onToggleDirectory}
                   onSelectPath={onSelectPath}
-                  getFileBadges={getFileBadges}
                 />
               ) : null}
             </li>
           );
         }
 
-        const fileBadges = getFileBadges?.(node.change);
         const isActive = activePath === node.change.path;
 
         return (
@@ -219,7 +214,6 @@ function TreeBranch({
                 {node.change.path.split("/").at(-1) ?? node.change.path}
               </span>
               <div className="flex shrink-0 items-center gap-1">
-                {fileBadges}
                 <Badge
                   variant={changeStatusBadgeVariant(node.change.status)}
                   className="min-w-7 justify-center px-2 font-mono text-[11px]"
@@ -239,7 +233,6 @@ export function ChangesFileTree({
   changes,
   activePath,
   onSelectPath,
-  getFileBadges,
   className
 }: ChangesFileTreeProps) {
   const tree = useMemo(() => buildChangeTree(changes), [changes]);
@@ -270,7 +263,6 @@ export function ChangesFileTree({
         expandedPaths={expandedPaths}
         onToggleDirectory={toggleDirectory}
         onSelectPath={onSelectPath}
-        getFileBadges={getFileBadges}
       />
     </div>
   );

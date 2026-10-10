@@ -6,73 +6,11 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"containers": [
-		{
-			"class_name": "ActionsContainer",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "lite",
-			"max_instances": 10
-		},
-		{
-			"class_name": "ActionsContainerBasic",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "basic",
-			"max_instances": 10
-		},
-		{
-			"class_name": "ActionsContainerStandard1",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "standard-1",
-			"max_instances": 10
-		},
-		{
-			"class_name": "ActionsContainerStandard2",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "standard-2",
-			"max_instances": 10
-		},
-		{
-			"class_name": "ActionsContainerStandard3",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "standard-3",
-			"max_instances": 10
-		},
-		{
-			"class_name": "ActionsContainerStandard4",
-			"image": "./containers/actions-runner/Dockerfile",
-			"instance_type": "standard-4",
-			"max_instances": 10
-		}
-	],
 	"durable_objects": {
 		"bindings": [
 			{
 				"name": "REPOSITORY_OBJECTS",
 				"class_name": "RepositoryObject"
-			},
-			{
-				"name": "ACTIONS_RUNNER",
-				"class_name": "ActionsContainer"
-			},
-			{
-				"name": "ACTIONS_RUNNER_BASIC",
-				"class_name": "ActionsContainerBasic"
-			},
-			{
-				"name": "ACTIONS_RUNNER_STANDARD_1",
-				"class_name": "ActionsContainerStandard1"
-			},
-			{
-				"name": "ACTIONS_RUNNER_STANDARD_2",
-				"class_name": "ActionsContainerStandard2"
-			},
-			{
-				"name": "ACTIONS_RUNNER_STANDARD_3",
-				"class_name": "ActionsContainerStandard3"
-			},
-			{
-				"name": "ACTIONS_RUNNER_STANDARD_4",
-				"class_name": "ActionsContainerStandard4"
 			}
 		]
 	},
@@ -98,6 +36,17 @@
 			"new_sqlite_classes": [
 				"RepositoryObject"
 			]
+		},
+		{
+			"tag": "remove-actions-containers-v1",
+			"deleted_classes": [
+				"ActionsContainer",
+				"ActionsContainerBasic",
+				"ActionsContainerStandard1",
+				"ActionsContainerStandard2",
+				"ActionsContainerStandard3",
+				"ActionsContainerStandard4"
+			]
 		}
 	],
 	"assets": {
@@ -108,10 +57,6 @@
 		{
 			"binding": "GIT_BUCKET",
 			"bucket_name": "gits"
-		},
-		{
-			"binding": "ACTION_LOGS_BUCKET",
-			"bucket_name": "gits-action-logs"
 		}
 	],
 	"d1_databases": [
@@ -122,26 +67,6 @@
 			"migrations_dir": "src/db/migrations"
 		}
 	],
-	"queues": {
-		"producers": [
-			{
-				"binding": "ACTIONS_QUEUE",
-				"queue": "gits-actions"
-			}
-		],
-		"consumers": [
-			{
-				"queue": "gits-actions",
-				"max_batch_size": 10,
-				"max_batch_timeout": 5
-			}
-		]
-	},
-	"triggers": {
-		"crons": [
-			"* * * * *"
-		]
-	},
 	"observability": {
 		"enabled": true
 	}

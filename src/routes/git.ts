@@ -1,10 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { optionalSession, requireGitBasicAuth } from "../middleware/auth";
-import { isZeroOid, parseReceivePackRequest } from "../services/git-protocol";
-import { RepositoryRefService } from "../services/repository-ref-service";
-import { triggerActionWorkflows } from "../services/action-trigger-service";
-import { createRepositoryObjectClient } from "../services/repository-object";
+import { createRepositoryObjectClient } from "../services/repository-object-client";
 import { RepositoryService } from "../services/repository-service";
 import type { AppEnv, AuthUser, GitServiceName, RepositoryRecord } from "../types";
 
@@ -17,26 +14,6 @@ function parseService(raw: string | undefined): GitServiceName {
 
 function normalizeRepoName(raw: string): string {
   return raw.endsWith(".git") ? raw.slice(0, -4) : raw;
-}
-
-function getOptionalExecutionCtx(source: { executionCtx?: unknown }): ExecutionContext | undefined {
-  let executionCtx: unknown;
-  try {
-    executionCtx = source.executionCtx;
-  } catch {
-    return undefined;
-  }
-  if (!executionCtx || typeof executionCtx !== "object") {
-    return undefined;
-  }
-  return executionCtx as ExecutionContext;
-}
-
-function executionCtxArg(source: {
-  executionCtx?: unknown;
-}): { executionCtx: ExecutionContext } | Record<string, never> {
-  const executionCtx = getOptionalExecutionCtx(source);
-  return executionCtx ? { executionCtx } : {};
 }
 
 function throwGitAuthChallenge(message: string): never {
@@ -205,13 +182,6 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
 
   const repositoryService = new RepositoryService(c.env.DB);
   const body = await readBodyWithLimit(c, receivePackBodyLimit(c));
-  let receivePackRequest: ReturnType<typeof parseReceivePackRequest> | null = null;
-  try {
-    receivePackRequest = parseReceivePackRequest(body);
-  } catch {
-    receivePackRequest = null;
-  }
-
   const user = c.get("basicAuthUser");
   const repository = await resolveGitRepositoryAccess({
     repositoryService,
@@ -220,58 +190,12 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
     ...(user ? { user } : {}),
     write: true
   });
-  const receivePackResult = await createRepositoryObjectClient(c.env).handleReceivePack({
+  return createRepositoryObjectClient(c.env).handleReceivePack({
     repositoryId: repository.id,
     owner,
     repo,
     body
   });
-  const response = receivePackResult.response;
-  if (
-    !response.ok ||
-    !receivePackRequest ||
-    !user ||
-    !receivePackResult.repositoryUpdated
-  ) {
-    return response;
-  }
-
-  const repositoryRefService = new RepositoryRefService(c.env.DB);
-  const currentDefault = await repositoryRefService.resolveDefaultBranchTarget(repository.id);
-  await repositoryRefService.syncRefs(
-    repository.id,
-    receivePackResult.updatedRefs,
-    currentDefault.ref
-  );
-
-  const refsByName = new Map(
-    receivePackResult.updatedRefs.map((ref) => [ref.name, ref.oid] as const)
-  );
-
-  for (const command of receivePackRequest.commands) {
-    if (isZeroOid(command.newOid)) {
-      continue;
-    }
-    if (!command.refName.startsWith("refs/heads/") && !command.refName.startsWith("refs/tags/")) {
-      continue;
-    }
-    if (refsByName.get(command.refName) !== command.newOid) {
-      continue;
-    }
-
-    await triggerActionWorkflows({
-      env: c.env,
-      ...executionCtxArg(c),
-      repository,
-      triggerEvent: "push",
-      triggerRef: command.refName,
-      triggerSha: command.newOid,
-      triggeredByUser: user,
-      requestOrigin: new URL(c.req.url).origin
-    });
-  }
-
-  return response;
 });
 
 export default router;

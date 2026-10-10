@@ -10,8 +10,7 @@ function createEnv(db: D1Database, bucket: R2Bucket): AppEnv["Bindings"] {
   const env = {
     DB: db,
     GIT_BUCKET: bucket,
-    JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787"
+    JWT_SECRET: "test-secret"
   } as AppEnv["Bindings"];
   env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
   return env;
@@ -58,6 +57,14 @@ describe("API repository browser route integration", () => {
       branches: Array<{ name: string; oid: string }>;
       readme: { path: string; content: string } | null;
     };
+    expect(Object.keys(body).sort()).toEqual([
+      "branches",
+      "defaultBranch",
+      "headOid",
+      "readme",
+      "repository",
+      "selectedRef"
+    ]);
     expect(body.defaultBranch).toBe("main");
     expect(body.branches.some((item) => item.name === "main")).toBe(true);
     expect(body.readme?.content).toContain("# Demo");
@@ -164,36 +171,6 @@ describe("API repository browser route integration", () => {
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
     const response = await app.fetch(
       new Request(`http://localhost/api/repos/alice/demo/commits/${seeded.latestCommit}`),
-      createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
-    );
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      changes: Array<{
-        path: string;
-        status: "added" | "modified" | "deleted";
-        isBinary: boolean;
-        oldContent: string | null;
-        newContent: string | null;
-        hunks: Array<{ lines: Array<{ kind: string }> }>;
-      }>;
-    };
-    const addedTextChange = body.changes.find((change) => change.path === "src/app.txt");
-    expect(addedTextChange?.status).toBe("added");
-    expect(addedTextChange?.isBinary).toBe(false);
-    expect(addedTextChange?.oldContent).toBe("");
-    expect(addedTextChange?.newContent).toContain("console.log('hello')");
-    expect(addedTextChange?.hunks.length).toBeGreaterThan(0);
-    expect(addedTextChange?.hunks[0]?.lines.some((line) => line.kind === "add")).toBe(true);
-  });
-
-  it("returns text diff hunks for added files in compare", async () => {
-    const bucket = new MockR2Bucket();
-    const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const response = await app.fetch(
-      new Request(
-        `http://localhost/api/repos/alice/demo/compare?baseRef=${seeded.initialCommit}&headRef=${seeded.latestCommit}`
-      ),
       createEnv(createPublicRepositoryDb("alice", "demo"), bucket as unknown as R2Bucket)
     );
 

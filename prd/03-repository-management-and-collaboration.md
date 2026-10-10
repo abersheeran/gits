@@ -2,90 +2,71 @@
 
 ## 1. 模块定位
 
-仓库模块负责回答三个基础问题：
-
-- 代码放在哪里。
-- 谁可以访问和协作。
-- Issue、PR、Actions 等协作对象附着在哪个边界内。
-
-当前仓库层永久保持最小集，个人仓库是固定边界，不扩展到 Org / Team / 组织治理系统。
+仓库模块管理代码归属、仓库生命周期、可见性与协作者。固定采用个人仓库模型，不扩展组织或团队。
 
 ## 2. 当前已实现能力
 
-- 首页公开仓库发现。
-- Dashboard 展示“我拥有的仓库”和“我参与协作的仓库”。
-- 创建仓库。
-- 修改仓库名称、描述和公开/私有状态。
-- 仓库设置页展示 Clone URL，并支持一键复制。
-- 仓库分支管理页支持创建分支、切换默认分支、删除非默认分支。
-- 删除仓库。
-- 协作者管理：
-  - 列表查询
-  - 新增或更新权限
-  - 移除协作者
-- 参与者列表接口仍保留为仓库范围用户选择基础数据，但不再承载 Issue / PR 的 assignee / reviewer 元数据。
-- 仓库详情接口会返回：
-  - open issue / open pull request 计数
-  - 是否可创建 issue / pull request
-  - 是否可运行 agent
-  - 是否可管理 actions
+- 首页列出公开仓库；Dashboard 展示拥有及参与协作的仓库。
+- 创建仓库，默认私有；可指定名称、描述和可见性。
+- 所有者可重命名、修改描述、切换公开/私有和删除仓库。
+- 设置页展示并支持复制 clone URL。
+- 所有者可创建分支、切换默认分支、删除非默认分支。
+- 所有者和 `admin` 协作者可列出协作者、添加已有用户、更新权限和移除协作者。
 
 ## 3. 当前协作模型
 
-- 仓库永久只保留个人 owner 模型，不设计 organization/team。
-- collaborator 只有仓库级 `read / write / admin` 三档权限。
-- owner 与 `admin` collaborator 可管理仓库设置与 Actions 配置。
-- `write / admin` collaborator 可参与代码写入、Issue/PR 维护和 agent 驱动的交付动作。
-- Agent Session 不拥有独立仓库角色，而是沿用触发者可用权限。
+- `read`：读取仓库。
+- `write`：读取及 Git push。
+- `admin`：读取、Git push 及管理协作者。
+- 所有者：上述全部能力，以及仓库设置、删除和分支管理 API。
 
-## 4. 当前关键流程
+`admin` 协作者不能修改仓库设置。分支管理 API 的所有者限制不等于分支保护；Git push 按仓库写权限处理引用更新。
 
-### 4.1 仓库创建与生命周期
+## 4. 关键流程
 
-1. 用户创建仓库。
-2. D1 写入仓库元数据。
-3. Git 存储层初始化默认分支 `main` 及基础仓库结构。
-4. 后续仓库页、Git 路由、Issue/PR/Actions 都以该仓库为边界工作。
+### 4.1 创建与删除
 
-### 4.2 协作扩散
+创建先写入 D1 仓库元数据，再由 `RepositoryObject` 初始化指向 `refs/heads/main` 的 `HEAD`。此时没有提交或实际分支引用，首次 push 后才产生。初始化失败时尝试清理已创建的记录和存储。
 
-1. owner 添加 collaborator。
-2. collaborator 获得读/写/管理能力。
-3. Issue、PR、review 和 run/session 都在同一仓库边界内协作。
+删除先清理 R2 仓库数据、内存缓存和 DO 快照，再删除 D1 仓库记录及关联协作者；不提供恢复入口。
 
-### 4.3 仓库重命名
+### 4.2 重命名
 
-1. 修改 D1 中的仓库名称。
-2. Git 存储前缀同步迁移。
-3. 仓库详情与 Git 远端地址切换到新路径。
+先迁移 R2 的仓库前缀，再更新 D1 名称；D1 更新失败时尝试回退存储名称。仓库 ID 保持不变，网页和 Git 远端地址随名称变化，客户端需更新远端地址。
+
+### 4.3 协作者
+
+按已有用户名添加或更新 `read / write / admin` 权限。所有者不能被添加为协作者，也不能通过协作者接口移除。
 
 ## 5. 当前接口
 
-- `GET /api/public/repos`
-- `GET /api/repos`
-- `POST /api/repos`
-- `PATCH /api/repos/:owner/:repo`
-- `DELETE /api/repos/:owner/:repo`
-- `GET /api/repos/:owner/:repo`
-- `GET /api/repos/:owner/:repo/collaborators`
-- `PUT /api/repos/:owner/:repo/collaborators`
-- `DELETE /api/repos/:owner/:repo/collaborators/:username`
-- `GET /api/repos/:owner/:repo/participants`
+- `GET /api/public/repos`：公开仓库，支持 `limit`。
+- `GET /api/repos`：当前用户拥有或参与协作的仓库。
+- `POST /api/repos`：`name`、可选 `description`、`isPrivate`。
+- `GET /api/repos/:owner/:repo`：仓库详情。
+- `PATCH /api/repos/:owner/:repo`：更新 `name`、`description`、`isPrivate`。
+- `DELETE /api/repos/:owner/:repo`：删除仓库。
+- `GET /api/repos/:owner/:repo/collaborators`：协作者列表。
+- `PUT /api/repos/:owner/:repo/collaborators`：`username`、`permission`。
+- `DELETE /api/repos/:owner/:repo/collaborators/:username`：移除协作者。
+- `GET /api/repos/:owner/:repo/branches`：分支列表。
+- `POST /api/repos/:owner/:repo/branches`：`branchName`、`sourceOid`（仓库内已有提交的 40 位 OID）。
+- `PATCH /api/repos/:owner/:repo/default-branch`：`branchName`。
+- `DELETE /api/repos/:owner/:repo/branches/:branch`：删除分支；路径中的分支名需 URL 编码。
 
 ## 6. 当前数据模型
 
-- `repositories`
-- `repository_collaborators`
-- `repository_counters`
+- `repositories`：ID、所有者 ID、名称、描述、可见性、创建时间；同一所有者下名称唯一。
+- `repository_collaborators`：仓库 ID、用户 ID、权限和创建时间；仓库与用户组成联合主键。
+- 分支与默认分支保存在 Git 引用及 `HEAD` 中，由 DO 读取，不另建 D1 分支表。
 
 ## 7. 关键代码文件
 
 - `src/services/repository-service.ts`
 - `src/services/storage-service.ts`
-- `src/routes/api/index.ts`
+- `src/services/repository-object.ts`
 - `src/routes/api/repository-admin-routes.ts`
-- `src/routes/api/repository-admin-routes.test.ts`
-- `src/routes/api/repository-metadata-routes.ts`
+- `src/routes/api/repository-browser-routes.ts`
 - `web/src/pages/home-page.tsx`
 - `web/src/pages/dashboard-page.tsx`
 - `web/src/pages/new-repository-page.tsx`
@@ -93,51 +74,18 @@
 - `web/src/pages/repository-branches-page.tsx`
 - `web/src/pages/repository-collaborators-page.tsx`
 
-## 8. 当前边界与缺口
+## 8. 当前边界与下一步
 
-### 8.1 仓库仍是“个人仓库 + 协作者”
+没有分支保护、仓库派生、模板仓库、归档或回收站；仓库列表尚无分页。下一步优先补充分支保护和仓库列表分页，改善仓库数量增长后的管理体验。
 
-- 组织、团队、组级权限不是未来规划，仓库协作边界永久限定在个人仓库 + collaborator。
-- 当前没有 fork、template repo、archive 等扩展仓库模型。
+## 9. 2026-03 分支管理补充
 
-### 8.2 仓库页仍以代码入口为主
+- 独立分支管理页仅对所有者开放，通过侧边表单创建分支，可删除非默认分支和切换默认分支。
+- 设置页只保留基本设置与删除入口。
+- 默认分支切换更新 Git `HEAD`，仓库详情与代码浏览随之读取新默认分支。
+- 分支删除 API 禁止删除默认分支，并要求至少保留一个分支。
+- 对应创建、默认分支切换和删除接口见第 5 节。
 
-- 已经有 open issue / open pull request 计数。
-- 但仓库首页还没有把“当前活跃任务链、活跃 session、最近交付分支”组织成更明显的任务导航层。
+## 10. 2026-03 全局导航滚动行为补充
 
-### 8.3 分支治理能力仍有限
-
-- 创建仓库默认初始化 `main`，并已支持独立页面下的默认分支切换。
-- 当前仍没有分支保护、命名策略、受保护分支删除限制等治理能力。
-
-### 8.4 删除仍是硬删除
-
-- 当前仓库删除会直接清理元数据和存储，不提供回收站或软删除。
-
-## 9. 下一步优先级
-
-1. 补充分支保护与分支治理能力。
-2. 强化仓库页到活跃 Issue / PR / Session 的导航。
-3. 继续把仓库页从“单纯代码入口”提升为“任务入口 + 代码入口”的混合视图。
-
-## 10. 2026-03 分支管理补充
-
-- 仓库新增独立分支管理页，owner 可直接：
-  - 通过右侧弹窗创建分支，避免创建表单和列表直接平铺在同一页面主体中
-  - 删除非默认分支
-  - 切换默认分支
-- 仓库设置页不再承载分支操作，仅保留仓库基本设置与删除入口。
-- 分支管理暂仅对仓库 owner 开放，与当前仓库重命名 / 删除权限保持一致。
-- 默认分支切换通过更新 Git `HEAD` 指向实现，仓库详情页与代码浏览页会随之读取新的默认分支。
-- 删除分支受两条保护规则限制：
-  - 默认分支不可删除
-  - 仓库至少保留一个分支
-- 新增接口：
-  - `POST /api/repos/:owner/:repo/branches`
-  - `PATCH /api/repos/:owner/:repo/default-branch`
-  - `DELETE /api/repos/:owner/:repo/branches/:branch`
-
-## 11. 2026-03 全局导航滚动行为补充
-
-- 顶部全局导航改为随页面内容自然滚动，不再固定吸附在视口顶部。
-- 首页、Dashboard、仓库与设置相关页面共享同一导航壳层，避免长内容页面持续占用首屏纵向空间。
+顶部全局导航随页面内容自然滚动，不固定吸附在视口顶部。首页、Dashboard、仓库与设置页面共享同一导航壳层。

@@ -27,7 +27,7 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return output;
 }
 
-export function encodePktLine(payload: Uint8Array): Uint8Array {
+function encodePktLine(payload: Uint8Array): Uint8Array {
   const totalLength = payload.length + 4;
   if (totalLength > MAX_PKT_LINE_LENGTH) {
     throw new ProtocolError("pkt-line payload too large");
@@ -111,7 +111,7 @@ function parseNonNegativeInteger(raw: string, label: string): number {
   return value;
 }
 
-export type UploadPackRequest = {
+type UploadPackRequest = {
   wants: string[];
   haves: string[];
   done: boolean;
@@ -227,13 +227,13 @@ export function parseUploadPackRequest(body: ArrayBuffer): UploadPackRequest {
   return response;
 }
 
-export type ReceivePackCommand = {
+type ReceivePackCommand = {
   oldOid: string;
   newOid: string;
   refName: string;
 };
 
-export type ReceivePackRequest = {
+type ReceivePackRequest = {
   commands: ReceivePackCommand[];
   capabilities: Set<string>;
   packfile?: Uint8Array;
@@ -331,7 +331,7 @@ export function parseReceivePackRequest(body: ArrayBuffer): ReceivePackRequest {
   return request;
 }
 
-export type ReceivePackRefStatus = {
+type ReceivePackRefStatus = {
   refName: string;
   ok: boolean;
   message?: string;
@@ -416,7 +416,7 @@ export function buildUploadPackNegotiationResponse(ackOids: string[]): Uint8Arra
   return concatBytes(encodeAckNak(ackOids));
 }
 
-export function encodeShallowLines(shallowOids: string[]): Uint8Array[] {
+function encodeShallowLines(shallowOids: string[]): Uint8Array[] {
   return [...new Set(shallowOids.map((oid) => oid.toLowerCase()))]
     .filter((oid) => OID_REGEX.test(oid))
     .map((oid) => encodeTextPktLine(`shallow ${oid}\n`));
@@ -440,7 +440,7 @@ export function encodeProtocolError(
   return concatBytes(parts);
 }
 
-export type UploadPackResponseArgs = {
+type UploadPackResponseArgs = {
   capabilities: Iterable<string>;
   ackLines?: string[];
   ackOids?: string[];

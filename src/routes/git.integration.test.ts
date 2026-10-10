@@ -3,7 +3,6 @@ import { Volume, createFsFromVolume } from "memfs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../app";
 import { AuthService } from "../services/auth-service";
-import { RepositoryRefService } from "../services/repository-ref-service";
 import { StorageService } from "../services/storage-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
@@ -15,8 +14,7 @@ function createEnv(db: D1Database, bucket: R2Bucket): AppEnv["Bindings"] {
   const env = {
     DB: db,
     GIT_BUCKET: bucket,
-    JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787"
+    JWT_SECRET: "test-secret"
   } as AppEnv["Bindings"];
   env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
   return env;
@@ -518,8 +516,6 @@ describe("Git smart-http integration", () => {
   });
 
   it("supports authenticated push to private repository", async () => {
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
-
     const bucket = new MockR2Bucket();
     const listSpy = vi.spyOn(bucket, "list");
     const storage = new StorageService(bucket as unknown as R2Bucket);
@@ -528,6 +524,7 @@ describe("Git smart-http integration", () => {
       createPrivateOwnedRepositoryDb("alice", "private-demo"),
       bucket as unknown as R2Bucket
     );
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
 
     vi.spyOn(AuthService.prototype, "verifyAccessToken").mockImplementation(async (token) => {
       if (token === "pat-ok") {
@@ -586,6 +583,8 @@ describe("Git smart-http integration", () => {
 
     expect(result.ok).toBe(true);
     expect(result.refs["refs/heads/main"]?.ok).toBe(true);
+    expect(prepareSpy).toHaveBeenCalled();
+    expect(prepareSpy.mock.calls.every(([sql]) => /^\s*SELECT\b/i.test(sql))).toBe(true);
 
     const refs = await storage.listHeadRefs("alice", "private-demo");
     expect(refs).toHaveLength(1);
@@ -605,7 +604,6 @@ describe("Git smart-http integration", () => {
       id: "user-1",
       username: "alice"
     });
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
 
     const bucket = new MockR2Bucket();
     await seedSampleRepositoryToR2(bucket, "alice", "demo");

@@ -1,11 +1,7 @@
 import {
-  ActionsService,
   AuthService,
   HTTPException,
   RepositoryService,
-  WebStandardStreamableHTTPServerTransport,
-  collectPlatformMcpForwardHeaders,
-  createPlatformMcpServer,
   deleteCookie,
   mustSessionUser,
   optionalSession,
@@ -14,21 +10,14 @@ import {
 } from "./deps";
 
 import {
-  MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH,
-  assertActionContainerInstanceType,
   assertEmail,
-  assertOptionalNullableRawString,
-  assertPositiveInteger,
   assertString,
   assertUsername,
-  findReadableRepositoryOr404,
   isUniqueConstraintError,
   parseJsonObject,
   parseLimit,
   sessionCookieSecure,
-  type ApiRouter,
-  type UpdateActionsGlobalConfigInput,
-  type UpdateRepositoryActionsConfigInput
+  type ApiRouter
 } from "./shared";
 
 const userRegistrationEnabled = (flag: string | undefined): boolean =>
@@ -127,25 +116,6 @@ export function registerPlatformRoutes(router: ApiRouter): void {
     return c.json({ repositories });
   });
 
-  router.all("/mcp", requireSession, async (c) => {
-    const issueNumberQuery = c.req.query("issueNumber");
-    const transport = new WebStandardStreamableHTTPServerTransport();
-    const server = createPlatformMcpServer({
-      apiBaseUrl: new URL(c.req.url).origin,
-      forwardedHeaders: collectPlatformMcpForwardHeaders(c.req.raw.headers),
-      defaults: {
-        owner: c.req.query("owner") ?? null,
-        repo: c.req.query("repo") ?? null,
-        issueNumber:
-          issueNumberQuery !== undefined
-            ? assertPositiveInteger(issueNumberQuery, "issueNumber")
-            : null
-      }
-    });
-    await server.connect(transport);
-    return transport.handleRequest(c.req.raw);
-  });
-
   router.post("/auth/tokens", requireSession, async (c) => {
     const payload = await parseJsonObject(c.req.raw);
     const name = assertString(payload.name, "name");
@@ -190,191 +160,5 @@ export function registerPlatformRoutes(router: ApiRouter): void {
       throw new HTTPException(404, { message: "Token not found" });
     }
     return c.json({ ok: true });
-  });
-
-  router.get("/settings/actions", requireSession, async (c) => {
-    const actionsService = new ActionsService(c.env.DB);
-    const config = await actionsService.getGlobalConfig();
-    return c.json({
-      config: {
-        codexConfigFileContent: config.codexConfigFileContent,
-        claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
-        updated_at: config.updated_at
-      }
-    });
-  });
-
-  router.patch("/settings/actions", requireSession, async (c) => {
-    const payload = await parseJsonObject(c.req.raw);
-    const patch: UpdateActionsGlobalConfigInput = {};
-    if (payload.codexConfigFileContent !== undefined) {
-      const codexConfigFileContent = assertOptionalNullableRawString(
-        payload.codexConfigFileContent,
-        "codexConfigFileContent"
-      );
-      if (
-        codexConfigFileContent !== null &&
-        codexConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
-      ) {
-        throw new HTTPException(400, {
-          message: `Field 'codexConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
-        });
-      }
-      patch.codexConfigFileContent = codexConfigFileContent;
-    }
-
-    if (payload.claudeCodeConfigFileContent !== undefined) {
-      const claudeCodeConfigFileContent = assertOptionalNullableRawString(
-        payload.claudeCodeConfigFileContent,
-        "claudeCodeConfigFileContent"
-      );
-      if (
-        claudeCodeConfigFileContent !== null &&
-        claudeCodeConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
-      ) {
-        throw new HTTPException(400, {
-          message: `Field 'claudeCodeConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
-        });
-      }
-      patch.claudeCodeConfigFileContent = claudeCodeConfigFileContent;
-    }
-
-    if (
-      patch.codexConfigFileContent === undefined &&
-      patch.claudeCodeConfigFileContent === undefined
-    ) {
-      throw new HTTPException(400, { message: "No updatable fields provided" });
-    }
-
-    const actionsService = new ActionsService(c.env.DB);
-    const config = await actionsService.updateGlobalConfig(patch);
-    return c.json({
-      config: {
-        codexConfigFileContent: config.codexConfigFileContent,
-        claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
-        updated_at: config.updated_at
-      }
-    });
-  });
-
-  router.get("/repos/:owner/:repo/actions/config", requireSession, async (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const repositoryService = new RepositoryService(c.env.DB);
-    const sessionUser = mustSessionUser(c);
-    const repository = await findReadableRepositoryOr404({
-      repositoryService,
-      owner,
-      repo,
-      userId: sessionUser.id
-    });
-    const canManageActions = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
-    if (!canManageActions) {
-      throw new HTTPException(403, { message: "Forbidden" });
-    }
-
-    const actionsService = new ActionsService(c.env.DB);
-    const config = await actionsService.getRepositoryConfig(repository.id);
-    return c.json({
-      config: {
-        instanceType: config.instanceType,
-        runnerType: config.runnerType,
-        codexConfigFileContent: config.codexConfigFileContent,
-        claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
-        inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
-        inheritsGlobalClaudeCodeConfig: config.inheritsGlobalClaudeCodeConfig,
-        updated_at: config.updated_at
-      }
-    });
-  });
-
-  router.patch("/repos/:owner/:repo/actions/config", requireSession, async (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const payload = await parseJsonObject(c.req.raw);
-    const patch: UpdateRepositoryActionsConfigInput = {};
-    if (payload.instanceType !== undefined) {
-      const instanceType = payload.instanceType;
-      patch.instanceType =
-        instanceType === null
-          ? null
-          : assertActionContainerInstanceType(instanceType, "instanceType");
-    }
-    if (payload.runnerType !== undefined) {
-      const runnerType = payload.runnerType;
-      if (runnerType !== null && runnerType !== "cloud" && runnerType !== "local") {
-        throw new HTTPException(400, {
-          message: "Field 'runnerType' must be 'cloud', 'local', or null"
-        });
-      }
-      patch.runnerType = runnerType;
-    }
-    if (payload.codexConfigFileContent !== undefined) {
-      const codexConfigFileContent = assertOptionalNullableRawString(
-        payload.codexConfigFileContent,
-        "codexConfigFileContent"
-      );
-      if (
-        codexConfigFileContent !== null &&
-        codexConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
-      ) {
-        throw new HTTPException(400, {
-          message: `Field 'codexConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
-        });
-      }
-      patch.codexConfigFileContent = codexConfigFileContent;
-    }
-
-    if (payload.claudeCodeConfigFileContent !== undefined) {
-      const claudeCodeConfigFileContent = assertOptionalNullableRawString(
-        payload.claudeCodeConfigFileContent,
-        "claudeCodeConfigFileContent"
-      );
-      if (
-        claudeCodeConfigFileContent !== null &&
-        claudeCodeConfigFileContent.length > MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH
-      ) {
-        throw new HTTPException(400, {
-          message: `Field 'claudeCodeConfigFileContent' exceeds ${MAX_ACTIONS_CONFIG_FILE_CONTENT_LENGTH} characters`
-        });
-      }
-      patch.claudeCodeConfigFileContent = claudeCodeConfigFileContent;
-    }
-
-    if (
-      patch.instanceType === undefined &&
-      patch.runnerType === undefined &&
-      patch.codexConfigFileContent === undefined &&
-      patch.claudeCodeConfigFileContent === undefined
-    ) {
-      throw new HTTPException(400, { message: "No updatable fields provided" });
-    }
-
-    const repositoryService = new RepositoryService(c.env.DB);
-    const sessionUser = mustSessionUser(c);
-    const repository = await findReadableRepositoryOr404({
-      repositoryService,
-      owner,
-      repo,
-      userId: sessionUser.id
-    });
-    const canManageActions = await repositoryService.isOwnerOrCollaborator(repository, sessionUser.id);
-    if (!canManageActions) {
-      throw new HTTPException(403, { message: "Forbidden" });
-    }
-
-    const actionsService = new ActionsService(c.env.DB);
-    const config = await actionsService.updateRepositoryConfig(repository.id, patch);
-    return c.json({
-      config: {
-        instanceType: config.instanceType,
-        runnerType: config.runnerType,
-        codexConfigFileContent: config.codexConfigFileContent,
-        claudeCodeConfigFileContent: config.claudeCodeConfigFileContent,
-        inheritsGlobalCodexConfig: config.inheritsGlobalCodexConfig,
-        inheritsGlobalClaudeCodeConfig: config.inheritsGlobalClaudeCodeConfig,
-        updated_at: config.updated_at
-      }
-    });
   });
 }

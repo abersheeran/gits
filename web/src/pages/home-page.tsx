@@ -55,7 +55,7 @@ export function HomePage({ user }: HomePageProps) {
               <Badge variant="secondary" className="w-fit">
                 Explore
               </Badge>
-              <HelpTip content="游客可以直接浏览公开仓库，并从仓库页进入代码、Issue、PR 与 Actions 上下文。" />
+              <HelpTip content="浏览公开仓库的代码与提交历史。" />
             </div>
             <div className="space-y-3">
               <h1 className="font-display text-section-heading-mobile text-text-primary md:text-section-heading">

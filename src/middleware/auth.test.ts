@@ -8,8 +8,7 @@ function createEnv(): AppEnv["Bindings"] {
   return {
     DB: {} as D1Database,
     GIT_BUCKET: {} as R2Bucket,
-    JWT_SECRET: "test-secret",
-    APP_ORIGIN: "http://localhost:8787"
+    JWT_SECRET: "test-secret"
   };
 }
 
@@ -31,6 +30,24 @@ function createGitAuthApp() {
 describe("optionalSession middleware", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("accepts a personal access token as bearer credentials", async () => {
+    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(null);
+    const tokenSpy = vi.spyOn(AuthService.prototype, "verifyAccessToken").mockResolvedValue({
+      id: "u1",
+      username: "alice"
+    });
+    const response = await createApp().fetch(
+      new Request("http://localhost/me", {
+        headers: { authorization: "Bearer gts_personal" }
+      }),
+      createEnv()
+    );
+
+    expect(response.status).toBe(200);
+    expect(tokenSpy).toHaveBeenCalledWith("gts_personal");
+    expect(await response.json()).toEqual({ user: { id: "u1", username: "alice" } });
   });
 
   it("falls back to cookie token when bearer token is invalid", async () => {

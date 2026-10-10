@@ -1,26 +1,9 @@
 import bcrypt from "bcryptjs";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthService } from "../../services/auth-service";
-import {
-  GITS_PLATFORM_MCP_TOOL_CREATE_PULL_REQUEST,
-  GITS_PLATFORM_MCP_TOOL_ISSUE_REPLY
-} from "../../services/platform-mcp-service";
 import { RepositoryService } from "../../services/repository-service";
 import { createMockD1Database } from "../../test-utils/mock-d1";
 import { createApp, createBaseEnv } from "./test-helpers";
-
-function createFetchBridge(
-  app: ReturnType<typeof createApp>,
-  env: ReturnType<typeof createBaseEnv>
-) {
-  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const request =
-      input instanceof Request ? new Request(input, init) : new Request(String(input), init);
-    return app.fetch(request, env);
-  };
-}
 
 describe("API platform routes", () => {
   afterEach(() => {
@@ -104,24 +87,6 @@ describe("API platform routes", () => {
 
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("Invalid username");
-  });
-
-  it("returns 400 for reserved username actions", async () => {
-    const response = await createApp().fetch(
-      new Request("http://localhost/api/auth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          username: "actions",
-          email: "actions@example.com",
-          password: "Password123"
-        })
-      }),
-      createBaseEnv(createMockD1Database([]))
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain("reserved");
   });
 
   it("returns public repository list", async () => {
@@ -210,59 +175,6 @@ describe("API platform routes", () => {
     expect(insertedHash.length).toBeGreaterThan(0);
     await expect(bcrypt.compare(originalPassword, insertedHash)).resolves.toBe(true);
     await expect(bcrypt.compare(originalPassword.trim(), insertedHash)).resolves.toBe(false);
-  });
-
-  it("requires authentication before serving MCP requests", async () => {
-    const response = await createApp().fetch(
-      new Request("http://localhost/api/mcp"),
-      createBaseEnv(createMockD1Database([]))
-    );
-
-    expect(response.status).toBe(401);
-  });
-
-  it("allows authenticated MCP clients to initialize and list tools", async () => {
-    vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(null);
-    vi.spyOn(AuthService.prototype, "verifyAccessTokenWithMetadata").mockResolvedValue({
-      user: {
-        id: "user-1",
-        username: "alice"
-      },
-      context: {
-        tokenId: "tok-1",
-        isInternal: false,
-        displayAsActions: false
-      }
-    });
-
-    const app = createApp();
-    const env = createBaseEnv(createMockD1Database([]));
-    const client = new Client({
-      name: "api-mcp-test-client",
-      version: "1.0.0"
-    });
-    const transport = new StreamableHTTPClientTransport(
-      new URL("http://localhost/api/mcp?owner=alice&repo=demo"),
-      {
-        fetch: createFetchBridge(app, env),
-        requestInit: {
-          headers: {
-            authorization: "Bearer gts_local"
-          }
-        }
-      }
-    );
-
-    try {
-      await client.connect(transport);
-      const response = await client.listTools();
-      expect(response.tools.map((tool) => tool.name)).toEqual([
-        GITS_PLATFORM_MCP_TOOL_ISSUE_REPLY,
-        GITS_PLATFORM_MCP_TOOL_CREATE_PULL_REQUEST
-      ]);
-    } finally {
-      await client.close();
-    }
   });
 
   it("lists current user access tokens", async () => {

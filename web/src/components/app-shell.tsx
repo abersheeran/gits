@@ -30,8 +30,6 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
     pathname === "/repositories/new" ||
     pathname.startsWith("/repositories/");
   const isTokensActive = pathname === "/tokens" || pathname.startsWith("/tokens/");
-  const isActionsSettingsActive =
-    pathname === "/settings/actions" || pathname.startsWith("/settings/actions/");
   const isLoginActive = pathname === "/login";
   const isRegisterActive = pathname === "/register";
 
@@ -65,7 +63,7 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                   <div className="space-y-0.5">
                     <p className="font-display text-heading-3-16-semibold text-text-primary">gits</p>
                     <p className="text-body-micro text-text-secondary">
-                      Agent-native delivery chain
+                      Host and manage Git repositories
                     </p>
                   </div>
                 </Link>
@@ -117,22 +115,6 @@ export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
                       >
                         <Link to="/tokens" aria-current={isTokensActive ? "page" : undefined}>
                           Tokens
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          "h-9 shrink-0 px-4 text-button-md",
-                          isActionsSettingsActive &&
-                            "bg-surface-base shadow-sm hover:bg-surface-base"
-                        )}
-                        asChild
-                      >
-                        <Link
-                          to="/settings/actions"
-                          aria-current={isActionsSettingsActive ? "page" : undefined}
-                        >
-                          Actions
                         </Link>
                       </Button>
                     </>

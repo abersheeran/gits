@@ -1,5 +1,5 @@
 import * as git from "isomorphic-git";
-import { createTwoFilesPatch, diffLines } from "diff";
+import { diffCommitTrees, looksBinary, type RepositoryDiffChange } from "./repository-diff";
 import { loadRepositoryFromStorage, type RepositorySnapshotStorage } from "./git-repo-loader";
 import { StorageService } from "./storage-service";
 
@@ -7,8 +7,6 @@ const OID_REGEX = /^[0-9a-f]{40}$/i;
 const README_CANDIDATES = ["readme.md", "readme", "readme.txt", "readme.mkd"];
 const MAX_README_BYTES = 200 * 1024;
 const MAX_FILE_PREVIEW_BYTES = 512 * 1024;
-const BINARY_SAMPLE_BYTES = 8000;
-const MAX_DIFF_TEXT_BYTES = 256 * 1024;
 
 type RepositoryBranch = {
   name: string;
@@ -28,7 +26,7 @@ export type RepositoryDetail = {
   } | null;
 };
 
-export type CommitSummary = {
+type CommitSummary = {
   oid: string;
   message: string;
   author: {
@@ -46,7 +44,7 @@ export type CommitSummary = {
   parents: string[];
 };
 
-export type RepositoryTreeEntry = {
+type RepositoryTreeEntry = {
   name: string;
   path: string;
   oid: string;
@@ -55,7 +53,7 @@ export type RepositoryTreeEntry = {
   latestCommit: CommitSummary | null;
 };
 
-export type RepositoryFilePreview = {
+type RepositoryFilePreview = {
   path: string;
   oid: string;
   mode: string;
@@ -93,61 +91,12 @@ export type RepositoryCommitHistoryResult = {
   };
 };
 
-export type RepositoryCompareChange = {
-  path: string;
-  previousPath: string | null;
-  status: "added" | "modified" | "deleted";
-  mode: string | null;
-  previousMode: string | null;
-  oid: string | null;
-  previousOid: string | null;
-  additions: number;
-  deletions: number;
-  isBinary: boolean;
-  patch: string | null;
-  hunks: RepositoryDiffHunk[];
-  oldContent: string | null;
-  newContent: string | null;
-};
-
-export type RepositoryDiffLine = {
-  kind: "context" | "add" | "delete" | "meta";
-  content: string;
-  oldLineNumber: number | null;
-  newLineNumber: number | null;
-};
-
-export type RepositoryDiffHunk = {
-  header: string;
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: RepositoryDiffLine[];
-};
-
 export type RepositoryCommitDetail = {
   commit: CommitSummary;
   filesChanged: number;
   additions: number;
   deletions: number;
-  changes: RepositoryCompareChange[];
-};
-
-export type RepositoryCompareResult = {
-  baseRef: string;
-  headRef: string;
-  baseOid: string;
-  headOid: string;
-  mergeBaseOid: string | null;
-  mergeable: "mergeable" | "conflicting" | "unknown";
-  aheadBy: number;
-  behindBy: number;
-  filesChanged: number;
-  additions: number;
-  deletions: number;
-  commits: CommitSummary[];
-  changes: RepositoryCompareChange[];
+  changes: RepositoryDiffChange[];
 };
 
 export class RepositoryBrowsePathNotFoundError extends Error {
@@ -209,16 +158,6 @@ function normalizeRepositoryPath(input?: string): string {
   return segments.join("/");
 }
 
-function looksBinary(content: Uint8Array): boolean {
-  const sample = content.subarray(0, Math.min(content.length, BINARY_SAMPLE_BYTES));
-  for (let index = 0; index < sample.length; index += 1) {
-    if (sample[index] === 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function sortTreeEntries(entries: RepositoryTreeEntry[]): RepositoryTreeEntry[] {
   return entries.sort((left, right) => {
     if (left.type === "tree" && right.type !== "tree") {
@@ -278,144 +217,6 @@ export function buildLoadedRepositoryContext(
     branchNames: new Set(branches.map((item) => item.name)),
     defaultBranch: branchNameFromHead(loaded.head) ?? branches[0]?.name ?? null
   };
-}
-
-type FlatTreeEntry = {
-  path: string;
-  oid: string;
-  mode: string;
-  type: RepositoryEntryType;
-};
-
-type TextBlobInfo = {
-  content: string | null;
-  isBinary: boolean;
-  size: number;
-};
-
-function buildSyntheticGitIdentity() {
-  const timestamp = Math.floor(Date.now() / 1000);
-  return {
-    name: "gits",
-    email: "noreply@gits.local",
-    timestamp,
-    timezoneOffset: 0
-  };
-}
-
-const HUNK_HEADER_REGEX = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@.*$/;
-
-function parseHunkLineCount(value: string | undefined, start: number): number {
-  if (value !== undefined) {
-    return Number.parseInt(value, 10);
-  }
-  return start === 0 ? 0 : 1;
-}
-
-function parseUnifiedDiffHunks(patch: string | null): RepositoryDiffHunk[] {
-  if (!patch) {
-    return [];
-  }
-
-  const patchLines = patch.split("\n");
-  const hunks: RepositoryDiffHunk[] = [];
-  let index = 0;
-
-  while (index < patchLines.length) {
-    const headerLine = patchLines[index] ?? "";
-    const match = headerLine.match(HUNK_HEADER_REGEX);
-    if (!match) {
-      index += 1;
-      continue;
-    }
-
-    const oldStart = Number.parseInt(match[1] ?? "0", 10);
-    const oldLines = parseHunkLineCount(match[2], oldStart);
-    const newStart = Number.parseInt(match[3] ?? "0", 10);
-    const newLines = parseHunkLineCount(match[4], newStart);
-    const lines: RepositoryDiffLine[] = [];
-    let oldLineNumber = oldStart;
-    let newLineNumber = newStart;
-    index += 1;
-
-    while (index < patchLines.length) {
-      const currentLine = patchLines[index] ?? "";
-      if (HUNK_HEADER_REGEX.test(currentLine)) {
-        break;
-      }
-      if (currentLine.startsWith("\\ No newline at end of file")) {
-        lines.push({
-          kind: "meta",
-          content: currentLine,
-          oldLineNumber: null,
-          newLineNumber: null
-        });
-        index += 1;
-        continue;
-      }
-
-      const marker = currentLine[0];
-      const content = currentLine.slice(1);
-      if (marker === " ") {
-        lines.push({
-          kind: "context",
-          content,
-          oldLineNumber,
-          newLineNumber
-        });
-        oldLineNumber += 1;
-        newLineNumber += 1;
-        index += 1;
-        continue;
-      }
-      if (marker === "+") {
-        lines.push({
-          kind: "add",
-          content,
-          oldLineNumber: null,
-          newLineNumber
-        });
-        newLineNumber += 1;
-        index += 1;
-        continue;
-      }
-      if (marker === "-") {
-        lines.push({
-          kind: "delete",
-          content,
-          oldLineNumber,
-          newLineNumber: null
-        });
-        oldLineNumber += 1;
-        index += 1;
-        continue;
-      }
-
-      if (currentLine.length === 0) {
-        index += 1;
-        continue;
-      }
-
-      lines.push({
-        kind: "meta",
-        content: currentLine,
-        oldLineNumber: null,
-        newLineNumber: null
-      });
-      index += 1;
-    }
-
-    hunks.push({
-      header: headerLine,
-      oldStart,
-      oldLines,
-      newStart,
-      newLines,
-      lines
-    });
-  }
-
-  return hunks;
 }
 
 export class RepositoryBrowserService {
@@ -518,262 +319,6 @@ export class RepositoryBrowserService {
       ...entry,
       latestCommit: latestCommits[index] ?? null
     }));
-  }
-
-  private async flattenTree(args: {
-    fs: unknown;
-    dir: string;
-    gitdir: string;
-    oid: string;
-    basePath?: string;
-    output?: Map<string, FlatTreeEntry>;
-  }): Promise<Map<string, FlatTreeEntry>> {
-    const output = args.output ?? new Map<string, FlatTreeEntry>();
-    const tree = await git.readTree({
-      fs: args.fs as never,
-      dir: args.dir,
-      gitdir: args.gitdir,
-      oid: args.oid
-    });
-    for (const entry of tree.tree) {
-      const path = args.basePath ? `${args.basePath}/${entry.path}` : entry.path;
-      if (entry.type === "tree") {
-        await this.flattenTree({
-          fs: args.fs,
-          dir: args.dir,
-          gitdir: args.gitdir,
-          oid: entry.oid,
-          basePath: path,
-          output
-        });
-        continue;
-      }
-      output.set(path, {
-        path,
-        oid: entry.oid,
-        mode: entry.mode,
-        type: entry.type
-      });
-    }
-    return output;
-  }
-
-  private async readTextBlob(args: {
-    fs: unknown;
-    dir: string;
-    gitdir: string;
-    oid: string | null;
-  }): Promise<TextBlobInfo> {
-    if (!args.oid) {
-      return {
-        content: "",
-        isBinary: false,
-        size: 0
-      };
-    }
-    const blob = await git.readBlob({
-      fs: args.fs as never,
-      dir: args.dir,
-      gitdir: args.gitdir,
-      oid: args.oid
-    });
-    if (looksBinary(blob.blob)) {
-      return {
-        content: null,
-        isBinary: true,
-        size: blob.blob.byteLength
-      };
-    }
-    const limited = blob.blob.byteLength > MAX_DIFF_TEXT_BYTES ? blob.blob.slice(0, MAX_DIFF_TEXT_BYTES) : blob.blob;
-    return {
-      content: new TextDecoder().decode(limited),
-      isBinary: false,
-      size: blob.blob.byteLength
-    };
-  }
-
-  private buildDiffChange(args: {
-    path: string;
-    previousEntry: FlatTreeEntry | null;
-    nextEntry: FlatTreeEntry | null;
-    previousText: TextBlobInfo;
-    nextText: TextBlobInfo;
-  }): RepositoryCompareChange {
-    const status =
-      args.previousEntry && args.nextEntry
-        ? "modified"
-        : args.nextEntry
-          ? "added"
-          : "deleted";
-    const isBinary = args.previousText.isBinary || args.nextText.isBinary;
-    if (isBinary) {
-      return {
-        path: args.path,
-        previousPath: null,
-        status,
-        mode: args.nextEntry?.mode ?? null,
-        previousMode: args.previousEntry?.mode ?? null,
-        oid: args.nextEntry?.oid ?? null,
-        previousOid: args.previousEntry?.oid ?? null,
-        additions: 0,
-        deletions: 0,
-        isBinary: true,
-        patch: null,
-        hunks: [],
-        oldContent: null,
-        newContent: null
-      };
-    }
-
-    const oldContent = args.previousText.content ?? "";
-    const newContent = args.nextText.content ?? "";
-    const changes = diffLines(oldContent, newContent);
-    let additions = 0;
-    let deletions = 0;
-    for (const change of changes) {
-      const lineCount = change.count ?? change.value.split("\n").length - 1;
-      if (change.added) {
-        additions += lineCount;
-      } else if (change.removed) {
-        deletions += lineCount;
-      }
-    }
-
-    const patch = createTwoFilesPatch(
-      args.path,
-      args.path,
-      oldContent,
-      newContent,
-      args.previousEntry?.oid ?? "",
-      args.nextEntry?.oid ?? ""
-    );
-
-    return {
-      path: args.path,
-      previousPath: null,
-      status,
-      mode: args.nextEntry?.mode ?? null,
-      previousMode: args.previousEntry?.mode ?? null,
-      oid: args.nextEntry?.oid ?? null,
-      previousOid: args.previousEntry?.oid ?? null,
-      additions,
-      deletions,
-      isBinary: false,
-      patch,
-      hunks: parseUnifiedDiffHunks(patch),
-      oldContent,
-      newContent
-    };
-  }
-
-  private async compareTrees(args: {
-    fs: unknown;
-    dir: string;
-    gitdir: string;
-    previousOid: string | null;
-    nextOid: string | null;
-  }): Promise<{
-    filesChanged: number;
-    additions: number;
-    deletions: number;
-    changes: RepositoryCompareChange[];
-  }> {
-    const previousEntries = args.previousOid
-      ? await this.flattenTree({
-          fs: args.fs,
-          dir: args.dir,
-          gitdir: args.gitdir,
-          oid: args.previousOid
-        })
-      : new Map<string, FlatTreeEntry>();
-    const nextEntries = args.nextOid
-      ? await this.flattenTree({
-          fs: args.fs,
-          dir: args.dir,
-          gitdir: args.gitdir,
-          oid: args.nextOid
-        })
-      : new Map<string, FlatTreeEntry>();
-    const paths = Array.from(new Set([...previousEntries.keys(), ...nextEntries.keys()])).sort((left, right) =>
-      left.localeCompare(right)
-    );
-
-    const changes: RepositoryCompareChange[] = [];
-    let additions = 0;
-    let deletions = 0;
-
-    for (const path of paths) {
-      const previousEntry = previousEntries.get(path) ?? null;
-      const nextEntry = nextEntries.get(path) ?? null;
-      if (
-        previousEntry &&
-        nextEntry &&
-        previousEntry.oid === nextEntry.oid &&
-        previousEntry.mode === nextEntry.mode &&
-        previousEntry.type === nextEntry.type
-      ) {
-        continue;
-      }
-      const [previousText, nextText] = await Promise.all([
-        previousEntry?.type === "blob"
-          ? this.readTextBlob({
-              fs: args.fs,
-              dir: args.dir,
-              gitdir: args.gitdir,
-              oid: previousEntry.oid
-            })
-          : Promise.resolve({ content: "", isBinary: false, size: 0 }),
-        nextEntry?.type === "blob"
-          ? this.readTextBlob({
-              fs: args.fs,
-              dir: args.dir,
-              gitdir: args.gitdir,
-              oid: nextEntry.oid
-            })
-          : Promise.resolve({ content: "", isBinary: false, size: 0 })
-      ]);
-      const change = this.buildDiffChange({
-        path,
-        previousEntry,
-        nextEntry,
-        previousText,
-        nextText
-      });
-      additions += change.additions;
-      deletions += change.deletions;
-      changes.push(change);
-    }
-
-    return {
-      filesChanged: changes.length,
-      additions,
-      deletions,
-      changes
-    };
-  }
-
-  private async listCommitsUntilAncestor(args: {
-    fs: unknown;
-    dir: string;
-    gitdir: string;
-    ref: string;
-    stopOid: string | null;
-  }): Promise<CommitSummary[]> {
-    const commits = await git.log({
-      fs: args.fs as never,
-      dir: args.dir,
-      gitdir: args.gitdir,
-      ref: args.ref,
-      depth: 250
-    });
-    const items: CommitSummary[] = [];
-    for (const commit of commits) {
-      if (args.stopOid && commit.oid === args.stopOid) {
-        break;
-      }
-      items.push(toCommitSummary(commit));
-    }
-    return items;
   }
 
   private async tryReadReadme(args: {
@@ -1211,7 +756,7 @@ export class RepositoryBrowserService {
       oid: input.oid
     });
     const previousOid = commitData.commit.parent[0] ?? null;
-    const comparison = await this.compareTrees({
+    const comparison = await diffCommitTrees({
       fs: loaded.fs,
       dir: loaded.dir,
       gitdir: loaded.gitdir,
@@ -1223,113 +768,6 @@ export class RepositoryBrowserService {
       filesChanged: comparison.filesChanged,
       additions: comparison.additions,
       deletions: comparison.deletions,
-      changes: comparison.changes
-    };
-  }
-
-  async compareRefs(input: {
-    owner: string;
-    repo: string;
-    baseRef: string;
-    headRef: string;
-  }, loadedContext?: LoadedRepositoryContext): Promise<RepositoryCompareResult> {
-    const loaded = await this.ensureLoadedContext(input.owner, input.repo, loadedContext);
-    const baseRef = resolveRefInput(input.baseRef, loaded.branchNames);
-    const headRef = resolveRefInput(input.headRef, loaded.branchNames);
-    const [baseOid, headOid] = await Promise.all([
-      this.tryResolveCommitOid({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
-        ref: baseRef
-      }),
-      this.tryResolveCommitOid({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
-        ref: headRef
-      })
-    ]);
-
-    if (!baseOid || !headOid) {
-      throw new RepositoryBrowsePathNotFoundError("compare");
-    }
-
-    const mergeBases = await git.findMergeBase({
-      fs: loaded.fs as never,
-      dir: loaded.dir,
-      gitdir: loaded.gitdir,
-      oids: [baseOid, headOid]
-    });
-    const mergeBaseOid = mergeBases[0] ?? null;
-    const mergeable =
-      OID_REGEX.test(baseRef) || OID_REGEX.test(headRef)
-        ? "unknown"
-        : await (async (): Promise<"mergeable" | "conflicting" | "unknown"> => {
-            const identity = buildSyntheticGitIdentity();
-            try {
-              await git.merge({
-                fs: loaded.fs as never,
-                dir: loaded.dir,
-                gitdir: loaded.gitdir,
-                ours: baseRef,
-                theirs: headRef,
-                fastForward: false,
-                dryRun: true,
-                noUpdateBranch: true,
-                abortOnConflict: true,
-                author: identity,
-                committer: identity
-              });
-              return "mergeable";
-            } catch (error) {
-              if (error instanceof git.Errors.MergeConflictError) {
-                return "conflicting";
-              }
-              if (error instanceof git.Errors.MergeNotSupportedError) {
-                return "unknown";
-              }
-              throw error;
-            }
-          })();
-
-    const [aheadCommits, behindCommits, comparison] = await Promise.all([
-      this.listCommitsUntilAncestor({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
-        ref: headRef,
-        stopOid: mergeBaseOid
-      }),
-      this.listCommitsUntilAncestor({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
-        ref: baseRef,
-        stopOid: mergeBaseOid
-      }),
-      this.compareTrees({
-        fs: loaded.fs,
-        dir: loaded.dir,
-        gitdir: loaded.gitdir,
-        previousOid: mergeBaseOid ?? baseOid,
-        nextOid: headOid
-      })
-    ]);
-
-    return {
-      baseRef,
-      headRef,
-      baseOid,
-      headOid,
-      mergeBaseOid,
-      mergeable,
-      aheadBy: aheadCommits.length,
-      behindBy: behindCommits.length,
-      filesChanged: comparison.filesChanged,
-      additions: comparison.additions,
-      deletions: comparison.deletions,
-      commits: aheadCommits,
       changes: comparison.changes
     };
   }

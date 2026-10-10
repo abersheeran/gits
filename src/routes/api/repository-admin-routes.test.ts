@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthService } from "../../services/auth-service";
-import { RepositoryObjectClient } from "../../services/repository-object";
-import { RepositoryRefService } from "../../services/repository-ref-service";
+import { RepositoryObjectClient } from "../../services/repository-object-client";
 import { createMockD1Database } from "../../test-utils/mock-d1";
 import { buildRepositoryRow, createApp, createBaseEnv } from "./test-helpers";
 
@@ -15,17 +14,9 @@ describe("API repository admin routes", () => {
       id: "user-1",
       username: "alice"
     });
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
     const initializeSpy = vi
       .spyOn(RepositoryObjectClient.prototype, "initializeRepository")
       .mockResolvedValue(undefined);
-    vi.spyOn(RepositoryObjectClient.prototype, "listHeadRefs").mockResolvedValue([
-      { name: "refs/heads/main", oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
-    ]);
-    vi.spyOn(RepositoryObjectClient.prototype, "resolveDefaultBranchTarget").mockResolvedValue({
-      ref: "refs/heads/main",
-      sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    });
     const db = createMockD1Database([
       {
         when: "INSERT INTO repositories",
@@ -350,7 +341,6 @@ describe("API repository admin routes", () => {
       id: "owner-1",
       username: "alice"
     });
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
     const createBranchSpy = vi
       .spyOn(RepositoryObjectClient.prototype, "createBranch")
       .mockResolvedValue({
@@ -399,7 +389,6 @@ describe("API repository admin routes", () => {
       id: "owner-1",
       username: "alice"
     });
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
     const setDefaultBranchSpy = vi
       .spyOn(RepositoryObjectClient.prototype, "setDefaultBranch")
       .mockResolvedValue({
@@ -446,7 +435,6 @@ describe("API repository admin routes", () => {
       id: "owner-1",
       username: "alice"
     });
-    vi.spyOn(RepositoryRefService.prototype, "syncRefs").mockResolvedValue(undefined);
     const deleteBranchSpy = vi
       .spyOn(RepositoryObjectClient.prototype, "deleteBranch")
       .mockResolvedValue({

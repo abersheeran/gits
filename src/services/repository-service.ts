@@ -115,28 +115,6 @@ export class RepositoryService {
     return row ?? null;
   }
 
-  async findRepositoryById(repositoryId: string): Promise<RepositoryRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT
-          r.id,
-          r.owner_id,
-          u.username AS owner_username,
-          r.name,
-          r.description,
-          r.is_private,
-          r.created_at
-         FROM repositories r
-         JOIN users u ON u.id = r.owner_id
-         WHERE r.id = ?
-         LIMIT 1`
-      )
-      .bind(repositoryId)
-      .first<RepositoryRecord>();
-
-    return row ?? null;
-  }
-
   async canReadRepository(repo: RepositoryRecord, userId?: string): Promise<boolean> {
     if (repo.is_private === 0) {
       return true;
@@ -150,17 +128,6 @@ export class RepositoryService {
       return true;
     }
 
-    const permission = await this.findCollaboratorPermission(repo.id, userId);
-    return permission !== null;
-  }
-
-  async isOwnerOrCollaborator(repo: RepositoryRecord, userId?: string): Promise<boolean> {
-    if (!userId) {
-      return false;
-    }
-    if (repo.owner_id === userId) {
-      return true;
-    }
     const permission = await this.findCollaboratorPermission(repo.id, userId);
     return permission !== null;
   }

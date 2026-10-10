@@ -16,11 +16,6 @@ export class StorageService {
     return `${trimSlash(owner)}/${trimSlash(repo)}`;
   }
 
-  objectKey(owner: string, repo: string, oid: string): string {
-    const value = ensureValidOid(oid);
-    return `${this.repoPrefix(owner, repo)}/objects/${value.slice(0, 2)}/${value.slice(2)}`;
-  }
-
   refKey(owner: string, repo: string, refName: string): string {
     return `${this.repoPrefix(owner, repo)}/${trimSlash(refName)}`;
   }
@@ -55,12 +50,6 @@ export class StorageService {
       return this.bucket.list({ prefix, cursor });
     }
     return this.bucket.list({ prefix });
-  }
-
-  async readRef(owner: string, repo: string, refName: string): Promise<string | null> {
-    const refPath = this.refKey(owner, repo, refName);
-    const value = await this.getText(refPath);
-    return value?.trim() ?? null;
   }
 
   async readHead(owner: string, repo: string): Promise<string | null> {

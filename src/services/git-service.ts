@@ -429,7 +429,6 @@ export class GitService {
   }): Promise<{
     repositoryUpdated: boolean;
     response: Response;
-    updatedRefs: Array<{ name: string; oid: string }>;
   }> {
     let capabilities: Set<string> | undefined;
     try {
@@ -479,8 +478,7 @@ export class GitService {
           });
           return {
             repositoryUpdated: false,
-            response: this.receivePackResponse(payload),
-            updatedRefs: []
+            response: this.receivePackResponse(payload)
           };
         }
       }
@@ -571,8 +569,7 @@ export class GitService {
         });
         return {
           repositoryUpdated: false,
-          response: this.receivePackResponse(payload),
-          updatedRefs: []
+          response: this.receivePackResponse(payload)
         };
       }
 
@@ -613,11 +610,6 @@ export class GitService {
         ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
       });
       await syncLoadedRepositoryHeadState(args.loaded);
-      const updatedRefs = await listRepositoryRefsFromFs({
-        fs,
-        gitdir: args.loaded.gitdir,
-        prefix: "refs"
-      });
 
       const payload = buildReceivePackReport({
         capabilities: request.capabilities,
@@ -625,8 +617,7 @@ export class GitService {
       });
       return {
         repositoryUpdated: true,
-        response: this.receivePackResponse(payload),
-        updatedRefs
+        response: this.receivePackResponse(payload)
       };
     } catch (error) {
       if (error instanceof ProtocolError) {
@@ -637,8 +628,7 @@ export class GitService {
         });
         return {
           repositoryUpdated: false,
-          response: this.receivePackResponse(payload),
-          updatedRefs: []
+          response: this.receivePackResponse(payload)
         };
       }
       if (error instanceof HTTPException) {
@@ -722,7 +712,6 @@ export class GitService {
   }): Promise<{
     repositoryUpdated: boolean;
     response: Response;
-    updatedRefs: Array<{ name: string; oid: string }>;
   }> {
     return this.executeReceivePack(args);
   }

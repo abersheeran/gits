@@ -1,15 +1,5 @@
 import { HTTPException } from "hono/http-exception";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type {
-  CommitSummary,
-  LoadedRepositoryContext,
-  RepositoryBrowseResult,
-  RepositoryCommitHistoryResult,
-  RepositoryCompareResult,
-  RepositoryCommitDetail,
-  RepositoryDetail,
-  RepositoryPathHistoryResult
-} from "./repository-browser-service";
+import type { LoadedRepositoryContext } from "./repository-browser-service";
 import {
   buildLoadedRepositoryContext,
   RepositoryBrowserService,
@@ -26,74 +16,15 @@ import {
 } from "./git-repo-loader";
 import { GitService } from "./git-service";
 import * as git from "isomorphic-git";
-import {
-  PullRequestMergeBranchNotFoundError,
-  PullRequestMergeConflictError,
-  PullRequestMergeNotSupportedError,
-  PullRequestMergeService,
-  type PullRequestSquashMergeResult
-} from "./pull-request-merge-service";
 import { StorageService } from "./storage-service";
-import type { AuthUser, GitServiceName, PullRequestRecord } from "../types";
-import type { RepositoryComparisonReader } from "./pull-request-review-thread-anchor-service";
+import type { GitServiceName } from "../types";
 import type { AppBindings } from "../types";
-
-type RepositoryObjectJsonOperation =
-  | "browse-repository-contents"
-  | "compare-refs"
-  | "create-branch"
-  | "delete-repository"
-  | "delete-branch"
-  | "get-commit-detail"
-  | "get-repository-detail"
-  | "initialize-repository"
-  | "list-commit-history"
-  | "list-head-refs"
-  | "list-path-history"
-  | "rename-repository"
-  | "resolve-default-branch-target"
-  | "set-default-branch"
-  | "squash-merge-pull-request";
-
-type RepositoryObjectJsonRequest = {
-  operation: RepositoryObjectJsonOperation;
-  payload: Record<string, unknown>;
-};
-
-type RepositoryHeadRef = { name: string; oid: string };
-
-type RepositoryDefaultBranchTarget = {
-  ref: string | null;
-  sha: string | null;
-};
-
-type RepositoryBranchMutationResult = {
-  defaultBranch: string | null;
-  branches: RepositoryHeadRef[];
-};
-
-type ReceivePackResponse = {
-  repositoryUpdated: boolean;
-  response: Response;
-  updatedRefs: RepositoryHeadRef[];
-};
-
-type RepositoryObjectErrorCode =
-  | "bad_request"
-  | "git_service_invalid"
-  | "merge_branch_not_found"
-  | "merge_conflict"
-  | "merge_not_supported"
-  | "path_invalid"
-  | "path_not_found";
-
-type RepositoryObjectErrorPayload = {
-  error: RepositoryObjectErrorCode;
-  message: string;
-};
-
-const UPDATED_REFS_HEADER = "x-gits-updated-refs";
-const REPOSITORY_UPDATED_HEADER = "x-gits-repository-updated";
+import type {
+  RepositoryObjectJsonRequest,
+  RepositoryBranchMutationResult,
+  RepositoryObjectErrorCode,
+  RepositoryObjectErrorPayload
+} from "./repository-object-protocol";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -112,72 +43,15 @@ function errorResponse(
   return jsonResponse({ error, message } satisfies RepositoryObjectErrorPayload, status);
 }
 
-function cloneResponseWithoutHeaders(response: Response, headerNames: string[]): Response {
-  const headers = new Headers(response.headers);
-  for (const headerName of headerNames) {
-    headers.delete(headerName);
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
-}
-
-function encodeBase64Utf8(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function decodeBase64Utf8(value: string): string {
-  const binary = atob(value);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-function encodeUpdatedRefsHeader(refs: RepositoryHeadRef[]): string {
-  return encodeBase64Utf8(JSON.stringify(refs));
-}
-
-function decodeUpdatedRefsHeader(value: string | null): RepositoryHeadRef[] {
-  if (!value) {
-    return [];
-  }
-  try {
-    const decoded = decodeBase64Utf8(value);
-    const parsed = JSON.parse(decoded) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.flatMap((item) => {
-      if (
-        item &&
-        typeof item === "object" &&
-        typeof item.name === "string" &&
-        typeof item.oid === "string"
-      ) {
-        return [{ name: item.name, oid: item.oid }];
-      }
-      return [];
-    });
-  } catch {
-    return [];
-  }
-}
-
 function isGitServiceName(value: string | null): value is GitServiceName {
   return value === "git-upload-pack" || value === "git-receive-pack";
 }
 
-function selectDefaultBranchTarget(
+function selectDefaultBranchRef(
   context: Pick<LoadedRepositoryContext, "head" | "headRefs">
-): RepositoryDefaultBranchTarget {
+): string | null {
   if (context.headRefs.length === 0) {
-    return { ref: null, sha: null };
+    return null;
   }
   const headRef = context.head?.startsWith("ref: ")
     ? context.head.slice("ref: ".length).trim()
@@ -186,10 +60,7 @@ function selectDefaultBranchTarget(
     (headRef ? context.headRefs.find((item) => item.name === headRef) : undefined) ??
     context.headRefs.find((item) => item.name === "refs/heads/main") ??
     context.headRefs[0];
-  return {
-    ref: selected?.name ?? null,
-    sha: selected?.oid ?? null
-  };
+  return selected?.name ?? null;
 }
 
 function isValidBranchName(value: string): boolean {
@@ -249,24 +120,6 @@ function normalizeCommitOid(value: unknown, field: string): string {
   return oid;
 }
 
-async function parseRepositoryObjectError(response: Response): Promise<RepositoryObjectErrorPayload> {
-  try {
-    return (await response.json()) as RepositoryObjectErrorPayload;
-  } catch {
-    return {
-      error: "bad_request",
-      message: response.statusText || "Repository object request failed"
-    };
-  }
-}
-
-function toContentfulStatusCode(status: number): ContentfulStatusCode {
-  if (status === 101 || status === 204 || status === 205 || status === 304) {
-    return 500;
-  }
-  return status as ContentfulStatusCode;
-}
-
 export class RepositoryObject {
   private readonly storage: StorageService;
 
@@ -275,8 +128,6 @@ export class RepositoryObject {
   private readonly browserService: RepositoryBrowserService;
 
   private readonly gitService: GitService;
-
-  private readonly mergeService: PullRequestMergeService;
 
   private cachedContext: LoadedRepositoryContext | null = null;
 
@@ -298,7 +149,6 @@ export class RepositoryObject {
     this.storage = new StorageService(env.GIT_BUCKET);
     this.browserService = new RepositoryBrowserService(this.storage, this.snapshotStorage);
     this.gitService = new GitService({} as never, this.storage, this.snapshotStorage);
-    this.mergeService = new PullRequestMergeService(this.storage, this.snapshotStorage);
   }
 
   private rememberContext(
@@ -464,8 +314,8 @@ export class RepositoryObject {
     if (!branch) {
       throw new HTTPException(404, { message: "Branch not found" });
     }
-    const defaultTarget = selectDefaultBranchTarget(context);
-    if (defaultTarget.ref === args.branchRef) {
+    const defaultRef = selectDefaultBranchRef(context);
+    if (defaultRef === args.branchRef) {
       throw new HTTPException(409, { message: "Default branch cannot be deleted" });
     }
     if (context.headRefs.length <= 1) {
@@ -498,13 +348,6 @@ export class RepositoryObject {
             String(payload.repo ?? "")
           );
           return jsonResponse({ branches: context.headRefs });
-        }
-        case "resolve-default-branch-target": {
-          const context = await this.ensureLoadedContext(
-            String(payload.owner ?? ""),
-            String(payload.repo ?? "")
-          );
-          return jsonResponse(selectDefaultBranchTarget(context));
         }
         case "create-branch": {
           return jsonResponse(
@@ -603,20 +446,6 @@ export class RepositoryObject {
           );
           return jsonResponse(result);
         }
-        case "compare-refs": {
-          const owner = String(payload.owner ?? "");
-          const repo = String(payload.repo ?? "");
-          const result = await this.browserService.compareRefs(
-            {
-              owner,
-              repo,
-              baseRef: String(payload.baseRef ?? ""),
-              headRef: String(payload.headRef ?? "")
-            },
-            await this.ensureLoadedContext(owner, repo)
-          );
-          return jsonResponse(result);
-        }
         case "initialize-repository": {
           await this.storage.initializeRepository(
             String(payload.owner ?? ""),
@@ -649,20 +478,6 @@ export class RepositoryObject {
           }
           return jsonResponse({ ok: true });
         }
-        case "squash-merge-pull-request": {
-          const owner = String(payload.owner ?? "");
-          const repo = String(payload.repo ?? "");
-          const context = await this.ensureLoadedContext(owner, repo);
-          const result = await this.mergeService.squashMergePullRequestWithLoaded({
-            owner,
-            repo,
-            pullRequest: payload.pullRequest as PullRequestRecord,
-            mergedBy: payload.mergedBy as AuthUser,
-            loaded: context
-          });
-          this.refreshContext(owner, repo, context);
-          return jsonResponse(result);
-        }
         default:
           return errorResponse(400, "bad_request", "Unsupported repository object operation");
       }
@@ -672,15 +487,6 @@ export class RepositoryObject {
       }
       if (error instanceof RepositoryBrowsePathNotFoundError) {
         return errorResponse(404, "path_not_found", error.message);
-      }
-      if (error instanceof PullRequestMergeConflictError) {
-        return errorResponse(409, "merge_conflict", error.message);
-      }
-      if (error instanceof PullRequestMergeBranchNotFoundError) {
-        return errorResponse(409, "merge_branch_not_found", error.message);
-      }
-      if (error instanceof PullRequestMergeNotSupportedError) {
-        return errorResponse(409, "merge_not_supported", error.message);
       }
       throw error;
     }
@@ -721,14 +527,7 @@ export class RepositoryObject {
     if (result.repositoryUpdated) {
       this.refreshContext(owner, repo, context);
     }
-    const headers = new Headers(result.response.headers);
-    headers.set(REPOSITORY_UPDATED_HEADER, result.repositoryUpdated ? "1" : "0");
-    headers.set(UPDATED_REFS_HEADER, encodeUpdatedRefsHeader(result.updatedRefs));
-    return new Response(result.response.body, {
-      status: result.response.status,
-      statusText: result.response.statusText,
-      headers
-    });
+    return result.response;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -754,381 +553,4 @@ export class RepositoryObject {
       throw error;
     }
   }
-}
-
-export class RepositoryObjectClient implements RepositoryComparisonReader {
-  constructor(private readonly namespace: DurableObjectNamespace) {}
-
-  private getStub(repositoryId: string): DurableObjectStub {
-    return this.namespace.getByName(repositoryId);
-  }
-
-  private async sendJsonRequest<T>(args: {
-    repositoryId: string;
-    operation: RepositoryObjectJsonOperation;
-    payload: Record<string, unknown>;
-  }): Promise<T> {
-    const response = await this.getStub(args.repositoryId).fetch("https://repository-object/json", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        operation: args.operation,
-        payload: args.payload
-      } satisfies RepositoryObjectJsonRequest)
-    });
-
-    if (!response.ok) {
-      const error = await parseRepositoryObjectError(response);
-      switch (error.error) {
-        case "path_invalid":
-          throw new RepositoryBrowseInvalidPathError();
-        case "path_not_found":
-          throw new RepositoryBrowsePathNotFoundError(error.message);
-        case "merge_conflict":
-          throw new PullRequestMergeConflictError();
-        case "merge_branch_not_found":
-          if (error.message.startsWith("Base branch not found: ")) {
-            throw new PullRequestMergeBranchNotFoundError(
-              "base",
-              error.message.slice("Base branch not found: ".length)
-            );
-          }
-          if (error.message.startsWith("Head branch not found: ")) {
-            throw new PullRequestMergeBranchNotFoundError(
-              "head",
-              error.message.slice("Head branch not found: ".length)
-            );
-          }
-          throw new HTTPException(500, { message: error.message });
-        case "merge_not_supported":
-          throw new PullRequestMergeNotSupportedError();
-        default:
-          throw new HTTPException(toContentfulStatusCode(response.status), { message: error.message });
-      }
-    }
-
-    return (await response.json()) as T;
-  }
-
-  async listHeadRefs(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-  }): Promise<RepositoryHeadRef[]> {
-    const result = await this.sendJsonRequest<{ branches: RepositoryHeadRef[] }>({
-      repositoryId: args.repositoryId,
-      operation: "list-head-refs",
-      payload: {
-        owner: args.owner,
-        repo: args.repo
-      }
-    });
-    return result.branches;
-  }
-
-  async resolveDefaultBranchTarget(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-  }): Promise<RepositoryDefaultBranchTarget> {
-    return this.sendJsonRequest<RepositoryDefaultBranchTarget>({
-      repositoryId: args.repositoryId,
-      operation: "resolve-default-branch-target",
-      payload: {
-        owner: args.owner,
-        repo: args.repo
-      }
-    });
-  }
-
-  async createBranch(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    branchName: string;
-    sourceOid: string;
-  }): Promise<RepositoryBranchMutationResult> {
-    return this.sendJsonRequest<RepositoryBranchMutationResult>({
-      repositoryId: args.repositoryId,
-      operation: "create-branch",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        branchName: args.branchName,
-        sourceOid: args.sourceOid
-      }
-    });
-  }
-
-  async setDefaultBranch(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    branchName: string;
-  }): Promise<RepositoryBranchMutationResult> {
-    return this.sendJsonRequest<RepositoryBranchMutationResult>({
-      repositoryId: args.repositoryId,
-      operation: "set-default-branch",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        branchName: args.branchName
-      }
-    });
-  }
-
-  async deleteBranch(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    branchName: string;
-  }): Promise<RepositoryBranchMutationResult> {
-    return this.sendJsonRequest<RepositoryBranchMutationResult>({
-      repositoryId: args.repositoryId,
-      operation: "delete-branch",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        branchName: args.branchName
-      }
-    });
-  }
-
-  async getRepositoryDetail(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    ref?: string;
-  }): Promise<RepositoryDetail> {
-    return this.sendJsonRequest<RepositoryDetail>({
-      repositoryId: args.repositoryId,
-      operation: "get-repository-detail",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        ...(args.ref ? { ref: args.ref } : {})
-      }
-    });
-  }
-
-  async browseRepositoryContents(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    ref?: string;
-    path?: string;
-  }): Promise<RepositoryBrowseResult> {
-    return this.sendJsonRequest<RepositoryBrowseResult>({
-      repositoryId: args.repositoryId,
-      operation: "browse-repository-contents",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        ...(args.ref ? { ref: args.ref } : {}),
-        ...(args.path ? { path: args.path } : {})
-      }
-    });
-  }
-
-  async listCommitHistory(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    ref?: string;
-    limit?: number;
-    page?: number;
-  }): Promise<RepositoryCommitHistoryResult> {
-    return this.sendJsonRequest<RepositoryCommitHistoryResult>({
-      repositoryId: args.repositoryId,
-      operation: "list-commit-history",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        ...(args.ref ? { ref: args.ref } : {}),
-        ...(args.limit !== undefined ? { limit: args.limit } : {}),
-        ...(args.page !== undefined ? { page: args.page } : {})
-      }
-    });
-  }
-
-  async listPathHistory(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    ref?: string;
-    path: string;
-    limit?: number;
-  }): Promise<RepositoryPathHistoryResult> {
-    return this.sendJsonRequest<RepositoryPathHistoryResult>({
-      repositoryId: args.repositoryId,
-      operation: "list-path-history",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        path: args.path,
-        ...(args.ref ? { ref: args.ref } : {}),
-        ...(args.limit !== undefined ? { limit: args.limit } : {})
-      }
-    });
-  }
-
-  async getCommitDetail(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    oid: string;
-  }): Promise<RepositoryCommitDetail> {
-    return this.sendJsonRequest<RepositoryCommitDetail>({
-      repositoryId: args.repositoryId,
-      operation: "get-commit-detail",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        oid: args.oid
-      }
-    });
-  }
-
-  async compareRefs(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    baseRef: string;
-    headRef: string;
-  }): Promise<RepositoryCompareResult> {
-    return this.sendJsonRequest<RepositoryCompareResult>({
-      repositoryId: args.repositoryId,
-      operation: "compare-refs",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        baseRef: args.baseRef,
-        headRef: args.headRef
-      }
-    });
-  }
-
-  async initializeRepository(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    defaultBranch?: string;
-  }): Promise<void> {
-    await this.sendJsonRequest<{ ok: true }>({
-      repositoryId: args.repositoryId,
-      operation: "initialize-repository",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        ...(args.defaultBranch ? { defaultBranch: args.defaultBranch } : {})
-      }
-    });
-  }
-
-  async renameRepository(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    nextRepo: string;
-  }): Promise<void> {
-    await this.sendJsonRequest<{ ok: true }>({
-      repositoryId: args.repositoryId,
-      operation: "rename-repository",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        nextRepo: args.nextRepo
-      }
-    });
-  }
-
-  async deleteRepository(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-  }): Promise<void> {
-    await this.sendJsonRequest<{ ok: true }>({
-      repositoryId: args.repositoryId,
-      operation: "delete-repository",
-      payload: {
-        owner: args.owner,
-        repo: args.repo
-      }
-    });
-  }
-
-  async squashMergePullRequest(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    pullRequest: PullRequestRecord;
-    mergedBy: AuthUser;
-  }): Promise<PullRequestSquashMergeResult> {
-    return this.sendJsonRequest<PullRequestSquashMergeResult>({
-      repositoryId: args.repositoryId,
-      operation: "squash-merge-pull-request",
-      payload: {
-        owner: args.owner,
-        repo: args.repo,
-        pullRequest: args.pullRequest,
-        mergedBy: args.mergedBy
-      }
-    });
-  }
-
-  async handleInfoRefs(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    service: GitServiceName;
-  }): Promise<Response> {
-    return this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/info/refs?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}&service=${encodeURIComponent(args.service)}`
-    );
-  }
-
-  async handleUploadPack(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-  }): Promise<Response> {
-    return this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/upload-pack?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}`,
-      {
-        method: "POST",
-        body: args.body
-      }
-    );
-  }
-
-  async handleReceivePack(args: {
-    repositoryId: string;
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-  }): Promise<ReceivePackResponse> {
-    const response = await this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/receive-pack?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}`,
-      {
-        method: "POST",
-        body: args.body
-      }
-    );
-    const updatedRefs = decodeUpdatedRefsHeader(response.headers.get(UPDATED_REFS_HEADER));
-    const repositoryUpdated = response.headers.get(REPOSITORY_UPDATED_HEADER) === "1";
-    return {
-      repositoryUpdated,
-      updatedRefs,
-      response: cloneResponseWithoutHeaders(response, [UPDATED_REFS_HEADER, REPOSITORY_UPDATED_HEADER])
-    };
-  }
-}
-
-export function createRepositoryObjectClient(
-  env: Pick<AppBindings, "REPOSITORY_OBJECTS">
-): RepositoryObjectClient {
-  return new RepositoryObjectClient(env.REPOSITORY_OBJECTS);
 }

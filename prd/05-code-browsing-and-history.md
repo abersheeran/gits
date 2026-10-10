@@ -2,135 +2,71 @@
 
 ## 1. 模块定位
 
-代码浏览层的职责不是做完整 IDE，而是给两类使用者提供足够上下文：
-
-- 人类在仓库页和 PR 页面理解代码、历史与 diff。
-- Agent 在 review、Issue、PR 之间切换时拿到可靠的仓库现状。
-
-它是 `Issue -> PR -> Review -> Merge` 的上下文底座。
+帮助用户在网页中阅读仓库文件、查看提交改动和追溯路径历史，保持只读浏览边界。
 
 ## 2. 当前已实现能力
 
-### 2.1 仓库主页
+- 仓库主页：默认分支、分支选择、README、clone URL 和最新提交摘要。
+- 目录与文件：`tree / blob` 路由、目录列表、文本预览、二进制元信息及最近提交。文本使用按需加载的 Monaco 只读查看器。
+- 独立提交页：按分支查看历史，支持分页；仓库主页不再平铺最近提交列表。
+- 提交详情：提交信息、变更统计、按目录组织的变更文件树和文本差异；新增、删除文本文件也显示差异。
+- 路径历史：查看单个路径的相关提交，可打开提交详情。
+- 差异查看默认显示改动行及上下 5 行，可展开更多上下文。提交详情侧边面板向下滚动时收起摘要，向上滚动或回到顶部时恢复。
+- 移动端目录列表折叠次要列，分支选择等控件适配可用宽度。
 
-- 默认分支解析
-- 分支列表
-- README 渲染
-- clone URL 展示
-- open issue / open pull request 计数
-- 最新提交摘要展示
-- `Recent commits` 列表已从仓库主页移除，改为独立 `Commits` 界面承载
+## 3. 当前实现与数据结构
 
-### 2.2 文件与目录浏览
+仓库详情、目录/文件、提交列表、单提交和路径历史均通过 `RepositoryObject` 读取。DO 复用内存仓库，依次以 DO 快照、R2 作为恢复来源。
 
-- `tree / blob` 路由
-- 目录树浏览
-- 文本文件预览
-- 二进制文件元信息
-- 最新提交摘要展示
-- 文本查看统一使用 Monaco 只读 viewer，按需懒加载
-- 移动端目录列表会折叠次要列，避免文件名、提交摘要和时间并排挤压导致横向溢出
+`RepositoryBrowserService` 返回以下派生数据，不为浏览结果单独建 D1 表：
 
-### 2.3 历史与比较
+- 仓库详情：默认分支、选中引用、提交 OID、分支列表和 README。
+- 目录/文件：路径、对象 OID、类型、最近提交；文件另含大小、二进制标记、截断标记和文本内容。
+- 提交列表：提交摘要及 `page / perPage / hasNextPage` 分页信息。
+- 提交详情：提交元数据、变更文件数、增删行数及结构化差异。
+- 路径历史：引用、路径和提交摘要列表。
 
-- 独立仓库 commit 历史页，支持按页浏览提交记录
-- 分支 commit 历史
-- 单路径历史
-- 单提交详情
-- compare diff
-- commit detail / compare 默认只显示改动行以及上下 5 行代码，可按需展开更多上下文
-- commit detail changes 左侧提供按目录组织的文件树，并标记新增 / 修改 / 删除文件，便于快速切换阅读
-- commit detail / compare 对新增或删除的文本文件会继续渲染结构化文本 diff，不会退化成 `Binary change`
-- commit detail sheet 顶部摘要栏在向下滚动 changes 区域时自动收起，向上滚动或回到顶部时恢复，释放纵向阅读空间
-- 分支选择等固定宽度控件在移动端改为占满可用宽度，避免工具栏换行后仍超出视口
-- ahead / behind
-- mergeability 估算
-- 统一 diff 结构：
-  - `change`
-  - `hunk`
-  - `line`
+## 4. 关键流程
 
-### 2.4 为评审复用的 diff 能力
-
-- PR 页直接复用 compare 结构化结果
-- PR 与 commit changes 复用同一套 changes workspace 结构：左侧文件树，右侧 diff
-- Review thread 锚点依赖文件路径、range 和 hunk header
-- 新 commit 后的 thread re-anchor 与 stale 判断依赖 compare 结果再次映射
-
-## 3. 当前实现方式
-
-- 仓库详情、contents、commits、commit detail、history、compare 都通过 `RepositoryObject` 访问。
-- 同一仓库的多个浏览请求共享一次 hydrate 后的内存上下文。
-- `RepositoryBrowserService` 负责文件读取、README 识别、commit 摘要、compare 与 diff 结构化。
-- 前端当前拆分为：
-  - 仓库 code 页：仓库首页与 tree/blob 浏览
-  - 独立 commits 页：分支 commit 历史与提交详情
-  - compare / path history 仍复用同一套浏览服务和 diff 结构
-
-## 4. 当前关键流程
-
-1. 用户进入仓库页或 PR compare。
-2. Worker 以 `repository.id` 路由到对应 `RepositoryObject`。
-3. `RepositoryObject` 如有缓存则直接复用，否则从 R2 hydrate 仓库。
-4. 浏览服务返回树、文件预览、commit 历史或 compare 结果。
-5. PR 评审与 review thread 重锚继续消费同一份 diff 结构。
+1. 用户选择仓库、引用和路径，或打开提交记录。
+2. Worker 检查仓库读权限，将请求路由到仓库 DO。
+3. 浏览服务读取 Git 对象并生成目录、文件或历史结果。
+4. 前端在代码页展示内容，在独立提交页翻页，通过侧边面板查看提交详情。
 
 ## 5. 当前接口
 
-- `GET /api/repos/:owner/:repo`
-- `GET /api/repos/:owner/:repo/branches`
-- `GET /api/repos/:owner/:repo/contents`
-- `GET /api/repos/:owner/:repo/commits`，支持 `page` / `limit` 分页参数并返回分页元数据
-- `GET /api/repos/:owner/:repo/commits/:oid`
-- `GET /api/repos/:owner/:repo/history`
-- `GET /api/repos/:owner/:repo/compare`
+| 接口 | 查询参数与用途 |
+| --- | --- |
+| `GET /api/repos/:owner/:repo` | 可选 `ref`；仓库信息及 README |
+| `GET /api/repos/:owner/:repo/branches` | 分支列表 |
+| `GET /api/repos/:owner/:repo/contents` | 可选 `ref`、`path`；省略路径时读取根目录 |
+| `GET /api/repos/:owner/:repo/commits` | 可选 `ref`、`page`、`limit`；默认第 1 页、每页 20 条 |
+| `GET /api/repos/:owner/:repo/commits/:oid` | 单提交详情 |
+| `GET /api/repos/:owner/:repo/history` | 必填 `path`，可选 `ref`、`limit`；默认最多 20 条，无分页参数 |
+
+`ref` 可使用分支名、完整引用或提交 OID。无权限读取私有仓库时返回 404。
 
 ## 6. 关键代码文件
 
 - `src/services/repository-browser-service.ts`
+- `src/services/repository-diff.ts`
 - `src/services/repository-object.ts`
-- `src/routes/api/index.ts`
 - `src/routes/api/repository-browser-routes.ts`
-- `src/routes/api/repository-browser-routes.test.ts`
-- `src/routes/api/repository-browser-routes.integration.test.ts`
-- `src/routes/api/pull-request-routes.ts`
+- `web/src/App.tsx`
 - `web/src/pages/repository-page.tsx`
 - `web/src/pages/repository-commits-page.tsx`
+- `web/src/components/repository/repository-commit-detail-sheet.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
-- `web/src/components/repository/repository-tabs.tsx`
 - `web/src/components/repository/repository-change-diff-editor.tsx`
+- `web/src/components/common/changes-workspace.tsx`
 - `web/src/components/ui/monaco-text-viewer.tsx`
-- `web/src/lib/monaco.ts`
 - `web/src/lib/api.ts`
 
-## 7. 当前边界与缺口
+## 7. 当前边界与下一步
 
-### 7.1 还没有代码搜索
+- 没有代码搜索和网页文件编辑。
+- README 读取上限 200 KiB，文本文件预览上限 512 KiB；超限文本会截断，二进制文件不显示文本内容。
+- 提交列表已分页，路径历史仍按数量限制返回。
+- 已支持按提交 OID 浏览，但缺少便捷的文件片段永久链接和行定位。
 
-- 当前没有按文件名、关键字或符号搜索代码的能力。
-- Issue 和 review 反馈还不能自动反推出相关文件候选。
-
-### 7.2 还没有面向任务的 Context Bundle
-
-当前浏览层能返回仓库事实，但还不能直接整理为 Agent 更好消费的上下文包，例如：
-
-- 候选文件
-- 相关 diff
-- 相关 review thread
-- 最近一次 session 的关键 artifact
-
-### 7.3 永久定位能力不足
-
-- 已有 review thread 锚点。
-- 但还缺面向浏览视图的 permalink、文件片段定位和从代码视图跳回任务上下文的更通用能力。
-
-### 7.4 浏览层仍偏“仓库页”
-
-- 现在的代码浏览是仓库中心视角。
-- 还不是 Issue / PR / Review 中的任务中心视角。
-
-## 8. 下一步优先级
-
-1. 增加基础代码搜索。
-2. 增加面向 Issue / PR / Review 的轻量 Context Bundle。
-3. 增加更稳定的文件片段永久定位，并把代码浏览与任务页面导航更紧地连起来。
+下一步优先增加基础代码搜索、文件片段永久链接及路径历史分页。

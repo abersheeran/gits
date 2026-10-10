@@ -2,7 +2,7 @@ function cloneValue<T>(value: T): T {
   return structuredClone(value);
 }
 
-export class MockDurableObjectStorage {
+class MockDurableObjectStorage {
   private readonly values = new Map<string, unknown>();
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
