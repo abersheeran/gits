@@ -77,7 +77,7 @@ Local `.env` values are loaded by the development script. Configure production v
 | `REPOSITORY_OBJECTS` | Durable Object namespace for `RepositoryObject` |
 | `ASSETS` | Frontend build from `web/dist` |
 
-Preserve the Durable Object migration history in `wrangler.jsonc` when upgrading.
+As of 2026-10, D1 and Durable Object migration histories each contain a single initial migration. Deployments from before this reset cannot be upgraded in place and must be recreated; for local development, delete `.wrangler/state` before running `npm run dev`.
 
 ## Deployment
 
@@ -104,7 +104,7 @@ The script applies remote D1 migrations, builds the frontend, then deploys the W
 npm run deploy
 ```
 
-To close registration, remove or empty the production registration variable. Check `GET /healthz` or `GET /api/healthz` after deployment. Existing deployments should read the [upgrade note](docs/USAGE.zh-CN.md#45-已有部署升级).
+To close registration, remove or empty the production registration variable. Check `GET /healthz` or `GET /api/healthz` after deployment. Deployments from before the reset must follow the [reset and redeployment note](docs/USAGE.zh-CN.md#45-迁移历史重置与重新部署).
 
 ### Apply Migrations Separately
 

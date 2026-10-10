@@ -48,4 +48,6 @@
 
 ## 6. 2026-10 产品范围调整
 
-Agent / Actions / Issue / Pull Request 功能已移除，产品收敛为 Git 仓库存储与管理。迁移 `src/db/migrations/0032_remove_agents_issues_pull_requests.sql` 删除这些功能的数据表及相关辅助表，并清理内部令牌和系统用户；现有部署需执行 D1 迁移。
+Agent / Actions / Issue / Pull Request 功能已移除，产品收敛为 Git 仓库存储与管理。2026-10，D1 与 Durable Object 迁移历史均重置为单个初始迁移，分别为 `src/db/migrations/0001_init.sql` 和 `repository-object-v1`。
+
+旧部署不能原地升级：先删除旧 `gits` Worker（连同其 Durable Object 命名空间及存储）、D1 数据库、R2 数据、`gits-actions` 队列，以及旧 `gits-actionscontainer*` 容器应用和镜像，再从零部署。本地开发先删除 `.wrangler/state`，再运行 `npm run dev`。

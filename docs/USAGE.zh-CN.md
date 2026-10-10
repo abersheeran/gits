@@ -73,9 +73,11 @@ npm run db:migrate
 
 `npm run dev` 自动执行本地迁移；`npm run deploy` 自动执行远程迁移。
 
-### 4.5 已有部署升级
+### 4.5 迁移历史重置与重新部署
 
-2026-10 已移除 Agent / Actions / Issue / Pull Request。升级时执行 D1 迁移；`src/db/migrations/0032_remove_agents_issues_pull_requests.sql` 会删除相关数据，需保留的旧数据应在迁移前备份。旧 R2 桶 `gits-action-logs` 和队列 `gits-actions` 已不再使用，可在 Cloudflare 控制台手动删除。保留 `wrangler.jsonc` 中的 DO 迁移历史。
+2026-10 已移除 Agent / Actions / Issue / Pull Request，D1 与 Durable Object 迁移历史均重置为单个初始迁移，分别为 `src/db/migrations/0001_init.sql` 和 `repository-object-v1`。
+
+旧部署不能原地升级：先删除旧 `gits` Worker（连同其 Durable Object 命名空间及存储）、D1 数据库、R2 数据、`gits-actions` 队列，以及旧 `gits-actionscontainer*` 容器应用和镜像，再从零部署。本地开发先删除 `.wrangler/state`，再运行 `npm run dev`。
 
 ## 5. 本地运行、部署与健康检查
 

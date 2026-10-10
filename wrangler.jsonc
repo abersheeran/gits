@@ -16,36 +16,9 @@
 	},
 	"migrations": [
 		{
-			"tag": "actions-container-v1",
-			"new_sqlite_classes": [
-				"ActionsContainer"
-			]
-		},
-		{
-			"tag": "actions-container-instance-types-v1",
-			"new_sqlite_classes": [
-				"ActionsContainerBasic",
-				"ActionsContainerStandard1",
-				"ActionsContainerStandard2",
-				"ActionsContainerStandard3",
-				"ActionsContainerStandard4"
-			]
-		},
-		{
 			"tag": "repository-object-v1",
 			"new_sqlite_classes": [
 				"RepositoryObject"
-			]
-		},
-		{
-			"tag": "remove-actions-containers-v1",
-			"deleted_classes": [
-				"ActionsContainer",
-				"ActionsContainerBasic",
-				"ActionsContainerStandard1",
-				"ActionsContainerStandard2",
-				"ActionsContainerStandard3",
-				"ActionsContainerStandard4"
 			]
 		}
 	],
