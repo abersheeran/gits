@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { buildMonacoModelPath, guessMonacoLanguage, monacoViewerFontFamily } from "@/lib/monaco";
 import { configureMonaco } from "@/lib/monaco-runtime";
@@ -13,13 +14,19 @@ type RepositoryChangeDiffEditorProps = {
 };
 
 export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProps) {
-  const originalPath = buildMonacoModelPath(props.change.previousPath ?? props.change.path, "diff-base");
+  const [contentHeight, setContentHeight] = useState(props.height);
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  const originalPath = buildMonacoModelPath(
+    props.change.previousPath ?? props.change.path,
+    "diff-base"
+  );
   const modifiedPath = buildMonacoModelPath(props.change.path, "diff-head");
   const language = guessMonacoLanguage(props.change.path || props.change.previousPath || undefined);
 
   return (
-    <div className="monaco-shell">
-      <div className="monaco-shell__viewport">
+    <div className="min-w-0 overflow-hidden">
+      <div className="min-w-0">
         <DiffEditor
           original={props.change.oldContent ?? ""}
           modified={props.change.newContent ?? ""}
@@ -27,8 +34,27 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
           modifiedModelPath={modifiedPath}
           language={language}
           theme="gits-light"
-          height={props.height}
-          loading={<div className="px-3 py-2 text-xs text-text-secondary">Loading diff…</div>}
+          height={contentHeight}
+          onMount={(editor) => {
+            cleanup.current?.();
+            const original = editor.getOriginalEditor();
+            const modified = editor.getModifiedEditor();
+            const resize = () =>
+              setContentHeight(
+                Math.min(
+                  760,
+                  Math.max(44, original.getContentHeight(), modified.getContentHeight())
+                )
+              );
+            const subscriptions = [
+              original.onDidContentSizeChange(resize),
+              modified.onDidContentSizeChange(resize),
+              editor.onDidUpdateDiff(resize)
+            ];
+            resize();
+            cleanup.current = () => subscriptions.forEach((subscription) => subscription.dispose());
+          }}
+          loading={<div className="px-3 py-2 text-xs text-text-secondary">正在加载…</div>}
           beforeMount={configureMonaco}
           options={{
             automaticLayout: true,

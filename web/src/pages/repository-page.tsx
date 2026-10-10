@@ -1,751 +1,154 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  BookOpenText,
-  ChevronRight,
-  FileCode2,
-  FolderOpen,
-  History,
-  Link2
-} from "lucide-react";
+import { useCommitDetail } from "@/hooks/use-commit-detail";
+import { RepositoryLayout } from "@/components/common/repository-layout";
+import { RepositoryContents } from "@/components/common/repository-contents";
+import { PathHistorySheet } from "@/components/common/path-history-sheet";
+import { BranchSelect } from "@/components/common/branch-select";
+import { CommitRow } from "@/components/common/commit-row";
+import { ErrorAlert } from "@/components/common/error-alert";
+import { Panel } from "@/components/common/panel";
 import { CopyButton } from "@/components/copy-button";
-import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
-import { RepositoryHeader } from "@/components/repository/repository-header";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
-import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import {
   formatApiError,
-  getRepositoryCommitDetail,
   getRepositoryCommits,
   getRepositoryContents,
   getRepositoryDetail,
-  getRepositoryPathHistory,
   type AuthUser,
-  type CommitHistoryResponse,
-  type RepositoryCommitDetailResponse,
+  type CommitSummary,
   type RepositoryContentsResponse,
-  type RepositoryDetailResponse,
-  type RepositoryPathHistoryResponse
+  type RepositoryDetailResponse
 } from "@/lib/api";
-import { formatRelativeTime, shortOid } from "@/lib/format";
-
-type RepositoryPageProps = {
-  user: AuthUser | null;
-};
-
-type CodeViewKind = "tree" | "blob";
-
-const LazyReadmeMarkdown = lazy(async () => {
-  const module = await import("@/components/readme-markdown");
-  return { default: module.ReadmeMarkdown };
-});
-
-function selectedBranchName(selectedRef: string | null): string | null {
-  if (!selectedRef) {
-    return null;
-  }
-  if (selectedRef.startsWith("refs/heads/")) {
-    return selectedRef.slice("refs/heads/".length);
-  }
-  return selectedRef;
-}
-
-function decodeUriSegment(input: string): string {
-  try {
-    return decodeURIComponent(input);
-  } catch {
-    return input;
-  }
-}
-
-function parseCodeSplatPath(input: string | undefined): string | undefined {
-  if (!input) {
-    return undefined;
-  }
-  const trimmed = input.replace(/^\/+|\/+$/g, "");
-  if (!trimmed) {
-    return undefined;
-  }
-  return trimmed
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .map((segment) => decodeUriSegment(segment))
-    .join("/");
-}
-
-function buildCodePath(input: {
-  owner: string;
-  repo: string;
-  kind: CodeViewKind;
-  ref?: string;
-  path?: string;
-  defaultBranch?: string | null;
-}): string {
-  const base = `/repo/${input.owner}/${input.repo}`;
-  const normalizedPath = input.path?.split("/").filter((segment) => segment.length > 0).join("/");
-  const useBasePath =
-    input.kind === "tree" &&
-    !normalizedPath &&
-    (!input.ref || (input.defaultBranch ? input.ref === input.defaultBranch : false));
-  if (useBasePath) {
-    return base;
-  }
-  if (!input.ref) {
-    return base;
-  }
-
-  const segments = [base, input.kind, encodeURIComponent(input.ref)];
-  if (normalizedPath) {
-    segments.push(...normalizedPath.split("/").map((segment) => encodeURIComponent(segment)));
-  }
-  return segments.join("/");
-}
-
-function buildCommitHistoryPath(input: {
-  owner: string;
-  repo: string;
-  ref?: string;
-  oid?: string;
-}): string {
-  const query = new URLSearchParams();
-  if (input.ref) {
-    query.set("ref", input.ref);
-  }
-  if (input.oid) {
-    query.set("oid", input.oid);
-  }
-  const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  return `/repo/${input.owner}/${input.repo}/commits${suffix}`;
-}
-
-function isCommitOid(value: string | null): value is string {
-  return Boolean(value && /^[0-9a-f]{40}$/i.test(value));
-}
-
-function commitTitle(message: string): string {
-  return (message.split("\n")[0] ?? "").trim() || "(no message)";
-}
-
-function parentPath(path: string): string {
-  if (!path) {
-    return "";
-  }
-  const index = path.lastIndexOf("/");
-  if (index <= 0) {
-    return "";
-  }
-  return path.slice(0, index);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  const kb = bytes / 1024;
-  if (kb < 1024) {
-    return `${kb.toFixed(1)} KB`;
-  }
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
-}
-
-function buildPath(segments: string[], index: number): string {
-  return segments.slice(0, index + 1).join("/");
-}
-
-function fileLineCount(content: string): number {
-  if (!content) {
-    return 0;
-  }
-  return content.split("\n").length;
-}
-
-function BreadcrumbPath({
-  kind,
-  path,
-  onNavigate,
-  noWrap = false
-}: {
-  kind: CodeViewKind;
-  path: string;
-  onNavigate: (next: { kind: CodeViewKind; path: string }) => void;
-  noWrap?: boolean;
-}) {
-  const segments = path ? path.split("/") : [];
-  if (segments.length === 0) {
-    return null;
-  }
-
-  return (
-    <div
-      className={`${
-        noWrap ? "flex items-center gap-1 whitespace-nowrap" : "flex flex-wrap items-center gap-1"
-      } text-xs text-muted-foreground`}
-    >
-      <button
-        type="button"
-        onClick={() => onNavigate({ kind: "tree", path: "" })}
-        className="gh-link rounded px-1 py-0.5"
-      >
-        /
-      </button>
-      {segments.map((segment, index) => (
-        <span key={`${segment}-${index}`} className="inline-flex items-center gap-1">
-          <ChevronRight className="h-3.5 w-3.5" />
-          <button
-            type="button"
-            onClick={() =>
-              onNavigate({
-                kind: kind === "blob" && index === segments.length - 1 ? "blob" : "tree",
-                path: buildPath(segments, index)
-              })
-            }
-            className="gh-link rounded px-1 py-0.5"
-          >
-            {segment}
-          </button>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function RepositoryContentsPanel({
-  contents,
-  onNavigate,
-  onOpenHistory
-}: {
-  contents: RepositoryContentsResponse;
-  onNavigate: (next: { kind: CodeViewKind; path: string }) => void;
-  onOpenHistory?: () => void;
-}) {
-  if (contents.kind === "blob" && contents.file) {
-    return (
-      <section className="min-w-0 border-b xl:border-b-0 xl:border-r">
-        <header className="flex items-center gap-3 border-b px-4 py-3 text-sm font-medium">
-          <span className="inline-flex shrink-0 items-center gap-2">
-            <FileCode2 className="h-4 w-4" />
-            File preview
-          </span>
-          <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
-            <BreadcrumbPath kind="blob" path={contents.path} onNavigate={onNavigate} noWrap />
-          </div>
-          {onOpenHistory ? (
-            <button
-              type="button"
-              onClick={onOpenHistory}
-              className="rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            >
-              History
-            </button>
-          ) : null}
-        </header>
-        <div className="space-y-3 border-b border-border-subtle bg-surface-focus px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline" className="bg-surface-base font-mono text-[11px]">
-              {shortOid(contents.file.oid)}
-            </Badge>
-            <span>{formatBytes(contents.file.size)}</span>
-            {contents.file.content ? <span>{fileLineCount(contents.file.content)} lines</span> : null}
-            {contents.file.truncated ? (
-              <Badge variant="outline" className="bg-surface-base">
-                已截断展示
-              </Badge>
-            ) : null}
-            {contents.file.isBinary ? (
-              <Badge variant="outline" className="bg-surface-base">
-                Binary file
-              </Badge>
-            ) : null}
-          </div>
-          {contents.file.latestCommit ? (
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <AuthorAvatar
-                name={contents.file.latestCommit.author.name}
-                className="h-6 w-6 text-[10px]"
-              />
-              <span className="font-medium text-foreground">
-                {commitTitle(contents.file.latestCommit.message)}
-              </span>
-              <span>{formatRelativeTime(contents.file.latestCommit.author.timestamp * 1000)}</span>
-            </div>
-          ) : null}
-        </div>
-
-        {contents.file.isBinary ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            当前文件为二进制内容，暂不支持在线文本预览。
-          </div>
-        ) : (
-          <div className="p-4">
-            <MonacoTextViewer
-              value={contents.file.content ?? ""}
-              path={contents.file.path}
-              scope="repository-blob"
-              minHeight={260}
-              maxHeight={860}
-            />
-          </div>
-        )}
-      </section>
-    );
-  }
-
-  return (
-    <section className="min-w-0 border-b xl:border-b-0 xl:border-r">
-      <header className="flex items-center gap-3 border-b px-4 py-3 text-sm font-medium">
-        <span className="inline-flex shrink-0 items-center gap-2">
-          <FolderOpen className="h-4 w-4" />
-          Files
-        </span>
-        <div className="min-w-0 flex-1 overflow-x-auto pb-0.5">
-          <BreadcrumbPath kind="tree" path={contents.path} onNavigate={onNavigate} noWrap />
-        </div>
-      </header>
-
-      <ul className="divide-y">
-        {contents.path ? (
-          <li>
-            <button
-              type="button"
-              onClick={() => onNavigate({ kind: "tree", path: parentPath(contents.path) })}
-              className="flex w-full items-center justify-between gap-2 px-4 py-2 text-left text-sm hover:bg-muted/40"
-            >
-              <span className="inline-flex items-center gap-2">
-                <FolderOpen className="h-4 w-4 text-amber-600" />
-                ..
-              </span>
-              <span className="text-xs text-muted-foreground">up</span>
-            </button>
-          </li>
-        ) : null}
-
-        {contents.entries.map((entry) => {
-          const isDir = entry.type === "tree";
-          const isBlob = entry.type === "blob";
-          const canOpen = isDir || isBlob;
-          return (
-            <li key={entry.path}>
-              {canOpen ? (
-                <button
-                  type="button"
-                  onClick={() => onNavigate({ kind: isDir ? "tree" : "blob", path: entry.path })}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 px-4 py-2 text-left text-sm hover:bg-muted/40 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_120px] md:items-center md:gap-3"
-                >
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    {isDir ? (
-                      <FolderOpen className="h-4 w-4 shrink-0 text-amber-600" />
-                    ) : (
-                      <FileCode2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="truncate font-medium">{entry.name}</span>
-                  </span>
-                  <span className="hidden truncate text-xs text-muted-foreground md:block">
-                    {entry.latestCommit ? commitTitle(entry.latestCommit.message) : entry.type}
-                  </span>
-                  <span className="shrink-0 text-right text-xs text-muted-foreground">
-                    {entry.latestCommit
-                      ? formatRelativeTime(entry.latestCommit.author.timestamp * 1000)
-                      : entry.type}
-                  </span>
-                </button>
-              ) : (
-                <div className="flex items-center justify-between gap-2 px-4 py-2 text-sm text-muted-foreground">
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    <FileCode2 className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{entry.name}</span>
-                  </span>
-                  <span className="shrink-0 text-xs">submodule</span>
-                </div>
-              )}
-            </li>
-          );
-        })}
-
-        {contents.entries.length === 0 && !contents.path ? (
-          <li className="px-4 py-3 text-sm text-muted-foreground">仓库为空，当前分支没有可浏览的文件。</li>
-        ) : null}
-      </ul>
-
-      {contents.readme ? (
-        <div className="border-t">
-          <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
-            <BookOpenText className="h-4 w-4" />
-            README
-            <span className="text-xs font-normal text-muted-foreground">{contents.readme.path}</span>
-          </header>
-          <div className="p-4">
-            <Suspense fallback={<div className="text-sm text-muted-foreground">README 渲染中...</div>}>
-              <LazyReadmeMarkdown content={contents.readme.content} />
-            </Suspense>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-export function RepositoryPage({ user }: RepositoryPageProps) {
-  const params = useParams<{
-    owner: string;
-    repo: string;
-    kind: string;
-    ref: string;
-    "*": string;
-  }>();
+import {
+  buildCodePath,
+  decodeUriSegment,
+  parseCodeSplatPath,
+  selectedBranchName,
+  type CodeViewKind
+} from "@/lib/repository-navigation";
+export function RepositoryPage({ user }: { user: AuthUser | null }) {
+  const params = useParams();
+  const { owner = "", repo = "" } = params;
   const navigate = useNavigate();
-  const owner = params.owner ?? "";
-  const repo = params.repo ?? "";
   const isCodePath = params.kind === "tree" || params.kind === "blob";
-  const viewKind: CodeViewKind = params.kind === "blob" ? "blob" : "tree";
+  const kind: CodeViewKind = params.kind === "blob" ? "blob" : "tree";
   const ref = isCodePath ? decodeUriSegment(params.ref ?? "") : undefined;
   const path = isCodePath ? parseCodeSplatPath(params["*"]) : undefined;
-
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [history, setHistory] = useState<CommitHistoryResponse | null>(null);
   const [contents, setContents] = useState<RepositoryContentsResponse | null>(null);
-  const [pathHistory, setPathHistory] = useState<RepositoryPathHistoryResponse | null>(null);
-  const [selectedCommitDetail, setSelectedCommitDetail] = useState<RepositoryCommitDetailResponse | null>(null);
-  const [commitDetailLoading, setCommitDetailLoading] = useState(false);
-  const [commitDetailError, setCommitDetailError] = useState<string | null>(null);
-  const [commitDetailSheetOpen, setCommitDetailSheetOpen] = useState(false);
+  const [latest, setLatest] = useState<CommitSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const commitDetailRequestId = useRef(0);
-
+  const [oid, setOid] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const commit = useCommitDetail(owner, repo, oid);
   useEffect(() => {
-    if (params.kind && !isCodePath && owner && repo) {
-      navigate(`/repo/${owner}/${repo}`, { replace: true });
-    }
-  }, [isCodePath, navigate, owner, params.kind, repo]);
-
+    if (params.kind && !isCodePath) navigate(`/repo/${owner}/${repo}`, { replace: true });
+  }, [params.kind, isCodePath, navigate, owner, repo]);
   useEffect(() => {
     let canceled = false;
-
     async function load() {
-      if (!owner || !repo) {
-        return;
-      }
-
       setLoading(true);
       setError(null);
+      setOid(null);
+      setHistoryOpen(false);
       try {
-        const [nextDetail, nextHistory, nextContents, nextPathHistory] = await Promise.all([
+        const [nextDetail, nextHistory, nextContents] = await Promise.all([
           getRepositoryDetail(owner, repo, ref),
           getRepositoryCommits(owner, repo, { ref, limit: 1 }),
-          getRepositoryContents(owner, repo, { ref, path }),
-          path ? getRepositoryPathHistory(owner, repo, { ref, path, limit: 12 }) : Promise.resolve(null)
+          getRepositoryContents(owner, repo, { ref, path })
         ]);
-
-        if (canceled) {
-          return;
-        }
-
-        setDetail(nextDetail);
-        setHistory(nextHistory);
-        setContents(nextContents);
-        setPathHistory(nextPathHistory);
-        setSelectedCommitDetail(null);
-        setCommitDetailLoading(false);
-        setCommitDetailError(null);
-        setCommitDetailSheetOpen(false);
-      } catch (loadError) {
         if (!canceled) {
-          setError(formatApiError(loadError));
+          setDetail(nextDetail);
+          setContents(nextContents);
+          setLatest(nextContents.file?.latestCommit ?? nextHistory.commits[0] ?? null);
         }
+      } catch (cause) {
+        if (!canceled) setError(formatApiError(cause));
       } finally {
-        if (!canceled) {
-          setLoading(false);
-        }
+        if (!canceled) setLoading(false);
       }
     }
-
     void load();
     return () => {
       canceled = true;
     };
-  }, [owner, path, ref, repo]);
-
-  const selectedBranch = useMemo(() => selectedBranchName(detail?.selectedRef ?? null), [detail]);
-  const selectedBranchInOptions =
-    selectedBranch?.length && detail?.branches.some((branch) => branch.name === selectedBranch)
-      ? selectedBranch
-      : undefined;
-  const commitShortOid =
-    selectedBranch && isCommitOid(selectedBranch) ? shortOid(selectedBranch) : null;
-  const commitSelectValue =
-    selectedBranch && isCommitOid(selectedBranch) ? `__commit__:${selectedBranch}` : undefined;
-  const selectedRefInSelect = commitSelectValue ?? selectedBranchInOptions;
-  const cloneUrl = `${window.location.origin}/${owner}/${repo}.git`;
-
-  function openCodeLocation(input: { kind: CodeViewKind; nextPath?: string; nextRef?: string }) {
-    const nextRef = input.nextRef ?? selectedBranch ?? detail?.defaultBranch ?? undefined;
-    const nextUrl = buildCodePath({
+  }, [owner, repo, ref, path]);
+  const selected =
+    selectedBranchName(detail?.selectedRef ?? null) ?? detail?.defaultBranch ?? undefined;
+  function link(nextKind: CodeViewKind, nextPath: string, nextRef = selected) {
+    return buildCodePath({
       owner,
       repo,
-      kind: input.kind,
+      kind: nextKind,
+      path: nextPath,
       ref: nextRef,
-      path: input.nextPath,
-      defaultBranch: detail?.defaultBranch ?? null
-    });
-    navigate(nextUrl);
-  }
-
-  function updatePath(next: { kind: CodeViewKind; path: string }) {
-    openCodeLocation({
-      kind: next.kind,
-      nextPath: next.path
+      defaultBranch: detail?.defaultBranch
     });
   }
-
-  function openCommitFiles(commitOid: string) {
-    openCodeLocation({
-      kind: "tree",
-      nextRef: commitOid,
-      nextPath: ""
-    });
-  }
-
-  function openCommitHistory(commitOid?: string) {
-    navigate(
-      buildCommitHistoryPath({
-        owner,
-        repo,
-        ref: selectedBranch ?? detail?.defaultBranch ?? undefined,
-        oid: commitOid
-      })
-    );
-  }
-
-  function closeCommitDetailSheet() {
-    commitDetailRequestId.current += 1;
-    setCommitDetailSheetOpen(false);
-    setSelectedCommitDetail(null);
-    setCommitDetailLoading(false);
-    setCommitDetailError(null);
-  }
-
-  async function openCommitDetail(commitOid: string) {
-    const requestId = commitDetailRequestId.current + 1;
-    commitDetailRequestId.current = requestId;
-    setCommitDetailSheetOpen(true);
-    setSelectedCommitDetail(null);
-    setCommitDetailLoading(true);
-    setCommitDetailError(null);
-    try {
-      const detailResponse = await getRepositoryCommitDetail(owner, repo, commitOid);
-      if (commitDetailRequestId.current !== requestId) {
-        return;
-      }
-      setSelectedCommitDetail(detailResponse);
-    } catch (loadError) {
-      if (commitDetailRequestId.current !== requestId) {
-        return;
-      }
-      setCommitDetailError(formatApiError(loadError));
-    } finally {
-      if (commitDetailRequestId.current === requestId) {
-        setCommitDetailLoading(false);
-      }
-    }
-  }
-
-  if (!owner || !repo) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>参数错误</AlertTitle>
-        <AlertDescription>仓库路径不完整。</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>加载失败</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!detail || !history || !contents) {
-    return (
-      <PageLoadingState
-        title="Loading repository"
-        description={`Preparing code, latest commit, and README for ${owner}/${repo}.`}
-      />
-    );
-  }
-
-  const latestCommit = history.commits[0] ?? null;
-  const showSidePanel = Boolean(pathHistory && pathHistory.commits.length > 0);
-  const selectedBranchLabel = selectedBranch
-    ? isCommitOid(selectedBranch)
-      ? `commit: ${selectedBranch}`
-      : `branch: ${selectedBranch}`
-    : null;
-
+  const cloneUrl = `${window.location.origin}/${owner}/${repo}.git`;
+  if (!detail || !contents) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
   return (
-    <div className="app-page">
-      <RepositoryHeader
+    <RepositoryLayout detail={detail} user={user}>
+      <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <BranchSelect
+          detail={detail}
+          disabled={loading}
+          onChange={(value) => navigate(link(kind, path ?? "", value))}
+        />
+        <div className="flex min-w-0 items-center gap-2">
+          <code
+            title={cloneUrl}
+            className="min-w-0 flex-1 truncate font-mono text-[13px] text-text-secondary"
+          >
+            {cloneUrl}
+          </code>
+          <CopyButton value={cloneUrl} idleLabel="复制地址" />
+        </div>
+      </div>
+      <ErrorAlert error={error} />
+      {loading ? (
+        <Panel>
+          <InlineLoadingState />
+        </Panel>
+      ) : (
+        !error && (
+          <>
+            {latest && (
+              <Panel>
+                <CommitRow commit={latest} onOpen={setOid} />
+              </Panel>
+            )}
+            <RepositoryContents
+              key={`${ref}/${path}`}
+              contents={contents}
+              link={link}
+              onHistory={() => setHistoryOpen(true)}
+              onCommit={setOid}
+            />
+          </>
+        )
+      )}
+      <PathHistorySheet
+        key={`${ref}/${path}`}
         owner={owner}
         repo={repo}
-        detail={detail}
-        user={user}
-        active="code"
-        selectedBranchLabel={selectedBranchLabel}
+        reference={selected}
+        path={path ?? ""}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onOpenCommit={setOid}
       />
-
-      {loading ? (
-        <InlineLoadingState
-          title="Refreshing code view"
-          description="Updating the selected ref, path history, and file preview."
-        />
-      ) : null}
-
-      <section className="page-panel overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-border-subtle bg-surface-focus px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select
-              value={selectedRefInSelect}
-              onValueChange={(value) => {
-                if (value.startsWith("__commit__:")) {
-                  return;
-                }
-                openCodeLocation({
-                  kind: viewKind,
-                  nextRef: value,
-                  nextPath: path
-                });
-              }}
-            >
-              <SelectTrigger className="h-9 w-full bg-surface-base text-label-sm sm:w-[220px]">
-                <SelectValue placeholder="选择分支" />
-              </SelectTrigger>
-              <SelectContent>
-                {commitSelectValue ? (
-                  <SelectItem value={commitSelectValue} disabled>
-                    commit: {commitShortOid}
-                  </SelectItem>
-                ) : null}
-                {detail.branches.map((branch) => (
-                  <SelectItem key={branch.name} value={branch.name}>
-                    {branch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-body-micro text-text-secondary">default: {detail.defaultBranch ?? "none"}</span>
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="panel-card-compact min-w-0">
-              <div className="flex items-center gap-2">
-                <Link2 className="h-3.5 w-3.5 text-text-supporting" />
-                <code className="block truncate font-mono text-body-micro text-text-primary">{cloneUrl}</code>
-              </div>
-            </div>
-            <CopyButton value={cloneUrl} />
-          </div>
-        </div>
-
-        {latestCommit ? (
-          <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle px-4 py-3 text-body-micro text-text-secondary">
-            <AuthorAvatar name={latestCommit.author.name} className="h-6 w-6 text-[10px]" />
-            <button
-              type="button"
-              onClick={() => openCommitHistory(latestCommit.oid)}
-              className="gh-link font-display text-heading-4"
-            >
-              {commitTitle(latestCommit.message)}
-            </button>
-            <span>·</span>
-            <span>{latestCommit.author.name}</span>
-            <span>·</span>
-            <span>{formatRelativeTime(latestCommit.author.timestamp * 1000)}</span>
-            <button
-              type="button"
-              onClick={() => openCommitHistory(latestCommit.oid)}
-              className="gh-link ml-auto font-mono text-body-micro"
-            >
-              {shortOid(latestCommit.oid)}
-            </button>
-          </div>
-        ) : null}
-
-        <div className={showSidePanel ? "grid gap-0 xl:grid-cols-[minmax(0,1fr)_340px]" : undefined}>
-          <RepositoryContentsPanel contents={contents} onNavigate={updatePath} />
-
-          {showSidePanel ? (
-            <aside className="min-w-0">
-              {pathHistory && pathHistory.commits.length > 0 ? (
-                <section className="border-b">
-                  <header className="inline-flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
-                    <History className="h-4 w-4" />
-                    Path history
-                  </header>
-                  <ul className="divide-y">
-                    {pathHistory.commits.map((commit) => (
-                      <li key={`path-${commit.oid}`} className="space-y-1 p-3">
-                        <div className="flex items-start gap-2">
-                          <AuthorAvatar name={commit.author.name} className="h-7 w-7 text-[11px]" />
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void openCommitDetail(commit.oid);
-                              }}
-                              className="gh-link block max-w-full truncate text-left font-display text-heading-4 leading-5"
-                            >
-                              {commitTitle(commit.message)}
-                            </button>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <span className="truncate">{commit.author.name}</span>
-                              <span>·</span>
-                              <span>{formatRelativeTime(commit.author.timestamp * 1000)}</span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => openCommitFiles(commit.oid)}
-                            className="gh-link font-mono text-body-micro"
-                          >
-                            {shortOid(commit.oid)}
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-
-            </aside>
-          ) : null}
-        </div>
-      </section>
-
       <RepositoryCommitDetailSheet
-        open={commitDetailSheetOpen}
-        detail={selectedCommitDetail}
-        loading={commitDetailLoading}
-        error={commitDetailError}
+        open={Boolean(oid)}
+        {...commit}
         onOpenChange={(open) => {
-          if (!open) {
-            closeCommitDetailSheet();
-          }
+          if (!open) setOid(null);
         }}
-        onBrowseSnapshot={openCommitFiles}
+        onBrowseSnapshot={(value) => navigate(link("tree", "", value))}
       />
-    </div>
+    </RepositoryLayout>
   );
 }

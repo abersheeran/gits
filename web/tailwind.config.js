@@ -86,16 +86,8 @@ export default {
         },
       },
       boxShadow: {
-        container:
-          "inset 0 0 0 0.5px rgba(15,14,13,0.06), 0 1px 2px rgba(15,14,13,0.02)",
-        "container-elevated":
-          "0 18px 40px -24px rgba(15,14,13,0.25), 0 6px 18px rgba(15,14,13,0.06), inset 0 0 0 0.5px rgba(15,14,13,0.04)",
-        button:
-          "0 6px 16px -10px rgba(15,14,13,0.25), inset 0 0 0 0.5px rgba(255,255,255,0.16)",
-        popover:
+        overlay:
           "0 28px 48px -28px rgba(15,14,13,0.25), 0 10px 24px rgba(15,14,13,0.12), inset 0 0 0 0.5px rgba(15,14,13,0.04)",
-        "button-elevated":
-          "0 16px 24px -16px rgba(15,14,13,0.3), inset 0 -2px 8px rgba(255,255,255,0.2)",
       },
       spacing: {
         "page-gutter": "var(--layout-gutter-mobile)",

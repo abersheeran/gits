@@ -1,22 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
-import { CopyButton } from "@/components/copy-button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { useState, type FormEvent } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useRepository } from "@/hooks/use-repository";
+import { RepositoryLayout } from "@/components/common/repository-layout";
+import { Panel } from "@/components/common/panel";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { ErrorAlert } from "@/components/common/error-alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { PageLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import {
   deleteRepository,
   formatApiError,
@@ -26,275 +27,134 @@ import {
   type RepositoryDetailResponse
 } from "@/lib/api";
 
-type RepositorySettingsPageProps = {
-  user: AuthUser | null;
-};
-
-export function RepositorySettingsPage({ user }: RepositorySettingsPageProps) {
+function SettingsForm({
+  detail,
+  onSaved
+}: {
+  detail: RepositoryDetailResponse;
+  onSaved: (detail: RepositoryDetailResponse) => void;
+}) {
+  const repository = detail.repository;
+  const owner = repository.owner_username;
+  const repo = repository.name;
   const navigate = useNavigate();
-  const params = useParams<{ owner: string; repo: string }>();
-  const owner = params.owner ?? "";
-  const repo = params.repo ?? "";
-
-  const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [isPrivate, setIsPrivate] = useState(true);
-  const [savePending, setSavePending] = useState(false);
-  const [deletePending, setDeletePending] = useState(false);
-  const [confirmRepoName, setConfirmRepoName] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    let canceled = false;
-
-    async function load() {
-      if (!owner || !repo) {
-        return;
-      }
-
-      setLoading(true);
-      setPageError(null);
-      try {
-        const data = await getRepositoryDetail(owner, repo);
-        if (canceled) {
-          return;
-        }
-        setDetail(data);
-        setName(data.repository.name);
-        setDescription(data.repository.description ?? "");
-        setIsPrivate(data.repository.is_private === 1);
-      } catch (loadError) {
-        if (!canceled) {
-          setPageError(formatApiError(loadError));
-        }
-      } finally {
-        if (!canceled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-    return () => {
-      canceled = true;
-    };
-  }, [owner, repo]);
-
-  const cloneUrl = useMemo(() => `${window.location.origin}/${owner}/${repo}.git`, [owner, repo]);
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (!owner || !repo) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>参数错误</AlertTitle>
-        <AlertDescription>仓库路径不完整。</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (pageError) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>加载失败</AlertTitle>
-        <AlertDescription>{pageError}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (loading || !detail) {
-    return (
-      <PageLoadingState
-        title="Loading repository settings"
-        description={`Fetching repository settings for ${owner}/${repo}.`}
-      />
-    );
-  }
-
-  if (detail.repository.owner_username !== user.username) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>无权限</AlertTitle>
-        <AlertDescription>只有仓库 owner 可修改设置。</AlertDescription>
-      </Alert>
-    );
-  }
-
-  async function refreshRepositoryDetail(nextOwner = owner, nextRepo = repo) {
-    const reloaded = await getRepositoryDetail(nextOwner, nextRepo);
-    setDetail(reloaded);
-  }
-
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
+  const [name, setName] = useState(repo);
+  const [description, setDescription] = useState(repository.description ?? "");
+  const [visibility, setVisibility] = useState(repository.is_private ? "private" : "public");
+  const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  async function save(event: FormEvent) {
     event.preventDefault();
-    if (savePending) {
-      return;
-    }
-
-    setSavePending(true);
-    setFormError(null);
-    setNotice(null);
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    setSaved(false);
     try {
       await updateRepository(owner, repo, {
         name,
-        description: description.trim() ? description : null,
-        isPrivate
+        description: description.trim() || null,
+        isPrivate: visibility === "private"
       });
-      setNotice("仓库设置已更新");
       if (name !== repo) {
         navigate(`/repo/${owner}/${name}/settings`, { replace: true });
       } else {
-        await refreshRepositoryDetail();
+        onSaved(await getRepositoryDetail(owner, repo));
+        setSaved(true);
       }
-    } catch (submitError) {
-      setFormError(formatApiError(submitError));
+    } catch (cause) {
+      setError(formatApiError(cause));
     } finally {
-      setSavePending(false);
+      setPending(false);
     }
   }
-
-  async function handleDelete(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (deletePending) {
-      return;
-    }
-    if (confirmRepoName !== repo) {
-      setFormError("确认名不匹配，未删除。");
-      return;
-    }
-
-    setDeletePending(true);
-    setFormError(null);
-    try {
-      await deleteRepository(owner, repo);
-      navigate("/dashboard", { replace: true });
-    } catch (deleteError) {
-      setFormError(formatApiError(deleteError));
-    } finally {
-      setDeletePending(false);
-    }
-  }
-
   return (
-    <div className="app-page">
-      <section className="page-hero">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-body-sm text-text-secondary">
-              <Link to={`/repo/${owner}/${repo}`} className="gh-link">
-                {owner}
-              </Link>
-              <span>/</span>
-              <span>{repo}</span>
-              <Badge variant="secondary">Settings</Badge>
-            </div>
-            <div className="flex items-start gap-2">
-              <h1 className="font-display text-card-title text-text-primary">仓库设置</h1>
-              <HelpTip content="管理仓库信息与删除操作。" />
-            </div>
+    <>
+      <Panel header="常规">
+        <form className="space-y-4 p-4" onSubmit={save} onChange={() => setSaved(false)}>
+          <ErrorAlert error={error} />
+          <div className="space-y-2">
+            <Label htmlFor="repo-name">仓库名</Label>
+            <Input
+              id="repo-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
           </div>
-          <Button variant="outline" asChild>
-            <Link to={`/repo/${owner}/${repo}/branches`}>管理分支</Link>
+          <div className="space-y-2">
+            <Label htmlFor="repo-description">描述</Label>
+            <Textarea
+              id="repo-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="repo-visibility">可见性</Label>
+            <Select
+              value={visibility}
+              onValueChange={(value) => {
+                setVisibility(value);
+                setSaved(false);
+              }}
+            >
+              <SelectTrigger id="repo-visibility">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="private">私有</SelectItem>
+                <SelectItem value="public">公开</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-3">
+            <PendingButton type="submit" pending={pending} pendingText="保存中…">
+              保存
+            </PendingButton>
+            {saved && (
+              <span role="status" className="text-body-xs text-text-secondary">
+                已保存
+              </span>
+            )}
+          </div>
+        </form>
+      </Panel>
+      <Panel header="危险操作">
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4">
+          <p className="text-body-xs text-text-secondary">删除仓库及其全部文件，此操作无法撤销。</p>
+          <Button variant="outline" onClick={() => setDeleting(true)}>
+            删除仓库
           </Button>
         </div>
-      </section>
-
-      {formError ? (
-        <Alert variant="destructive">
-          <AlertTitle>操作失败</AlertTitle>
-          <AlertDescription>{formError}</AlertDescription>
-        </Alert>
-      ) : null}
-      {notice ? (
-        <Alert>
-          <AlertTitle>已更新</AlertTitle>
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>General</CardTitle>
-            <HelpTip content="修改仓库名称、描述和可见性。" />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Clone URL</Label>
-            <div className="flex items-center gap-2">
-              <Input value={cloneUrl} readOnly />
-              <CopyButton value={cloneUrl} idleLabel="复制地址" copiedLabel="已复制" />
-            </div>
-          </div>
-
-          <form className="space-y-4" onSubmit={handleSave}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="repo-name">仓库名</Label>
-                <Input id="repo-name" value={name} onChange={(event) => setName(event.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="repo-description">描述</Label>
-                <Input
-                  id="repo-description"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="repo-private"
-                checked={isPrivate}
-                onCheckedChange={(checked) => setIsPrivate(checked === true)}
-              />
-              <Label htmlFor="repo-private">私有仓库</Label>
-            </div>
-            <PendingButton type="submit" pending={savePending} pendingText="保存中...">
-              保存设置
-            </PendingButton>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="border-destructive/50">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>Danger Zone</CardTitle>
-            <HelpTip content="删除仓库后不可恢复，底层对象与元数据都会一起清理。" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={handleDelete}>
-            <div className="space-y-2">
-              <Label htmlFor="confirmRepoName">输入仓库名确认删除</Label>
-              <Input
-                id="confirmRepoName"
-                value={confirmRepoName}
-                onChange={(event) => setConfirmRepoName(event.target.value)}
-                placeholder={repo}
-                required
-              />
-            </div>
-            <PendingButton
-              type="submit"
-              variant="destructive"
-              pending={deletePending}
-              pendingText="删除中..."
-            >
-              删除仓库
-            </PendingButton>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+      </Panel>
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="删除仓库"
+        description="仓库及其提交历史将被永久删除。"
+        confirmName={repo}
+        onConfirm={async () => {
+          await deleteRepository(owner, repo);
+          navigate("/dashboard", { replace: true });
+        }}
+      />
+    </>
+  );
+}
+export function RepositorySettingsPage({ user }: { user: AuthUser | null }) {
+  const { detail, setDetail, error } = useRepository();
+  if (!user) return <Navigate to="/login" replace />;
+  if (error) return <ErrorAlert error={error} />;
+  if (!detail) return <PageLoadingState />;
+  return (
+    <RepositoryLayout detail={detail} user={user}>
+      {detail.repository.owner_username === user.username ? (
+        <SettingsForm key={detail.repository.name} detail={detail} onSaved={setDetail} />
+      ) : (
+        <ErrorAlert error="只有仓库所有者可以修改设置。" />
+      )}
+    </RepositoryLayout>
   );
 }

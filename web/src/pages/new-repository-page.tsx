@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
+import { PageHeader } from "@/components/common/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,14 +51,9 @@ export function NewRepositoryPage({ user }: NewRepositoryPageProps) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-xl">
+      <PageHeader title="新建仓库" />
       <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>新建仓库</CardTitle>
-            <HelpTip content="仓库名不能以 .git 结尾，只支持字母、数字和 . _ -。" />
-          </div>
-        </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleCreateRepository}>
             <div className="space-y-2">

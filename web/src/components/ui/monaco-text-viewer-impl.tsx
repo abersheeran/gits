@@ -17,15 +17,15 @@ export function MonacoTextViewerImpl({
   const resolvedLanguage = language ?? guessMonacoLanguage(path);
 
   return (
-    <div className={cn("monaco-shell", className)}>
-      <div className="monaco-shell__viewport">
+    <div className={cn("min-w-0 overflow-hidden", className)}>
+      <div className="min-w-0">
         <Editor
           value={value}
           language={resolvedLanguage}
           path={path ? buildMonacoModelPath(path, scope) : undefined}
           theme="gits-light"
           height={height}
-          loading={<div className="px-3 py-2 text-xs text-text-secondary">Loading editor…</div>}
+          loading={<div className="px-3 py-2 text-xs text-text-secondary">正在加载…</div>}
           beforeMount={configureMonaco}
           options={{
             automaticLayout: true,

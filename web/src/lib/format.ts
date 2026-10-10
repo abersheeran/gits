@@ -1,5 +1,5 @@
 export function formatDateTime(timestamp: number | null | undefined): string {
-  if (!timestamp) {
+  if (timestamp === null || timestamp === undefined) {
     return "-";
   }
 
@@ -12,7 +12,7 @@ export function formatDateTime(timestamp: number | null | undefined): string {
   }).format(new Date(timestamp));
 }
 
-export function shortOid(oid: string, length = 12): string {
+export function shortOid(oid: string, length = 7): string {
   return oid.slice(0, length);
 }
 
@@ -34,7 +34,7 @@ export function formatRelativeTime(
   timestamp: number | null | undefined,
   now = Date.now()
 ): string {
-  if (!timestamp) {
+  if (timestamp === null || timestamp === undefined) {
     return "-";
   }
 

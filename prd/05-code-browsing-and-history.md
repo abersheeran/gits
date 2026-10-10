@@ -56,6 +56,8 @@
 - `web/src/pages/repository-page.tsx`
 - `web/src/pages/repository-commits-page.tsx`
 - `web/src/components/repository/repository-commit-detail-sheet.tsx`
+- `web/src/components/common/repository-contents.tsx`
+- `web/src/components/common/path-history-sheet.tsx`
 - `web/src/components/repository/repository-diff-view.tsx`
 - `web/src/components/repository/repository-change-diff-editor.tsx`
 - `web/src/components/common/changes-workspace.tsx`
@@ -66,7 +68,13 @@
 
 - 没有代码搜索和网页文件编辑。
 - README 读取上限 200 KiB，文本文件预览上限 512 KiB；超限文本会截断，二进制文件不显示文本内容。
-- 提交列表已分页，路径历史仍按数量限制返回。
+- 提交列表已分页，路径历史通过增加数量限制加载更多，最多显示 100 条，接口仍无分页参数。
 - 已支持按提交 OID 浏览，但缺少便捷的文件片段永久链接和行定位。
 
 下一步优先增加基础代码搜索、文件片段永久链接及路径历史分页。
+
+## 8. 2026-10 界面整理
+
+- 目录与文件页通过「历史」打开路径历史 Sheet；根目录使用提交列表接口，历史不再常驻挤占代码宽度。
+- 提交标题打开详情 Sheet，列表提供短 SHA 复制、相对时间（悬停查看完整时间）、浏览此时文件的图标入口及上一页 / 下一页。
+- 文件仅展示一次最近提交摘要；差异高度随可见内容调整，保留上下文展开与变更文件定位。

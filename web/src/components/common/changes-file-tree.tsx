@@ -30,10 +30,7 @@ type TreeDirectoryBuilder = {
   path: string;
   directories: Map<string, TreeDirectoryBuilder>;
   files: Map<string, RepositoryCommitChange>;
-  order: Array<
-    | { kind: "directory"; key: string }
-    | { kind: "file"; key: string }
-  >;
+  order: Array<{ kind: "directory"; key: string } | { kind: "file"; key: string }>;
 };
 
 function createDirectoryBuilder(name: string, path: string): TreeDirectoryBuilder {
@@ -132,11 +129,11 @@ function changeStatusBadgeVariant(status: RepositoryCommitChange["status"]) {
 function changeStatusShortLabel(status: RepositoryCommitChange["status"]): string {
   switch (status) {
     case "added":
-      return "A";
+      return "新增";
     case "deleted":
-      return "D";
+      return "删除";
     default:
-      return "M";
+      return "修改";
   }
 }
 
@@ -167,7 +164,7 @@ function TreeBranch({
               <button
                 type="button"
                 onClick={() => onToggleDirectory(node.path)}
-                className="flex w-full items-center gap-2 rounded-full px-3 py-2 text-left text-label-sm text-text-secondary transition-colors hover:bg-surface-base hover:text-text-primary"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-label-sm text-text-secondary transition-colors hover:bg-surface-base hover:text-text-primary"
                 style={{ paddingLeft: `${depth * 16 + 12}px` }}
                 aria-expanded={isExpanded}
               >
@@ -202,10 +199,10 @@ function TreeBranch({
               onClick={() => onSelectPath(node.change.path)}
               aria-current={isActive ? "true" : undefined}
               className={cn(
-                "flex w-full items-center gap-2 rounded-full border px-3 py-2 text-left transition-colors",
+                "flex w-full items-center gap-2 min-h-10 rounded-md px-3 py-2 text-left transition-colors",
                 isActive
-                  ? "border-border-default bg-surface-base text-text-primary shadow-sm"
-                  : "border-transparent bg-transparent text-text-secondary hover:border-border-subtle hover:bg-surface-base hover:text-text-primary"
+                  ? "bg-surface-focus text-text-primary"
+                  : "bg-transparent text-text-secondary hover:bg-surface-base hover:text-text-primary"
               )}
               style={{ paddingLeft: `${depth * 16 + 12}px` }}
             >
@@ -216,7 +213,7 @@ function TreeBranch({
               <div className="flex shrink-0 items-center gap-1">
                 <Badge
                   variant={changeStatusBadgeVariant(node.change.status)}
-                  className="min-w-7 justify-center px-2 font-mono text-[11px]"
+                  className="min-w-7 justify-center px-2 text-body-micro"
                 >
                   {changeStatusShortLabel(node.change.status)}
                 </Badge>

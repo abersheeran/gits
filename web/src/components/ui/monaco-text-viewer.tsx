@@ -25,12 +25,12 @@ function MonacoTextViewerFallback(props: {
   className?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-md border bg-background", props.className)}>
+    <div className={cn("min-w-0 overflow-hidden bg-surface-base", props.className)}>
       <div
-        className="flex items-center justify-center px-3 py-2 text-xs text-muted-foreground"
+        className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
         style={{ height: props.height }}
       >
-        Loading editor…
+        正在加载…
       </div>
     </div>
   );

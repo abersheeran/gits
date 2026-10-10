@@ -38,7 +38,9 @@ function countTextLines(value: string | null): number {
   return Math.max(value.split(/\r\n|\n|\r/).length, 1);
 }
 
-function mergeVisibleRanges(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+function mergeVisibleRanges(
+  ranges: Array<{ start: number; end: number }>
+): Array<{ start: number; end: number }> {
   if (ranges.length === 0) {
     return [];
   }
@@ -109,32 +111,31 @@ function diffEditorHeight(change: RepositoryCommitChange): number {
 
   if (approximateVisibleLineCount > 0) {
     return estimateMonacoHeight("\n".repeat(Math.max(approximateVisibleLineCount - 1, 0)), {
-      minHeight: 180,
+      minHeight: 44,
       maxHeight: 760
     });
   }
 
-  const longestSide = [change.oldContent ?? "", change.newContent ?? ""]
-    .sort((left, right) => right.length - left.length)
-    .at(0) ?? "";
+  const longestSide =
+    [change.oldContent ?? "", change.newContent ?? ""]
+      .sort((left, right) => right.length - left.length)
+      .at(0) ?? "";
 
   return estimateMonacoHeight(longestSide, {
-    minHeight: 180,
+    minHeight: 44,
     maxHeight: 760
   });
 }
 
-function RepositoryDiffEditorFallback(props: {
-  height: number;
-}) {
+function RepositoryDiffEditorFallback(props: { height: number }) {
   return (
-    <div className="monaco-shell">
-      <div className="monaco-shell__viewport">
+    <div className="min-w-0 overflow-hidden">
+      <div className="min-w-0">
         <div
           className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
           style={{ height: props.height }}
         >
-          Loading diff…
+          正在加载…
         </div>
       </div>
     </div>
@@ -148,7 +149,7 @@ export function RepositoryDiffView({
   sectionIdForPath
 }: RepositoryDiffViewProps) {
   if (changes.length === 0) {
-    return <p className="text-body-sm text-text-secondary">No file changes.</p>;
+    return <p className="text-body-sm text-text-secondary">没有文件改动。</p>;
   }
 
   return (
@@ -158,21 +159,25 @@ export function RepositoryDiffView({
 
         return (
           <section
-            key={`${change.status}:${change.path}`}
+            key={`${{ added: "新增", modified: "修改", deleted: "删除" }[change.status]}:${change.path}`}
             id={sectionIdForPath?.(change.path)}
             className={cn(
-              "scroll-mt-4 overflow-hidden rounded-[16px] border border-border-subtle bg-surface-base shadow-container transition-colors",
-              isActive ? "border-border-default ring-1 ring-border-default" : ""
+              "scroll-mt-4 overflow-hidden rounded-lg border border-border bg-surface-base transition-colors",
+              isActive ? "border-text-secondary" : ""
             )}
             onMouseDownCapture={() => onChangeActivate?.(change)}
           >
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-surface-focus px-4 py-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <Badge variant={changeBadgeVariant(change.status)}>{change.status}</Badge>
-                <span className="truncate font-mono text-sm text-text-primary">{change.path}</span>
+                <Badge variant={changeBadgeVariant(change.status)}>
+                  {{ added: "新增", modified: "修改", deleted: "删除" }[change.status]}
+                </Badge>
+                <span className="truncate font-mono text-[13px] text-text-primary">
+                  {change.path}
+                </span>
                 {change.previousPath && change.previousPath !== change.path ? (
                   <span className="font-mono text-xs text-text-secondary">
-                    from {change.previousPath}
+                    原路径：{change.previousPath}
                   </span>
                 ) : null}
               </div>
@@ -183,10 +188,10 @@ export function RepositoryDiffView({
             </header>
             {change.isBinary ? (
               <div className="px-4 py-3 text-body-sm text-text-secondary">
-                Binary change. Inline diff is not available.
+                二进制文件无法显示文本差异。
               </div>
             ) : change.oldContent !== null || change.newContent !== null ? (
-              <div className="p-4">
+              <div className="min-w-0">
                 <Suspense
                   fallback={<RepositoryDiffEditorFallback height={diffEditorHeight(change)} />}
                 >
@@ -197,7 +202,7 @@ export function RepositoryDiffView({
                 </Suspense>
               </div>
             ) : change.patch ? (
-              <div className="p-4">
+              <div className="min-w-0">
                 <MonacoTextViewer
                   value={change.patch}
                   path={`${change.path}.diff`}
@@ -207,9 +212,9 @@ export function RepositoryDiffView({
                   maxHeight={420}
                 />
               </div>
-            ) : ( 
+            ) : (
               <div className="px-4 py-3 text-body-sm text-text-secondary">
-                Diff output is unavailable for this file.
+                此文件暂无可显示的差异。
               </div>
             )}
           </section>

@@ -12,8 +12,8 @@ function lazyPage<TProps>(
   return lazy(loader);
 }
 
-const DashboardPage = lazyPage(async () => ({
-  default: (await import("@/pages/dashboard-page")).DashboardPage
+const MyRepositoriesPage = lazyPage(async () => ({
+  default: (await import("@/pages/dashboard-page")).MyRepositoriesPage
 }));
 const HomePage = lazyPage(async () => ({
   default: (await import("@/pages/home-page")).HomePage
@@ -59,7 +59,7 @@ function titleForPath(pathname: string): string {
   const commits = matchPath("/repo/:owner/:repo/commits", pathname);
   if (commits) {
     const repository = formatRepositoryName(commits.params.owner, commits.params.repo);
-    return `Commits · ${repository} · ${APP_NAME}`;
+    return `提交 · ${repository} · ${APP_NAME}`;
   }
 
   const repoBranches = matchPath("/repo/:owner/:repo/branches", pathname);
@@ -93,13 +93,13 @@ function titleForPath(pathname: string): string {
   }
 
   if (pathname === "/dashboard") {
-    return `Dashboard · ${APP_NAME}`;
+    return `我的仓库 · ${APP_NAME}`;
   }
   if (pathname === "/repositories/new") {
     return `新建仓库 · ${APP_NAME}`;
   }
   if (pathname === "/tokens") {
-    return `Access Tokens · ${APP_NAME}`;
+    return `访问令牌 · ${APP_NAME}`;
   }
   if (pathname === "/login") {
     return `登录 · ${APP_NAME}`;
@@ -108,7 +108,7 @@ function titleForPath(pathname: string): string {
     return `注册 · ${APP_NAME}`;
   }
   if (pathname === "/") {
-    return `首页 · ${APP_NAME}`;
+    return `探索 · ${APP_NAME}`;
   }
   return APP_NAME;
 }
@@ -139,10 +139,7 @@ function App() {
   if (authLoading) {
     return (
       <div className="mx-auto w-[min(1080px,92vw)] py-10">
-        <PageLoadingState
-          title="Initializing session"
-          description="Checking the current account and loading the application shell."
-        />
+        <PageLoadingState />
       </div>
     );
   }
@@ -152,21 +149,18 @@ function App() {
       <Suspense
         fallback={
           <div className="mx-auto w-[min(1080px,92vw)] py-10">
-            <PageLoadingState
-              title="Loading page"
-              description="Fetching the current route bundle and preparing the page."
-            />
+            <PageLoadingState />
           </div>
         }
       >
         <Routes>
-          <Route path="/" element={<HomePage user={user} />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
           <Route
             path="/register"
             element={<RegisterPage user={user} onAuthChanged={refreshAuth} />}
           />
-          <Route path="/dashboard" element={<DashboardPage user={user} />} />
+          <Route path="/dashboard" element={<MyRepositoriesPage user={user} />} />
           <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
           <Route path="/tokens" element={<TokensPage user={user} />} />
           <Route

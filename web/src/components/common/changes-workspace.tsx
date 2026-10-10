@@ -1,5 +1,4 @@
 import { useId, useState, type ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
 import type { RepositoryCommitChange } from "@/lib/api";
 import { ChangesFileTree } from "./changes-file-tree";
 
@@ -22,7 +21,7 @@ export function ChangesWorkspace({ changes, children }: ChangesWorkspaceProps) {
   const activePath =
     preferredActivePath && changes.some((change) => change.path === preferredActivePath)
       ? preferredActivePath
-      : changes[0]?.path ?? null;
+      : (changes[0]?.path ?? null);
 
   function sectionIdForPath(path: string): string {
     return `changes-section-${workspaceId}-${encodeURIComponent(path)}`;
@@ -45,17 +44,12 @@ export function ChangesWorkspace({ changes, children }: ChangesWorkspaceProps) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(240px,280px)_minmax(0,1fr)]">
       <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">
-        <div className="overflow-hidden rounded-[16px] border border-border-subtle bg-surface-focus shadow-container">
+        <div className="min-w-0">
           <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
             <div className="space-y-1">
-              <h3 className="font-display text-heading-4 text-text-primary">Changed files</h3>
-              <p className="text-body-micro text-text-secondary">
-                Navigate the diff by file and status.
-              </p>
+              <h3 className="font-display text-heading-4 text-text-primary">变更文件</h3>
             </div>
-            <Badge variant="outline" className="bg-surface-base">
-              {changes.length}
-            </Badge>
+            <span className="text-body-micro text-text-tertiary">{changes.length}</span>
           </div>
           <ChangesFileTree
             changes={changes}

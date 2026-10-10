@@ -1,168 +1,144 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Button, type ButtonProps } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { formatApiError, logout, type AuthUser } from "@/lib/api";
 import { useState, type ReactNode } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Menu } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription
+} from "@/components/ui/sheet";
+import { IconButton } from "@/components/common/icon-button";
+import { ErrorAlert } from "@/components/common/error-alert";
+import { formatApiError, logout, type AuthUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-type AppShellProps = {
+export function AppShell({
+  user,
+  onAuthChanged,
+  children
+}: {
   user: AuthUser | null;
   onAuthChanged: () => Promise<void>;
   children: ReactNode;
-};
-
-export function AppShell({ user, onAuthChanged, children }: AppShellProps) {
-  const navigate = useNavigate();
+}) {
   const { pathname } = useLocation();
-  const [logoutPending, setLogoutPending] = useState(false);
-  const [logoutError, setLogoutError] = useState<string | null>(null);
-
-  const navVariant = (
-    isActive: boolean,
-    inactiveVariant: NonNullable<ButtonProps["variant"]> = "ghost"
-  ): NonNullable<ButtonProps["variant"]> => (isActive ? "secondary" : inactiveVariant);
-
-  const isExploreActive = pathname === "/" || pathname.startsWith("/repo/");
-  const isDashboardActive =
-    pathname === "/dashboard" ||
-    pathname.startsWith("/dashboard/") ||
-    pathname === "/repositories/new" ||
-    pathname.startsWith("/repositories/");
-  const isTokensActive = pathname === "/tokens" || pathname.startsWith("/tokens/");
-  const isLoginActive = pathname === "/login";
-  const isRegisterActive = pathname === "/register";
-
-  async function handleLogout() {
-    if (logoutPending) {
-      return;
-    }
-
-    setLogoutPending(true);
-    setLogoutError(null);
-    try {
-      await logout();
-      await onAuthChanged();
-      navigate("/");
-    } catch (error) {
-      setLogoutError(formatApiError(error));
-    } finally {
-      setLogoutPending(false);
-    }
-  }
-
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const items = [
+    ["/", "探索"],
+    ...(user
+      ? [
+          ["/dashboard", "我的仓库"],
+          ["/tokens", "访问令牌"]
+        ]
+      : [])
+  ];
+  const navigation = (
+    <nav aria-label="主导航" className="flex flex-col gap-1 md:flex-row">
+      {items.map(([path, label]) => {
+        const active =
+          pathname === path || (path === "/dashboard" && pathname === "/repositories/new");
+        return (
+          <Link
+            key={path}
+            to={path}
+            onClick={() => setOpen(false)}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "rounded-md px-3 py-3 text-body-xs md:py-2",
+              active
+                ? "bg-surface-focus text-text-primary"
+                : "text-text-secondary hover:bg-surface-hover"
+            )}
+          >
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+  const account = (mobile = false) => (
+    <div className={cn("flex gap-3", mobile ? "flex-col items-stretch" : "flex-wrap items-center")}>
+      {user ? (
+        <>
+          <span className={cn("block truncate text-body-xs", mobile ? "px-3" : "max-w-40")}>
+            {user.username}
+          </span>
+          <Button
+            variant="ghost"
+            className={mobile ? "w-full justify-start px-3" : undefined}
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              setError(null);
+              try {
+                await logout();
+                await onAuthChanged();
+                setOpen(false);
+                navigate("/");
+              } catch (cause) {
+                setError(formatApiError(cause));
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            {pending ? "退出中…" : "退出"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button
+            variant="ghost"
+            className={mobile ? "w-full justify-start px-3" : undefined}
+            asChild
+          >
+            <Link to="/login" onClick={() => setOpen(false)}>
+              登录
+            </Link>
+          </Button>
+          <Button className={mobile ? "w-full justify-start px-3" : undefined} asChild>
+            <Link to="/register" onClick={() => setOpen(false)}>
+              注册
+            </Link>
+          </Button>
+        </>
+      )}
+    </div>
+  );
   return (
     <div className="min-h-screen bg-surface-canvas">
-      <header className="px-0 py-3 md:py-4">
-        <div className="app-container">
-          <div className="page-panel overflow-hidden bg-surface-base px-4 py-4 backdrop-blur md:px-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Link to="/" className="inline-flex items-center gap-3">
-                  <img src="/logo.svg" alt="gits logo" className="h-10 w-10 rounded-[14px]" />
-                  <div className="space-y-0.5">
-                    <p className="font-display text-heading-3-16-semibold text-text-primary">gits</p>
-                    <p className="text-body-micro text-text-secondary">
-                      Host and manage Git repositories
-                    </p>
-                  </div>
-                </Link>
-                {user ? (
-                  <div className="rounded-full border border-border-subtle bg-surface-focus px-3 py-1.5 text-label-xs text-text-supporting">
-                    Signed in as <span className="text-text-primary">{user.username}</span>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
-                <nav
-                  className="flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-surface-focus p-1"
-                  aria-label="Primary"
-                >
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "h-9 shrink-0 px-4 text-button-md",
-                      isExploreActive && "bg-surface-base shadow-sm hover:bg-surface-base"
-                    )}
-                    asChild
-                  >
-                    <Link to="/" aria-current={isExploreActive ? "page" : undefined}>
-                      Explore
-                    </Link>
-                  </Button>
-                  {user ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          "h-9 shrink-0 px-4 text-button-md",
-                          isDashboardActive && "bg-surface-base shadow-sm hover:bg-surface-base"
-                        )}
-                        asChild
-                      >
-                        <Link to="/dashboard" aria-current={isDashboardActive ? "page" : undefined}>
-                          Dashboard
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className={cn(
-                          "h-9 shrink-0 px-4 text-button-md",
-                          isTokensActive && "bg-surface-base shadow-sm hover:bg-surface-base"
-                        )}
-                        asChild
-                      >
-                        <Link to="/tokens" aria-current={isTokensActive ? "page" : undefined}>
-                          Tokens
-                        </Link>
-                      </Button>
-                    </>
-                  ) : null}
-                </nav>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {user ? (
-                    <Button variant="outline" onClick={handleLogout} disabled={logoutPending}>
-                      {logoutPending ? "Signing out..." : "Sign out"}
-                    </Button>
-                  ) : (
-                    <>
-                      <Button variant={navVariant(isLoginActive, "outline")} asChild>
-                        <Link to="/login" aria-current={isLoginActive ? "page" : undefined}>
-                          Sign in
-                        </Link>
-                      </Button>
-                      <Button variant={navVariant(isRegisterActive)} asChild>
-                        <Link to="/register" aria-current={isRegisterActive ? "page" : undefined}>
-                          Create account
-                        </Link>
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {logoutError ? (
-              <Alert variant="destructive" className="mt-4">
-                <AlertTitle>退出失败</AlertTitle>
-                <AlertDescription>{logoutError}</AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
+      <header className="h-14 border-b border-border bg-surface-base">
+        <div className="app-container flex h-full items-center gap-6">
+          <Link to="/" className="flex items-center gap-2 font-display font-semibold">
+            <img src="/logo.svg" alt="" className="h-8 w-8" />
+            gits
+          </Link>
+          <div className="hidden md:block">{navigation}</div>
+          <div className="ml-auto hidden md:block">{account()}</div>
+          <IconButton label="打开菜单" className="ml-auto md:hidden" onClick={() => setOpen(true)}>
+            <Menu className="h-5 w-5" />
+          </IconButton>
         </div>
       </header>
-
-      <main className="app-container py-3 md:py-4">{children}</main>
-
-      <div className="app-container pb-6 pt-8">
-        <Separator />
-        <footer className="flex flex-col gap-1 py-4 text-body-micro text-text-secondary md:flex-row md:items-center md:justify-between">
-          <span>React SPA + Hono API + Cloudflare runtime</span>
-          <span>Warm-neutral shell aligned with the current design system</span>
-        </footer>
-      </div>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent className="w-[min(320px,100vw)] rounded-l-xl p-4">
+          <SheetHeader className="mb-6 pl-3 pr-10">
+            <SheetTitle>gits</SheetTitle>
+            <SheetDescription className="sr-only">导航与账户</SheetDescription>
+          </SheetHeader>
+          {navigation}
+          <div className="mt-4 border-t border-border-subtle pt-4">{account(true)}</div>
+          <ErrorAlert error={error} />
+        </SheetContent>
+      </Sheet>
+      <main className="app-container min-w-0 py-6 md:py-8">
+        <ErrorAlert error={error} />
+        {children}
+      </main>
     </div>
   );
 }

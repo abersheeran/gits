@@ -1,17 +1,11 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
+import { PageHeader } from "@/components/common/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PendingButton } from "@/components/ui/pending-button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatApiError, login, type AuthUser } from "@/lib/api";
@@ -53,13 +47,8 @@ export function LoginPage({ user, onAuthChanged }: LoginPageProps) {
 
   return (
     <div className="mx-auto max-w-xl">
+      <PageHeader title="登录" />
       <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>登录账号</CardTitle>
-            <HelpTip content="使用用户名或邮箱登录。登录后即可创建仓库、管理协作者和访问受保护页面。" />
-          </div>
-        </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
@@ -89,7 +78,12 @@ export function LoginPage({ user, onAuthChanged }: LoginPageProps) {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-            <PendingButton className="w-full" type="submit" pending={submitting} pendingText="登录中...">
+            <PendingButton
+              className="w-full"
+              type="submit"
+              pending={submitting}
+              pendingText="登录中..."
+            >
               登录
             </PendingButton>
           </form>

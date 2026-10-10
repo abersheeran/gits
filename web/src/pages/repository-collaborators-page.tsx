@@ -1,271 +1,237 @@
-import { useCallback, useEffect, useState } from "react";
-import type { FormEvent } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useState, type FormEvent } from "react";
+import { Navigate } from "react-router-dom";
+import { UserMinus } from "lucide-react";
+import { useRepository } from "@/hooks/use-repository";
+import { RepositoryLayout } from "@/components/common/repository-layout";
+import { Panel } from "@/components/common/panel";
+import { EmptyState } from "@/components/common/empty-state";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { ErrorAlert } from "@/components/common/error-alert";
+import { IconButton } from "@/components/common/icon-button";
+import { RelativeTime } from "@/components/common/relative-time";
+import { Pagination } from "@/components/common/pagination";
+import { PermissionSelect } from "@/components/common/permission-select";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { PageLoadingState, InlineLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 import {
   formatApiError,
-  getRepositoryDetail,
   listCollaborators,
   removeCollaborator,
   upsertCollaborator,
   type AuthUser,
   type CollaboratorPermission,
-  type CollaboratorRecord,
-  type RepositoryDetailResponse
+  type CollaboratorRecord
 } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
-
-type RepositoryCollaboratorsPageProps = {
-  user: AuthUser | null;
-};
-
-export function RepositoryCollaboratorsPage({ user }: RepositoryCollaboratorsPageProps) {
-  const params = useParams<{ owner: string; repo: string }>();
-  const owner = params.owner ?? "";
-  const repo = params.repo ?? "";
-
-  const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
-  const [collaborators, setCollaborators] = useState<CollaboratorRecord[]>([]);
+export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null }) {
+  const { owner, repo, detail, error: pageError } = useRepository();
+  const [items, setItems] = useState<CollaboratorRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
+  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [permission, setPermission] = useState<CollaboratorPermission>("read");
-  const [saving, setSaving] = useState(false);
-
-  const loadPage = useCallback(async () => {
-    if (!owner || !repo) {
-      return;
-    }
-
-    setLoading(true);
-    setPageError(null);
-    try {
-      const [nextDetail, nextCollaborators] = await Promise.all([
-        getRepositoryDetail(owner, repo),
-        listCollaborators(owner, repo)
-      ]);
-      setDetail(nextDetail);
-      setCollaborators(nextCollaborators);
-    } catch (loadError) {
-      setPageError(formatApiError(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, [owner, repo]);
-
+  const [pending, setPending] = useState(false);
+  const [target, setTarget] = useState<CollaboratorRecord | null>(null);
+  const [page, setPage] = useState(1);
   useEffect(() => {
-    void loadPage();
-  }, [loadPage]);
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
+    let canceled = false;
+    listCollaborators(owner, repo)
+      .then((data) => {
+        if (!canceled) setItems(data);
+      })
+      .catch((cause) => {
+        if (!canceled) setError(formatApiError(cause));
+      })
+      .finally(() => {
+        if (!canceled) setLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [owner, repo]);
+  async function save(targetUsername: string, next: CollaboratorPermission) {
+    await upsertCollaborator(owner, repo, { username: targetUsername, permission: next });
+    setItems(await listCollaborators(owner, repo));
   }
-
-  if (!owner || !repo) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>参数错误</AlertTitle>
-        <AlertDescription>仓库路径不完整。</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (pageError) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>加载失败</AlertTitle>
-        <AlertDescription>{pageError}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!detail) {
-    return (
-      <PageLoadingState
-        title="Loading collaborators"
-        description={`Fetching collaborator access for ${owner}/${repo}.`}
-      />
-    );
-  }
-
-  async function handleUpsertCollaborator(event: FormEvent<HTMLFormElement>) {
+  async function add(event: FormEvent) {
     event.preventDefault();
-    if (saving) {
-      return;
-    }
-
-    setSaving(true);
-    setActionError(null);
+    if (pending) return;
+    setPending(true);
+    setFormError(null);
     try {
-      await upsertCollaborator(owner, repo, { username, permission });
+      await save(username, permission);
+      setOpen(false);
       setUsername("");
       setPermission("read");
-      await loadPage();
-    } catch (submitError) {
-      setActionError(formatApiError(submitError));
+    } catch (cause) {
+      setFormError(formatApiError(cause));
     } finally {
-      setSaving(false);
+      setPending(false);
     }
   }
-
-  async function handleRemoveCollaborator(targetUsername: string) {
-    setActionError(null);
-    try {
-      await removeCollaborator(owner, repo, targetUsername);
-      await loadPage();
-    } catch (removeError) {
-      setActionError(formatApiError(removeError));
-    }
-  }
-
+  if (!user) return <Navigate to="/login" replace />;
+  if (pageError) return <ErrorAlert error={pageError} />;
+  if (!detail) return <PageLoadingState />;
   return (
-    <div className="app-page">
-      {loading ? (
-        <InlineLoadingState
-          title="Refreshing collaborators"
-          description="Updating repository access and collaborator roles."
-        />
-      ) : null}
-
-      <section className="page-hero">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-body-sm text-text-secondary">
-              <Link to={`/repo/${owner}/${repo}`} className="gh-link">
-                {owner}
-              </Link>
-              <span>/</span>
-              <span>{repo}</span>
-              <Badge variant="secondary">Collaborators</Badge>
-            </div>
-            <div className="flex items-start gap-2">
-              <h1 className="font-display text-card-title text-text-primary">协作者</h1>
-              <HelpTip content="权限分为 read、write 和 admin。owner 始终保留完整权限。" />
-            </div>
-          </div>
-          <Button variant="outline" asChild>
-            <Link to={`/repo/${owner}/${repo}/settings`}>返回设置</Link>
-          </Button>
-        </div>
-      </section>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>添加或更新协作者</CardTitle>
-            <HelpTip content="按用户名直接新增协作者，重复提交会更新现有协作者的权限级别。" />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {actionError ? (
-            <Alert variant="destructive">
-              <AlertTitle>操作失败</AlertTitle>
-              <AlertDescription>{actionError}</AlertDescription>
-            </Alert>
-          ) : null}
-          <form className="space-y-4" onSubmit={handleUpsertCollaborator}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="collaborator-username">用户名</Label>
-                <Input
-                  id="collaborator-username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="collaborator-permission">权限</Label>
-                <Select value={permission} onValueChange={(value) => setPermission(value as CollaboratorPermission)}>
-                  <SelectTrigger id="collaborator-permission">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="read">read</SelectItem>
-                    <SelectItem value="write">write</SelectItem>
-                    <SelectItem value="admin">admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <PendingButton type="submit" pending={saving} pendingText="Applying access...">
-                添加或更新
-              </PendingButton>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>协作者列表</CardTitle>
-            <HelpTip content="列表中可以直接移除指定用户的仓库协作权限。" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {collaborators.length === 0 ? (
-            <p className="text-body-sm text-text-secondary">暂无协作者。</p>
-          ) : (
+    <RepositoryLayout detail={detail} user={user}>
+      <Panel
+        header={
+          <>
+            <span>协作者</span>
+            <Button
+              onClick={() => {
+                setFormError(null);
+                setOpen(true);
+              }}
+            >
+              添加协作者
+            </Button>
+          </>
+        }
+      >
+        <ErrorAlert error={error} />
+        {loading ? (
+          <InlineLoadingState />
+        ) : !error && items.length === 0 ? (
+          <EmptyState title="暂无协作者" description="添加已有用户一起管理仓库。" />
+        ) : (
+          <>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Username</TableHead>
-                  <TableHead>Permission</TableHead>
-                  <TableHead>Added</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>用户名</TableHead>
+                  <TableHead className="w-28">权限</TableHead>
+                  <TableHead className="hidden md:table-cell">添加时间</TableHead>
+                  <TableHead className="w-16">
+                    <span className="sr-only">操作</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {collaborators.map((item) => (
+                {items.slice((page - 1) * 20, page * 20).map((item) => (
                   <TableRow key={item.user_id}>
-                    <TableCell>{item.username}</TableCell>
+                    <TableCell className="truncate">{item.username}</TableCell>
                     <TableCell>
-                      <Badge>{item.permission}</Badge>
-                    </TableCell>
-                    <TableCell>{formatDateTime(item.created_at)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          void handleRemoveCollaborator(item.username);
+                      <PermissionSelect
+                        value={item.permission}
+                        disabled={pending}
+                        label={`${item.username} 的权限`}
+                        onChange={async (next) => {
+                          setPending(true);
+                          setError(null);
+                          try {
+                            await save(item.username, next);
+                          } catch (cause) {
+                            setError(formatApiError(cause));
+                          } finally {
+                            setPending(false);
+                          }
                         }}
+                      />
+                    </TableCell>
+                    <TableCell className="hidden text-text-tertiary md:table-cell">
+                      <RelativeTime timestamp={item.created_at} />
+                    </TableCell>
+                    <TableCell>
+                      <IconButton
+                        label={`移除 ${item.username}`}
+                        disabled={pending}
+                        onClick={() => setTarget(item)}
                       >
-                        移除
-                      </Button>
+                        <UserMinus className="h-4 w-4" />
+                      </IconButton>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            {items.length > 20 && (
+              <Pagination page={page} hasNext={page * 20 < items.length} onChange={setPage} />
+            )}
+          </>
+        )}
+      </Panel>
+      <Dialog
+        open={open}
+        onOpenChange={(value) => {
+          if (!pending) setOpen(value);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>添加协作者</DialogTitle>
+            <DialogDescription>选择已有用户及其仓库权限。</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={add}>
+            <ErrorAlert error={formError} />
+            <div className="space-y-2">
+              <Label htmlFor="collaborator-name">用户名</Label>
+              <Input
+                id="collaborator-name"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="collaborator-permission">权限</Label>
+              <PermissionSelect
+                id="collaborator-permission"
+                value={permission}
+                onChange={setPermission}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending}
+                onClick={() => setOpen(false)}
+              >
+                取消
+              </Button>
+              <PendingButton type="submit" pending={pending} pendingText="添加中…">
+                添加协作者
+              </PendingButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={target !== null}
+        onOpenChange={(value) => {
+          if (!value) setTarget(null);
+        }}
+        title="移除协作者"
+        description={`移除「${target?.username ?? ""}」的仓库权限？`}
+        onConfirm={async () => {
+          if (target) {
+            await removeCollaborator(owner, repo, target.username);
+            setItems(items.filter((item) => item.user_id !== target.user_id));
+            setPage(1);
+          }
+        }}
+      />
+    </RepositoryLayout>
   );
 }

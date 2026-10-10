@@ -1,22 +1,42 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
-import { Link, Navigate } from "react-router-dom";
-import { HelpTip } from "@/components/common/help-tip";
+import { useEffect, useState, type FormEvent } from "react";
+import { Navigate } from "react-router-dom";
+import { PageHeader } from "@/components/common/page-header";
+import { Panel } from "@/components/common/panel";
+import { EmptyState } from "@/components/common/empty-state";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { ErrorAlert } from "@/components/common/error-alert";
+import { RelativeTime } from "@/components/common/relative-time";
+import { Pagination } from "@/components/common/pagination";
 import { CopyButton } from "@/components/copy-button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InlineLoadingState } from "@/components/ui/loading-state";
 import { PendingButton } from "@/components/ui/pending-button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 import {
   createAccessToken,
   formatApiError,
@@ -25,227 +45,247 @@ import {
   type AccessTokenMetadata,
   type AuthUser
 } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
 
-type TokensPageProps = {
-  user: AuthUser | null;
-};
-
-function tokenStatus(token: AccessTokenMetadata): "active" | "expired" | "revoked" {
-  if (token.revoked_at !== null) {
-    return "revoked";
-  }
-  if (token.expires_at !== null && token.expires_at <= Date.now()) {
-    return "expired";
-  }
-  return "active";
+function tokenStatus(token: AccessTokenMetadata) {
+  if (token.revoked_at !== null) return "已撤销";
+  if (token.expires_at !== null && token.expires_at <= Date.now()) return "已过期";
+  return "有效";
 }
-
-export function TokensPage({ user }: TokensPageProps) {
+export function TokensPage({ user }: { user: AuthUser | null }) {
   const [tokens, setTokens] = useState<AccessTokenMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  const [formError, setFormError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [expiresAt, setExpiresAt] = useState("");
+  const [expiry, setExpiry] = useState("0");
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
-
-  async function loadTokens() {
-    setLoading(true);
-    setError(null);
+  const [target, setTarget] = useState<AccessTokenMetadata | null>(null);
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    let canceled = false;
+    listAccessTokens()
+      .then((data) => {
+        if (!canceled) setTokens(data);
+      })
+      .catch((cause) => {
+        if (!canceled) setError(formatApiError(cause));
+      })
+      .finally(() => {
+        if (!canceled) setLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, []);
+  async function refresh() {
     try {
       setTokens(await listAccessTokens());
-    } catch (loadError) {
-      setError(formatApiError(loadError));
-    } finally {
-      setLoading(false);
+      setError(null);
+    } catch (cause) {
+      setError(formatApiError(cause));
     }
   }
-
-  useEffect(() => {
-    void loadTokens();
-  }, []);
-
-  async function handleCreateToken(event: FormEvent<HTMLFormElement>) {
+  async function create(event: FormEvent) {
     event.preventDefault();
-    if (creating) {
-      return;
-    }
-
+    if (creating) return;
     setCreating(true);
-    setError(null);
-    setCreatedToken(null);
-
+    setFormError(null);
     try {
-      const parsedExpires = expiresAt.trim() ? Number.parseInt(expiresAt, 10) : undefined;
-      if (parsedExpires !== undefined && !Number.isFinite(parsedExpires)) {
-        setError("过期时间必须是毫秒时间戳。");
-        return;
-      }
-
-      const created = await createAccessToken({
-        name,
-        ...(parsedExpires !== undefined ? { expiresAt: parsedExpires } : {})
+      const days = Number(expiry);
+      const result = await createAccessToken({
+        name: name.trim(),
+        ...(days ? { expiresAt: Date.now() + days * 86400000 } : {})
       });
-      setCreatedToken(created.token);
+      setOpen(false);
+      setCreatedToken(result.token);
       setName("");
-      setExpiresAt("");
-      await loadTokens();
-    } catch (createError) {
-      setError(formatApiError(createError));
+      setExpiry("0");
+      await refresh();
+    } catch (cause) {
+      setFormError(formatApiError(cause));
     } finally {
       setCreating(false);
     }
   }
-
-  async function handleRevokeToken(tokenId: string) {
-    setError(null);
-    try {
-      await revokeAccessToken(tokenId);
-      await loadTokens();
-    } catch (revokeError) {
-      setError(formatApiError(revokeError));
-    }
-  }
-
-  const hasActiveToken = useMemo(() => tokens.some((token) => tokenStatus(token) === "active"), [tokens]);
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!user) return <Navigate to="/login" replace />;
   return (
-    <div className="app-page">
-      {createdToken ? (
-        <Alert>
-          <AlertTitle>新 Token（仅本次可见）</AlertTitle>
-          <AlertDescription>
-            <div className="panel-inset-compact mt-2 flex flex-wrap items-center gap-2">
-              <code className="text-xs sm:text-sm">{createdToken}</code>
-              <CopyButton value={createdToken} />
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>操作失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>创建 Access Token</CardTitle>
-            <HelpTip content="Token 仅在创建后显示一次，请复制并保存，用于 Git 访问。" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={handleCreateToken}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="token-name">名称</Label>
-                <Input
-                  id="token-name"
-                  placeholder="laptop"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="token-expires-at">过期时间（可选，毫秒时间戳）</Label>
-                <Input
-                  id="token-expires-at"
-                  type="number"
-                  value={expiresAt}
-                  onChange={(event) => setExpiresAt(event.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <PendingButton type="submit" pending={creating} pendingText="Creating token...">
-                创建 Token
-              </PendingButton>
-              <Button variant="ghost" asChild>
-                <Link to="/dashboard">返回 Dashboard</Link>
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>Token 列表</CardTitle>
-            <HelpTip content="使用有效令牌进行 HTTP Git 认证；可查看已撤销或过期的令牌记录。" />
-          </div>
-          <p className="text-body-sm text-text-secondary">
-            {hasActiveToken ? "当前存在可用 token。" : "当前没有 active token。"}
-          </p>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <InlineLoadingState
-              title="Loading tokens"
-              description="Fetching active and historical access tokens."
-            />
-          ) : tokens.length === 0 ? (
-            <p className="text-body-sm text-text-secondary">暂无 token。</p>
-          ) : (
+    <>
+      <PageHeader
+        title="访问令牌"
+        action={
+          <Button
+            onClick={() => {
+              setFormError(null);
+              setOpen(true);
+            }}
+          >
+            创建令牌
+          </Button>
+        }
+      />
+      <Panel>
+        <ErrorAlert error={error} />
+        {loading ? (
+          <InlineLoadingState />
+        ) : tokens.length === 0 ? (
+          <EmptyState title="还没有访问令牌" description="创建令牌以通过 Git 客户端访问仓库。" />
+        ) : (
+          <>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Prefix</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Last Used</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>名称</TableHead>
+                  <TableHead className="hidden md:table-cell">前缀</TableHead>
+                  <TableHead className="hidden lg:table-cell">创建时间</TableHead>
+                  <TableHead className="hidden md:table-cell">过期时间</TableHead>
+                  <TableHead className="hidden lg:table-cell">最近使用</TableHead>
+                  <TableHead className="w-20">状态</TableHead>
+                  <TableHead className="w-20">
+                    <span className="sr-only">操作</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tokens.map((token) => {
-                  const status = tokenStatus(token);
-                  return (
-                    <TableRow key={token.id}>
-                      <TableCell>{token.name}</TableCell>
-                      <TableCell className="font-mono text-xs">{token.token_prefix}</TableCell>
-                      <TableCell>{formatDateTime(token.created_at)}</TableCell>
-                      <TableCell>{formatDateTime(token.expires_at)}</TableCell>
-                      <TableCell>{formatDateTime(token.last_used_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant={status === "active" ? "secondary" : "outline"}>{status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {status === "revoked" ? (
-                          <span className="text-body-xs text-text-secondary">-</span>
+                {tokens.slice((page - 1) * 20, page * 20).map((token) => (
+                  <TableRow key={token.id}>
+                    <TableCell>
+                      <span className="block truncate">{token.name}</span>
+                      <span className="mt-1 block text-body-micro text-text-tertiary md:hidden">
+                        {token.expires_at === null ? (
+                          "不过期"
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              void handleRevokeToken(token.id);
-                            }}
-                          >
-                            吊销
-                          </Button>
+                          <>
+                            过期：
+                            <RelativeTime timestamp={token.expires_at} />
+                          </>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </span>
+                    </TableCell>
+                    <TableCell className="hidden truncate font-mono text-[13px] md:table-cell">
+                      {token.token_prefix}
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      <RelativeTime timestamp={token.created_at} />
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <RelativeTime timestamp={token.expires_at} fallback="不过期" />
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      <RelativeTime timestamp={token.last_used_at} fallback="尚未使用" />
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={tokenStatus(token) === "有效" ? "success" : "secondary"}>
+                        {tokenStatus(token)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {token.revoked_at === null && (
+                        <Button variant="ghost" onClick={() => setTarget(token)}>
+                          撤销
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            <Pagination page={page} hasNext={page * 20 < tokens.length} onChange={setPage} />
+          </>
+        )}
+      </Panel>
+      <Dialog
+        open={open}
+        onOpenChange={(value) => {
+          if (!creating) setOpen(value);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>创建令牌</DialogTitle>
+            <DialogDescription>用于 Git 客户端和 API 身份验证。</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={create}>
+            <ErrorAlert error={formError} />
+            <div className="space-y-2">
+              <Label htmlFor="token-name">名称</Label>
+              <Input
+                id="token-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="token-expiry">有效期</Label>
+              <Select value={expiry} onValueChange={setExpiry}>
+                <SelectTrigger id="token-expiry">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    ["0", "不过期"],
+                    ["7", "7 天"],
+                    ["30", "30 天"],
+                    ["90", "90 天"],
+                    ["365", "1 年"]
+                  ].map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={creating}
+                onClick={() => setOpen(false)}
+              >
+                取消
+              </Button>
+              <PendingButton type="submit" pending={creating} pendingText="创建中…">
+                创建令牌
+              </PendingButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={createdToken !== null}
+        onOpenChange={(value) => {
+          if (!value) setCreatedToken(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>令牌已创建</DialogTitle>
+            <DialogDescription>请复制并妥善保存，关闭后无法再次查看。</DialogDescription>
+          </DialogHeader>
+          <code className="block break-all font-mono text-[13px]">{createdToken}</code>
+          <DialogFooter>
+            <CopyButton value={createdToken ?? ""} />
+            <Button onClick={() => setCreatedToken(null)}>完成</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={target !== null}
+        onOpenChange={(value) => {
+          if (!value) setTarget(null);
+        }}
+        title="撤销令牌"
+        description={`撤销后，使用「${target?.name ?? ""}」的客户端将无法继续访问。`}
+        onConfirm={async () => {
+          if (target) {
+            await revokeAccessToken(target.id);
+            await refresh();
+          }
+        }}
+      />
+    </>
   );
 }

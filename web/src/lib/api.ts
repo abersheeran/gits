@@ -1,3 +1,6 @@
+import { ApiError } from "./api-error";
+export { ApiError, formatApiError } from "./api-error";
+
 export type AuthUser = {
   id: string;
   username: string;
@@ -158,16 +161,6 @@ export type PaginationMetadata = {
 type ApiRequestInit = RequestInit & {
   bodyJson?: unknown;
 };
-
-export class ApiError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
 
 async function parseErrorMessage(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
@@ -445,17 +438,4 @@ export async function revokeAccessToken(tokenId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/api/auth/tokens/${tokenId}`, {
     method: "DELETE"
   });
-}
-
-export function formatApiError(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 401) {
-      return "未登录或登录已过期。";
-    }
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "请求失败，请稍后重试。";
 }
