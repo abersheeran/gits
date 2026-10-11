@@ -109,6 +109,7 @@ CREATE TABLE github_repositories (
   claimed_pushed_at TEXT,
   sync_requested_at INTEGER NOT NULL DEFAULT 0,
   claimed_at INTEGER,
+  visibility_override INTEGER CHECK (visibility_override IN (0, 1)),
   UNIQUE(user_id, github_repo_id)
 );
 

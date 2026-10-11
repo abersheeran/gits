@@ -21,7 +21,8 @@
 | ChangesFileTree | `changes-file-tree.tsx` | 可折叠目录树，显示中文变更状态，点击文件定位差异。 |
 | ShaCopyButton | `sha-copy-button.tsx` | 短 SHA 本身即复制按钮，复制完整 SHA，提供 Tooltip 与短暂勾选反馈；Clone URL 和新令牌使用 CopyField。 |
 | CopyField | `copy-field.tsx` | 只读等宽值与相连的复制图标按钮；用于 Clone 地址和新令牌，点击值选中全文；label 表示值本身（「Clone 地址」「令牌」），用作字段无障碍名称，复制按钮名称为「复制${label}」。 |
-| VisibilityField | `visibility-field.tsx` | 原生私有 / 公开单选，附图标与含义说明；新建仓库与设置页共用 value、onChange、name；disabled 与 help 用于镜像的只读说明。 |
+| VisibilityField | `visibility-field.tsx` | 原生私有 / 公开单选，附图标与含义说明；新建仓库与设置对话框共用 value、onChange、name；disabled 用于提交中禁用，help 用于补充说明。 |
+| RepositoryVisibilitySetting | `repository-visibility-setting.tsx` | 仓库可见性当前值与编辑图标；在 Dialog 中使用 VisibilityField，异步 onSave 保存并刷新当前值，mirror 补充镜像同步保留选择的说明。 |
 | EmptyRepositoryGuide | `empty-repository-guide.tsx` | 无分支时展示 Clone 地址、推送命令与访问令牌入口；defaultBranch 为空时使用 main。 |
 | PathBreadcrumbs | `path-breadcrumbs.tsx` | 代码页工具栏路径导航，根目录不显示，子路径以仓库名为根；通过 link 生成各级目录和当前文件地址。 |
 | CopyIconButton | `copy-icon-button.tsx` | 通过 value、label、className 复用复制图标按钮；统一图标切换、Tooltip 和 sr-only 状态播报，label 为复制动作名称。 |

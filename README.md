@@ -104,8 +104,8 @@ npx wrangler r2 bucket create gits-preview
 
 Copy the returned production D1 ID into `wrangler.jsonc` → `d1_databases[0].database_id`. Copy the Preview D1 ID into both `wrangler.jsonc` → `previews.d1_databases[0].database_id` and `wrangler.preview-migrations.jsonc` → `d1_databases[0].database_id`; both Preview entries must point at the same database.
 
-Login uses random, server-side sessions stored in D1. When upgrading, apply migration
-`0003_user_sessions.sql` before deploying the new Worker (the deploy scripts do this automatically).
+Login uses random, server-side sessions stored in D1. When upgrading, apply
+all pending migrations before deploying the new Worker (the deploy scripts do this automatically).
 Existing JWT sessions are invalidated; users must log in again. Existing PATs remain valid.
 `JWT_SECRET` is no longer used. GitHub App authentication still uses GitHub's required App JWTs.
 

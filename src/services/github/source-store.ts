@@ -92,7 +92,8 @@ export function sourceRecalculation(db: D1Database, sourceId: string, now: numbe
     ).bind(MAX_MIRROR_BYTES, now, ...sourceArgs, now),
     db.prepare(
       `UPDATE repositories SET description = g.description,
-         is_private = CASE WHEN s.visibility_policy = 'private' THEN 1 ELSE g.is_private END
+         is_private = COALESCE(g.visibility_override,
+           CASE WHEN s.visibility_policy = 'private' THEN 1 ELSE g.is_private END)
        FROM github_repositories g JOIN github_installations s ON s.id = g.source_id
        WHERE repositories.id = g.repository_id AND s.id = ${source}`
     ).bind(...sourceArgs)

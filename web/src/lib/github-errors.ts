@@ -11,6 +11,7 @@ const messages: Record<string, string> = {
   "Invalid repository status filter": "筛选条件无效，请重新选择。",
   "Invalid repository selection": "同步选择无效，请刷新后重试。",
   "Repository is not a mirror": "该仓库已停止同步，请刷新页面。",
+  "Mirror description is managed by GitHub": "镜像仓库的描述由 GitHub 同步，请在 GitHub 上修改。",
   "Cannot reach GitHub": "无法连接 GitHub，请稍后重试。",
   "GitHub rate limit exceeded": "已达到 GitHub 请求频率限制，请稍后重试。",
   "GitHub owner or repository is not accessible":

@@ -123,7 +123,7 @@ it("enforces mirror read-only rules and restores writes after stopping", async (
   await dispatchMirrorTasks(env);
   const base = "/repos/alice/repo-1";
   for (const [method, suffix, payload] of [
-    ["PATCH", "", { description: "new" }], ["PATCH", "", { isPrivate: true }],
+    ["PATCH", "", { description: "new" }],
     ["POST", "/branches", { branchName: "feature", sourceOid: "a".repeat(40) }],
     ["PATCH", "/default-branch", { branchName: "feature" }],
     ["DELETE", "/branches/feature", undefined]
@@ -166,6 +166,77 @@ it("enforces mirror read-only rules and restores writes after stopping", async (
   expect((await request(env, base, "PATCH", { description: "ordinary" })).status).toBe(200);
   const repository = sqlite.prepare("SELECT description FROM repositories").get()!;
   expect(repository.description).toBe("ordinary");
+});
+
+it.each([true, false])("preserves an owner's mirror visibility override (%s)", async (isPrivate) => {
+  const { env, remote, sqlite, repos } = await githubFixture([
+    githubRepo(1, { private: !isPrivate })
+  ]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  const base = "/repos/alice/repo-1";
+  expect((await request(env, base, "PATCH", { isPrivate })).status).toBe(200);
+  expect(remote().visibility_override).toBe(Number(isPrivate));
+
+  // Both GitHub updates and source policy edits must preserve the local choice.
+  repos[0]!.description = "updated on GitHub";
+  await discoverSource(env, "source");
+  expect((await request(env, "/github/sources/source", "PATCH", {
+    visibilityPolicy: isPrivate ? "follow" : "private"
+  })).status).toBe(200);
+  expect(sqlite.prepare("SELECT description, is_private FROM repositories").get())
+    .toMatchObject({ description: "updated on GitHub", is_private: Number(isPrivate) });
+  expect((await request(env, base, "GET", undefined, "")).status).toBe(isPrivate ? 404 : 200);
+  const publicRepos = await (await request(env, "/public/repos", "GET", undefined, "")).json();
+  expect(publicRepos.repositories).toHaveLength(isPrivate ? 0 : 1);
+
+  expect((await request(env, base + "/mirror", "DELETE")).status).toBe(200);
+  expect(remote().visibility_override).toBeNull();
+  expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private)
+    .toBe(Number(isPrivate));
+});
+
+it("only allows owners to change mirror visibility and validates before saving", async () => {
+  const { env, remote, sqlite } = await githubFixture([githubRepo()]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  const base = "/repos/alice/repo-1";
+  sqlite.prepare(`INSERT INTO repository_collaborators VALUES (?, 'other', 'admin', 1)`)
+    .run(remote().repository_id!);
+  expect((await request(env, base, "PATCH", { isPrivate: true }, "bob")).status).toBe(403);
+  expect((await request(env, base, "PATCH", { isPrivate: true }, "")).status).toBe(401);
+  expect((await request(env, base, "PATCH", { isPrivate: "private" })).status).toBe(400);
+  expect((await request(env, base, "PATCH", {
+    description: "local description", isPrivate: true
+  })).status).toBe(409);
+  expect((await request(env, base, "PATCH", { name: "repo-1" })).status).toBe(200);
+  expect(remote().visibility_override).toBeNull();
+  expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(0);
+});
+
+it("rolls back visibility overrides with conflicting repository renames", async () => {
+  const { env, remote, sqlite } = await githubFixture([githubRepo()]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  sqlite.exec(`INSERT INTO repositories (id, owner_id, name, is_private, created_at)
+    VALUES ('taken', 'user', 'taken', 1, 1)`);
+  expect((await request(env, "/repos/alice/repo-1", "PATCH", {
+    name: "taken", isPrivate: true
+  })).status).toBe(409);
+  expect(remote().visibility_override).toBeNull();
+  expect(sqlite.prepare("SELECT is_private FROM repositories WHERE id = ?")
+    .get(remote().repository_id!)!.is_private).toBe(0);
+});
+
+it("saves mirror visibility and its override atomically", async () => {
+  const { env, remote, sqlite } = await githubFixture([githubRepo()]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  sqlite.exec(`CREATE TRIGGER reject_visibility_override BEFORE UPDATE OF visibility_override
+    ON github_repositories BEGIN SELECT RAISE(ABORT, 'override write failed'); END`);
+  expect((await request(env, "/repos/alice/repo-1", "PATCH", { isPrivate: true })).status).toBe(500);
+  expect(remote().visibility_override).toBeNull();
+  expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(0);
 });
 
 it("deleting a mirror excludes its remote before deleting local data", async () => {

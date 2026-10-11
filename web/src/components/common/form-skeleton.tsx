@@ -24,7 +24,7 @@ const layouts: Record<Variant, Layout> = {
   },
   settings: {
     fields: [{ name: "name" }, { name: "description", multiline: true }],
-    visibility: true,
+    visibility: false,
     actions: ["w-16"]
   }
 };
@@ -56,29 +56,43 @@ function VisibilitySkeleton() {
 export function FormSkeleton({ variant }: { variant: Variant }) {
   const layout = layouts[variant];
   return (
-    <SkeletonRegion announce className="space-y-4 p-4">
-      {layout.fields.map((field) => (
-        <div key={field.name} className="space-y-2">
-          <div className="flex h-5 items-center">
-            <Skeleton className="h-3.5 w-16" />
-          </div>
-          <div className="flex min-w-0 items-center gap-2">
-            {field.prefix && <Skeleton className="h-3.5 w-16 shrink-0" />}
-            <Skeleton className={cn("flex-1", field.multiline ? "h-[86px]" : "h-10 md:h-9")} />
-          </div>
-          {field.description && (
-            <div className="flex h-4 items-center">
-              <Skeleton className="h-3 w-24" />
+    <SkeletonRegion announce>
+      <div className="space-y-4 p-4">
+        {layout.fields.map((field) => (
+          <div key={field.name} className="space-y-2">
+            <div className="flex h-5 items-center">
+              <Skeleton className="h-3.5 w-16" />
             </div>
-          )}
-        </div>
-      ))}
-      {layout.visibility && <VisibilitySkeleton />}
-      <div className={cn("flex gap-2", layout.alignEnd && "justify-end")}>
-        {layout.actions.map((width) => (
-          <Skeleton key={width} className={cn("h-10 md:h-9", width)} />
+            <div className="flex min-w-0 items-center gap-2">
+              {field.prefix && <Skeleton className="h-3.5 w-16 shrink-0" />}
+              <Skeleton className={cn("flex-1", field.multiline ? "h-[86px]" : "h-10 md:h-9")} />
+            </div>
+            {field.description && (
+              <div className="flex h-4 items-center">
+                <Skeleton className="h-3 w-24" />
+              </div>
+            )}
+          </div>
         ))}
+        {layout.visibility && <VisibilitySkeleton />}
+        <div className={cn("flex gap-2", layout.alignEnd && "justify-end")}>
+          {layout.actions.map((width) => (
+            <Skeleton key={width} className={cn("h-10 md:h-9", width)} />
+          ))}
+        </div>
       </div>
+      {variant === "settings" && (
+        <div className="flex items-center justify-between gap-3 border-t border-border-subtle p-4">
+          <div className="space-y-2">
+            <div className="flex h-5 items-center"><Skeleton className="h-3.5 w-16" /></div>
+            <div className="flex h-5 items-center gap-2">
+              <Skeleton className="size-4 rounded-sm" />
+              <Skeleton className="h-3.5 w-8" />
+            </div>
+          </div>
+          <Skeleton className="size-10 rounded-md md:size-8" />
+        </div>
+      )}
     </SkeletonRegion>
   );
 }

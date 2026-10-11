@@ -55,9 +55,9 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
-    if ((payload.description !== undefined || payload.isPrivate !== undefined)
+    if (payload.description !== undefined
       && await repositoryService.findMirror(repository.id)) {
-      throw new HTTPException(409, { message: "Mirror metadata is managed by GitHub" });
+      throw new HTTPException(409, { message: "Mirror description is managed by GitHub" });
     }
 
     const nextNameRaw = assertOptionalString(payload.name, "name");

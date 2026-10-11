@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { FormSkeleton } from "@/components/common/form-skeleton";
 import { PendingButton } from "@/components/ui/pending-button";
-import { VisibilityField } from "@/components/common/visibility-field";
+import { RepositoryVisibilitySetting } from "@/components/common/repository-visibility-setting";
 import { Check } from "lucide-react";
 import {
   deleteRepository,
@@ -37,9 +37,6 @@ function SettingsForm({
   const navigate = useNavigate();
   const [name, setName] = useState(repo);
   const [description, setDescription] = useState(repository.description ?? "");
-  const [visibility, setVisibility] = useState<"private" | "public">(
-    repository.is_private ? "private" : "public"
-  );
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +51,7 @@ function SettingsForm({
       await updateRepository(owner, repo, {
         name,
         ...(!detail.mirror
-          ? { description: description.trim() || null, isPrivate: visibility === "private" }
+          ? { description: description.trim() || null }
           : {})
       });
       if (name !== repo) {
@@ -96,15 +93,6 @@ function SettingsForm({
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
-          <VisibilityField
-            disabled={!!detail.mirror}
-            help={detail.mirror ? <HelpTip label="由 GitHub 同步" /> : undefined}
-            value={visibility}
-            onChange={(value) => {
-              setVisibility(value);
-              setSaved(false);
-            }}
-          />
           <div className="flex items-center gap-3">
             <PendingButton type="submit" pending={pending} pendingText="保存中…">
               保存
@@ -120,6 +108,16 @@ function SettingsForm({
             )}
           </div>
         </form>
+        <div className="border-t border-border-subtle p-4">
+          <RepositoryVisibilitySetting
+            value={repository.is_private ? "private" : "public"}
+            mirror={!!detail.mirror}
+            onSave={async (value) => {
+              await updateRepository(owner, repo, { isPrivate: value === "private" });
+              onSaved(await getRepositoryDetail(owner, repo));
+            }}
+          />
+        </div>
       </Panel>
       {detail.mirror && (
         <RepositoryMirrorPanel owner={owner} repo={repo} mirror={detail.mirror} onSaved={onSaved} />

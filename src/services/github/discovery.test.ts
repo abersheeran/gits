@@ -4,6 +4,7 @@ import { discoverSource } from "./discovery";
 import { dispatchMirrorTasks } from "./scheduler";
 import { recalculateSource } from "./source-store";
 import { MAX_MIRROR_BYTES } from "./types";
+import { RepositoryService } from "../repository-service";
 
 it("marks missing after complete pagination and restores reappearing repos", async () => {
   const fixture = await githubFixture([githubRepo()]);
@@ -66,6 +67,21 @@ it("transfers by ID and updates metadata without renaming", async () => {
   expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(0);
   sqlite.exec("UPDATE github_installations SET visibility_policy = 'private' WHERE id = 'org'");
   await recalculateSource(env, "org");
+  expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(1);
+});
+
+it("keeps custom mirror visibility when transferring between installations", async () => {
+  const { env, remote, sqlite, repos, seedSource } = await githubFixture([githubRepo()]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  const repositoryId = remote().repository_id!;
+  await new RepositoryService(env.DB).updateRepository(repositoryId, { isPrivate: true });
+  seedSource("org", githubInstallation(200, true));
+  repos[0]!.full_name = "team/repo-1";
+  await discoverSource(env, "org");
+  expect(remote()).toMatchObject({
+    source_id: "org", repository_id: repositoryId, visibility_override: 1
+  });
   expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(1);
 });
 

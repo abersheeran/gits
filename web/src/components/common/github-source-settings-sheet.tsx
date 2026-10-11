@@ -113,11 +113,11 @@ export function GithubSourceSettingsSheet({
               包含已归档仓库
             </label>
             <fieldset className="space-y-3">
-              <legend className="text-body-xs font-medium">可见性</legend>
+              <legend className="text-body-xs font-medium">默认可见性</legend>
               {(
                 [
-                  ["follow", "跟随 GitHub", "与 GitHub 仓库保持相同的可见性", Globe],
-                  ["private", "全部设为私有", "只有你和协作者可以访问", Lock]
+                  ["follow", "跟随 GitHub", "未单独设置的镜像与 GitHub 保持一致", Globe],
+                  ["private", "私有", "未单独设置的镜像只有你和协作者可以访问", Lock]
                 ] as const
               ).map(([value, label, description, Icon]) => (
                 <label key={value} className="flex min-h-10 cursor-pointer items-center gap-3">

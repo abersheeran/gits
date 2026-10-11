@@ -8,12 +8,19 @@ import { dispatchMirrorTasks } from "../services/github/scheduler";
 it("applies all migrations with the same tables and indexes as schema.sql", () => {
   const migrated = new DatabaseSync(":memory:", { enableDoubleQuotedStringLiterals: true });
   const schema = new DatabaseSync(":memory:", { enableDoubleQuotedStringLiterals: true });
-  for (const filename of ["0001_init.sql", "0002_github_sync.sql", "0003_user_sessions.sql"]) {
+  for (const filename of [
+    "0001_init.sql", "0002_github_sync.sql", "0003_user_sessions.sql", "0004_mirror_visibility.sql"
+  ]) {
     migrated.exec(readFileSync(new URL(`./migrations/${filename}`, import.meta.url), "utf8"));
   }
   schema.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
   const query = "SELECT type, name, sql FROM sqlite_master ORDER BY type, name";
-  expect(migrated.prepare(query).all()).toEqual(schema.prepare(query).all());
+  // ALTER TABLE and CREATE TABLE format the same definition differently.
+  const definitions = (db: DatabaseSync) => db.prepare(query).all().map((row) => ({
+    ...row,
+    sql: typeof row.sql === "string" ? row.sql.replace(/\s+/g, " ").trim() : row.sql
+  }));
+  expect(definitions(migrated)).toEqual(definitions(schema));
   migrated.close();
   schema.close();
 });

@@ -65,6 +65,7 @@ export type RemoteRow = {
   included: number;
   local_name: string | null;
   repository_id: string | null;
+  visibility_override: number | null;
   state: RepositoryState;
   last_error: string | null;
   attempts: number;

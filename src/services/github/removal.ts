@@ -6,7 +6,8 @@ import type { RemoteRow } from "./types";
 export async function stopMirror(env: AppBindings, remote: RemoteRow) {
   await env.DB.prepare(
     `UPDATE github_repositories SET selection = 'exclude', included = 0, state = 'excluded',
-       repository_id = NULL, lease_until = NULL, claim_id = NULL, last_error = NULL
+       repository_id = NULL, visibility_override = NULL,
+       lease_until = NULL, claim_id = NULL, last_error = NULL
      WHERE id = ?`
   ).bind(remote.id).run();
   if (remote.repository_id) {

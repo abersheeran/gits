@@ -14,6 +14,13 @@ function isMatch(sql: string, matcher: string | RegExp): boolean {
 
 export function createMockD1Database(handlers: MockHandler[]): D1Database {
   return {
+    async batch(statements: D1PreparedStatement[]) {
+      const results = [];
+      for (const statement of statements) {
+        results.push(await statement.run());
+      }
+      return results;
+    },
     prepare(sql: string) {
       return {
         bind(...params: unknown[]) {

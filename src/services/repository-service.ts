@@ -262,10 +262,20 @@ export class RepositoryService {
       return;
     }
 
-    await this.db
+    const update = this.db
       .prepare(`UPDATE repositories SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...params, repositoryId)
-      .run();
+      .bind(...params, repositoryId);
+    if (patch.isPrivate !== undefined) {
+      // Commit the visibility and its sync override together so discovery cannot undo the edit.
+      await this.db.batch([
+        update,
+        this.db.prepare(
+          "UPDATE github_repositories SET visibility_override = ? WHERE repository_id = ?"
+        ).bind(Number(patch.isPrivate), repositoryId)
+      ]);
+    } else {
+      await update.run();
+    }
   }
 
   async deleteRepositoryById(repositoryId: string): Promise<void> {
