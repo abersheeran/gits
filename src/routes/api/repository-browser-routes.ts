@@ -70,13 +70,17 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     if (detailRef) {
       detailInput.ref = detailRef;
     }
-    const details = await repositoryClient.getRepositoryDetail({
-      repositoryId: repository.id,
-      ...detailInput
-    });
+    const [viewerPermission, details] = await Promise.all([
+      repositoryService.findViewerPermission(repository, sessionUser?.id),
+      repositoryClient.getRepositoryDetail({
+        repositoryId: repository.id,
+        ...detailInput
+      })
+    ]);
 
     return c.json({
       repository,
+      viewerPermission,
       ...details
     });
   });

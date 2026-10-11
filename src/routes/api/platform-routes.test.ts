@@ -31,7 +31,28 @@ describe("API platform routes", () => {
     expect(await response.text()).toContain("User registration is disabled");
   });
 
-  it("allows registration when user registration flag is set", async () => {
+  it.each(["false", "0", "", "enabled"])("returns 403 when user registration flag is %j", async (flag) => {
+    const env = createBaseEnv(createMockD1Database([]));
+    env.ALLOW_USER_REGISTRATION = flag;
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice@example.com",
+          password: "Password123"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("User registration is disabled");
+  });
+
+  it.each(["true", " TRUE "])("allows registration when user registration flag is %j", async (flag) => {
     vi.spyOn(AuthService.prototype, "createUser").mockResolvedValue({
       id: "user-1",
       username: "alice"
@@ -39,7 +60,7 @@ describe("API platform routes", () => {
     vi.spyOn(AuthService.prototype, "createSessionToken").mockResolvedValue("session-token");
 
     const env = createBaseEnv(createMockD1Database([]));
-    env.ALLOW_USER_REGISTRATION = "enabled";
+    env.ALLOW_USER_REGISTRATION = flag;
 
     const response = await createApp().fetch(
       new Request("http://localhost/api/auth/register", {

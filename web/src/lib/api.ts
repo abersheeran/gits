@@ -20,6 +20,7 @@ export type RepositoryRecord = {
 
 export type RepositoryDetailResponse = {
   repository: RepositoryRecord;
+  viewerPermission: "owner" | CollaboratorPermission | null;
   defaultBranch: string | null;
   selectedRef: string | null;
   headOid: string | null;

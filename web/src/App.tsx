@@ -166,7 +166,7 @@ function App() {
             path="/repo/:owner/:repo/collaborators"
             element={<RepositoryCollaboratorsPage user={user} />}
           />
-          <Route path="/repo/:owner/:repo/commits" element={<RepositoryCommitsPage user={user} />} />
+          <Route path="/repo/:owner/:repo/commits" element={<RepositoryCommitsPage />} />
           <Route
             path="/repo/:owner/:repo/branches"
             element={<RepositoryBranchesPage user={user} />}

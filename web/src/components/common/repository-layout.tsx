@@ -2,20 +2,24 @@ import { Code2, History, GitBranch, Settings, type LucideIcon } from "lucide-rea
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
-import type { AuthUser, RepositoryDetailResponse } from "@/lib/api";
+import type { RepositoryDetailResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 export function RepositoryLayout({
   detail,
-  user,
   children
 }: {
   detail: RepositoryDetailResponse;
-  user: AuthUser | null;
   children: ReactNode;
 }) {
   const { pathname } = useLocation();
   const repository = detail.repository;
   const base = `/repo/${repository.owner_username}/${repository.name}`;
+  const settingsItems: Array<[string, string]> =
+    detail.viewerPermission === "owner"
+      ? [["settings", "常规"], ["collaborators", "协作者"]]
+      : detail.viewerPermission === "admin"
+        ? [["collaborators", "协作者"]]
+        : [];
   const settings = pathname === `${base}/settings` || pathname === `${base}/collaborators`;
   const tab = settings
     ? "settings"
@@ -25,12 +29,19 @@ export function RepositoryLayout({
         ? "commits"
         : "";
   const ref = detail.selectedRef?.replace(/^refs\/heads\//, "");
-  const tabs: Array<[string, string, LucideIcon]> = [
-    ["", "代码", Code2],
-    ["commits", "提交", History],
-    ["branches", "分支", GitBranch]
+  const tabs: Array<[string, string, string, LucideIcon]> = [
+    ["", "代码", base, Code2],
+    [
+      "commits",
+      "提交",
+      ref ? `${base}/commits?ref=${encodeURIComponent(ref)}` : `${base}/commits`,
+      History
+    ],
+    ["branches", "分支", `${base}/branches`, GitBranch]
   ];
-  if (user?.username === repository.owner_username) tabs.push(["settings", "设置", Settings]);
+  if (settingsItems.length > 0) {
+    tabs.push(["settings", "设置", `${base}/${settingsItems[0][0]}`, Settings]);
+  }
   return (
     <div className="min-w-0 space-y-4">
       <header className="space-y-2">
@@ -48,17 +59,11 @@ export function RepositoryLayout({
         )}
       </header>
       <nav aria-label="仓库导航" className="flex min-w-0 overflow-x-auto border-b border-border">
-        {tabs.map(([key, label, Icon]) => (
+        {tabs.map(([key, label, to, Icon]) => (
           <Link
             key={key}
             aria-current={tab === key ? "page" : undefined}
-            to={
-              key === "commits" && ref
-                ? `${base}/commits?ref=${encodeURIComponent(ref)}`
-                : key
-                  ? `${base}/${key}`
-                  : base
-            }
+            to={to}
             className={cn(
               "inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-body-xs",
               tab === key
@@ -71,13 +76,10 @@ export function RepositoryLayout({
           </Link>
         ))}
       </nav>
-      {settings ? (
+      {settings && settingsItems.length > 1 ? (
         <div className="grid min-w-0 gap-4 md:grid-cols-[160px_minmax(0,1fr)]">
           <nav aria-label="设置导航" className="flex gap-1 md:flex-col">
-            {[
-              ["settings", "常规"],
-              ["collaborators", "协作者"]
-            ].map(([key, label]) => (
+            {settingsItems.map(([key, label]) => (
               <Link
                 key={key}
                 to={`${base}/${key}`}

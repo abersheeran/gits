@@ -115,6 +115,21 @@ export class RepositoryService {
     return row ?? null;
   }
 
+  async findViewerPermission(
+    repo: RepositoryRecord,
+    userId?: string
+  ): Promise<"owner" | CollaboratorPermission | null> {
+    if (!userId) {
+      return null;
+    }
+
+    if (repo.owner_id === userId) {
+      return "owner";
+    }
+
+    return this.findCollaboratorPermission(repo.id, userId);
+  }
+
   async canReadRepository(repo: RepositoryRecord, userId?: string): Promise<boolean> {
     if (repo.is_private === 0) {
       return true;

@@ -94,7 +94,7 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
   if (pageError) return <ErrorAlert error={pageError} />;
   if (!detail) return <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail} user={user}>
+    <RepositoryLayout detail={detail}>
       <Panel
         header={
           <>

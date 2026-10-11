@@ -21,7 +21,7 @@ import {
 } from "./shared";
 
 const userRegistrationEnabled = (flag: string | undefined): boolean =>
-  typeof flag === "string" && flag.trim().length > 0;
+  flag?.trim().toLowerCase() === "true";
 
 export function registerPlatformRoutes(router: ApiRouter): void {
   router.get("/healthz", (c) => c.json({ ok: true }));

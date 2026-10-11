@@ -53,6 +53,7 @@ describe("API repository browser route integration", () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
+      viewerPermission: string | null;
       defaultBranch: string;
       branches: Array<{ name: string; oid: string }>;
       readme: { path: string; content: string } | null;
@@ -63,8 +64,10 @@ describe("API repository browser route integration", () => {
       "headOid",
       "readme",
       "repository",
-      "selectedRef"
+      "selectedRef",
+      "viewerPermission"
     ]);
+    expect(body.viewerPermission).toBeNull();
     expect(body.defaultBranch).toBe("main");
     expect(body.branches.some((item) => item.name === "main")).toBe(true);
     expect(body.readme?.content).toContain("# Demo");

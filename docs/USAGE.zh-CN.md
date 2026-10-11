@@ -2,9 +2,9 @@
 
 本文说明如何部署服务、管理个人仓库和协作者，以及通过网页、API 和 Git 读写代码。
 
-## 1. 当前产品范围
+## 1. 产品范围
 
-`gits` 是运行在 Cloudflare Workers 上的个人 Git 仓库托管服务，提供账户与 PAT、仓库管理、分支管理、代码浏览和提交历史。仓库可公开或私有，协作者按仓库授权。
+`gits` 是运行在 Cloudflare Workers 上的个人 Git 仓库托管服务，提供账户与 PAT、仓库管理、分支管理、代码浏览和提交历史。仓库可公开或私有，协作者按仓库授权。完整功能边界见 [PRD 索引](../prd/README.md#2-功能边界)。
 
 ## 2. 前置要求
 
@@ -63,7 +63,7 @@ ALLOW_USER_REGISTRATION=true
 ```
 
 - `JWT_SECRET`：必须替换为自己的密钥；本地用 `npm run secret:dev`，生产用 `npm run secret:prod` 设置。
-- `ALLOW_USER_REGISTRATION`：去除空白后非空就启用注册，包括字符串 `false`。关闭注册需删除该变量或设置为空。
+- `ALLOW_USER_REGISTRATION`：设为 `true`（不区分大小写）启用注册，其他值或未设置时关闭。
 - `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES`：可选的 fetch / push 请求体上限，默认分别为 8 MiB / 32 MiB。
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
@@ -90,23 +90,9 @@ npm run db:migrate:preview
 
 `npm run dev` 自动执行本地迁移；`npm run deploy` 自动执行生产迁移；`npm run preview` 先通过 `wrangler.preview-migrations.jsonc` 迁移同一个 `gits-preview` 数据库，再运行 `wrangler preview`。
 
-### 4.5 迁移历史重置与重新部署
-
-2026-10 已移除 Agent / Actions / Issue / Pull Request，D1 与 Durable Object 迁移历史均重置为单个初始迁移，分别为 `src/db/migrations/0001_init.sql` 和 `repository-object-v1`。
-
-旧部署不能原地升级：先删除旧 `gits` Worker（连同其 Durable Object 命名空间及存储）、D1 数据库、R2 数据、`gits-actions` 队列，以及旧 `gits-actionscontainer*` 容器应用和镜像，再从零部署。本地开发先删除 `.wrangler/state`，再运行 `npm run dev`。
-
 ## 5. 本地运行、部署与健康检查
 
-在 Workers Builds 中将仓库连接到 `gits` Worker，选择生产分支，为其余所有分支启用 **Preview builds**，根目录选择仓库根目录：
-
-| 设置 | 命令 |
-| --- | --- |
-| Build command | `npm ci && npm --prefix web ci && npm run build` |
-| Deploy command（生产分支） | `npm run deploy` |
-| Preview command（其余分支） | `npm run preview` |
-
-Preview 地址格式为 `<branch>-gits.<subdomain>.workers.dev`。手动运行 `npm run preview` 前需先构建前端。配置规则见 [Cloudflare Preview 文档](https://developers.cloudflare.com/workers/previews/configuration/)。
+### 5.1 本地运行
 
 两个终端分别运行：
 
@@ -120,6 +106,20 @@ npm run dev:web
 
 浏览器打开 Vite 输出的地址。`web/vite.config.ts` 将 API、健康检查及 Git 请求代理到 `http://127.0.0.1:8787`，本地 Worker 需使用此端口。
 
+### 5.2 Workers Builds 与 Preview
+
+在 Workers Builds 中将仓库连接到 `gits` Worker，选择生产分支，为其余所有分支启用 **Preview builds**，根目录选择仓库根目录：
+
+| 设置 | 命令 |
+| --- | --- |
+| Build command | `npm ci && npm --prefix web ci && npm run build` |
+| Deploy command（生产分支） | `npm run deploy` |
+| Preview command（其余分支） | `npm run preview` |
+
+Preview 地址格式为 `<branch>-gits.<subdomain>.workers.dev`。手动运行 `npm run preview` 前需先构建前端。配置规则见 [Cloudflare Preview 文档](https://developers.cloudflare.com/workers/previews/configuration/)。
+
+### 5.3 手动部署
+
 远程资源配置完成后部署：
 
 ```bash
@@ -127,9 +127,9 @@ npm run secret:prod
 npm run deploy -- --var ALLOW_USER_REGISTRATION:true
 ```
 
-部署依次执行远程迁移、前端构建和 Worker 发布，并保留已有生产变量。后续可直接运行 `npm run deploy`。
+部署依次执行远程迁移、前端构建和 Worker 发布，并保留已有生产变量。之后再次部署直接运行 `npm run deploy`。
 
-健康检查：
+### 5.4 健康检查
 
 ```bash
 BASE_URL="http://127.0.0.1:8787"
@@ -149,7 +149,7 @@ curl -sS "$BASE_URL/api/healthz"
 | `read` 协作者 | 读取对应仓库，包括私有仓库 |
 | `write` 协作者 | 读取和 Git push |
 | `admin` 协作者 | 读取、Git push、管理协作者 |
-| 所有者 | 上述全部能力，以及仓库设置、删除、分支管理 API |
+| 所有者 | 上述全部能力，以及仓库设置、删除、分支管理 |
 
 PAT 明文只在创建时返回，可设置到期时间或撤销；PAT 不限制到单个仓库。登出只清除登录 cookie，不撤销已有 JWT 或 PAT。
 
@@ -174,15 +174,15 @@ PAT 明文只在创建时返回，可设置到期时间或撤销；PAT 不限制
 
 ### 7.3 分支
 
-所有者在 `/repo/:owner/:repo/branches` 创建分支、设置默认分支或删除分支。创建需要已有提交的完整 40 位 OID；空仓库先 push 一次。删除 API 不允许删除默认分支，并要求至少保留一个分支。
+`/repo/:owner/:repo/branches` 列出全部分支。所有者可在此创建分支、设置默认分支或删除分支。新建分支的来源可选已有分支或完整提交 SHA；空仓库需先 push 一次。不能删除默认分支，且至少保留一个分支。
 
 ### 7.4 设置
 
-所有者在 `/repo/:owner/:repo/settings` 修改名称、描述、可见性，复制 clone URL 或删除仓库。重命名后需更新 Git 远端地址；删除会清理数据，没有回收站。
+所有者在 `/repo/:owner/:repo/settings` 修改名称、描述、可见性或删除仓库。删除需输入仓库名确认。重命名后需更新 Git 远端地址；删除会清理全部数据，不可恢复。Clone 地址在代码页复制。
 
 ### 7.5 协作者
 
-所有者或 `admin` 协作者在 `/repo/:owner/:repo/collaborators` 按已注册用户名添加成员、修改权限或移除成员。
+所有者或 `admin` 协作者从仓库页「设置」标签进入 `/repo/:owner/:repo/collaborators`，按已注册用户名添加成员、修改权限或移除成员。
 
 ## 8. API 快速实操
 
@@ -291,7 +291,7 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 
 | 现象 | 检查项 |
 | --- | --- |
-| 注册返回 403 | `ALLOW_USER_REGISTRATION` 是否非空；关闭注册不能写 `false` |
+| 注册返回 403 | `ALLOW_USER_REGISTRATION` 是否为 `true` |
 | Git 返回 401 | 是否使用 PAT、是否过期或撤销、用户名是否匹配令牌用户 |
 | API 返回 401 | 是否携带有效登录 cookie 或 Bearer 凭证 |
 | 仓库返回 404 | 路径是否正确，是否已重命名，当前用户是否有私有仓库读权限 |
@@ -302,12 +302,13 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 | 本地页面无法调用 API | Worker 是否在 8787 端口，是否通过 Vite 地址访问，cookie 是否属于当前主机 |
 | 静态资源目录不存在 | 先安装前端依赖并运行 `npm run build:web` |
 
-## 12. 当前边界
+## 12. 功能边界
 
 - 个人仓库加协作者，不提供组织或团队。
+- 只做 Git 仓库托管，不提供 Issue、Pull Request、CI 或 Agent。
 - 仅 HTTP Git；Workers 无法承载入站 SSH 服务，不提供 SSH Git。
-- 没有 Git LFS、代码搜索、分支保护或网页文件编辑。
-- 分支管理 API 的所有者限制不构成 Git push 的分支保护策略。
-- 仓库硬删除，无恢复入口；仓库列表和路径历史尚无分页，提交历史已支持分页。
+- 网页只读，不提供文件编辑；不提供 Git LFS、代码搜索或分支保护。
+- 分支管理的所有者限制不构成分支保护：有写权限即可通过 Git push 修改任意引用。
+- 仓库硬删除，不可恢复。
 
-模块设计与后续方向见 [PRD 索引](../prd/README.md)。
+各模块的详细规则见 [PRD 索引](../prd/README.md)。

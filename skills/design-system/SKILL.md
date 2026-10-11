@@ -99,8 +99,8 @@ README 等 Markdown 正文沿用 `markdown-body` 的排版，不受上表约束�
 所有 `/repo/:owner/:repo/*` 页面共用同一个仓库布局：
 
 1. **仓库头**：`owner / name`（name 加粗，可点击回仓库首页）、可见性 Badge（公开/私有）、描述（无描述则不显示）。
-2. **标签导航**：下划线式标签——代码（`Code2`）、提交（`History`）、分支（`GitBranch`）；仓库所有者额外看到**设置**（`Settings`）。当前标签用 `text-text-primary` 加 2px 底边，其余 `text-text-secondary`。标签栏底部一条贯通分隔线。
-3. **设置**内部用二级导航切换**常规**和**协作者**（桌面为左侧竖排，移动端为顶部横排）。
+2. **标签导航**：下划线式标签——代码（`Code2`）、提交（`History`）、分支（`GitBranch`）；仓库所有者和 `admin` 协作者额外看到**设置**（`Settings`）。当前标签用 `text-text-primary` 加 2px 底边，其余 `text-text-secondary`。标签栏底部一条贯通分隔线。
+3. **设置**内部用二级导航切换**常规**和**协作者**（桌面为左侧竖排，移动端为顶部横排）。`admin` 协作者只有**协作者**一项，不显示二级导航。
 
 「代码」标签页结构：
 

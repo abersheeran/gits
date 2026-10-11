@@ -92,7 +92,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
     shortName: branch.name.replace(/^refs\/heads\//, "")
   }));
   return (
-    <RepositoryLayout detail={detail} user={user}>
+    <RepositoryLayout detail={detail}>
       <Panel
         header={
           <>

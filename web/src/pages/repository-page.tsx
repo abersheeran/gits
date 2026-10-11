@@ -92,7 +92,7 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
   const cloneUrl = `${window.location.origin}/${owner}/${repo}.git`;
   if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail} user={user}>
+    <RepositoryLayout detail={detail}>
       {detail.branches.length === 0 && !loading && !error ? (
         <EmptyRepositoryGuide
           cloneUrl={cloneUrl}

@@ -14,11 +14,10 @@ import {
   formatApiError,
   getRepositoryCommits,
   getRepositoryDetail,
-  type AuthUser,
   type CommitHistoryResponse,
   type RepositoryDetailResponse
 } from "@/lib/api";
-export function RepositoryCommitsPage({ user }: { user: AuthUser | null }) {
+export function RepositoryCommitsPage() {
   const { owner = "", repo = "" } = useParams();
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
@@ -68,7 +67,7 @@ export function RepositoryCommitsPage({ user }: { user: AuthUser | null }) {
   }
   if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail} user={user}>
+    <RepositoryLayout detail={detail}>
       <BranchSelect
         detail={detail}
         disabled={loading}

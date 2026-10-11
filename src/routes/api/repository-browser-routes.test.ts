@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthService } from "../../services/auth-service";
 import { RepositoryObjectClient } from "../../services/repository-object-client";
 import { createMockD1Database } from "../../test-utils/mock-d1";
 import { buildRepositoryRow, createApp, createBaseEnv } from "./test-helpers";
@@ -6,6 +7,78 @@ import { buildRepositoryRow, createApp, createBaseEnv } from "./test-helpers";
 describe("API repository browser routes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    {
+      viewer: "owner",
+      user: { id: "owner-1", username: "alice" },
+      isPrivate: 1,
+      permission: null,
+      expected: "owner"
+    },
+    {
+      viewer: "admin collaborator",
+      user: { id: "user-2", username: "bob" },
+      isPrivate: 1,
+      permission: "admin",
+      expected: "admin"
+    },
+    {
+      viewer: "read collaborator",
+      user: { id: "user-2", username: "bob" },
+      isPrivate: 1,
+      permission: "read",
+      expected: "read"
+    },
+    {
+      viewer: "unrelated authenticated visitor",
+      user: { id: "user-3", username: "charlie" },
+      isPrivate: 0,
+      permission: null,
+      expected: null
+    },
+    {
+      viewer: "anonymous visitor",
+      user: null,
+      isPrivate: 0,
+      permission: null,
+      expected: null
+    }
+  ])("returns viewerPermission for $viewer", async ({ user, isPrivate, permission, expected }) => {
+    if (user) {
+      vi.spyOn(AuthService.prototype, "verifySessionToken").mockResolvedValue(user);
+    }
+    const db = createMockD1Database([
+      {
+        when: "WHERE u.username = ? AND r.name = ?",
+        first: () => buildRepositoryRow({ is_private: isPrivate })
+      },
+      {
+        when: "FROM repository_collaborators",
+        first: (params) =>
+          params[0] === "repo-1" && params[1] === user?.id && permission
+            ? { permission }
+            : null
+      }
+    ]);
+    vi.spyOn(RepositoryObjectClient.prototype, "getRepositoryDetail").mockResolvedValue({
+      defaultBranch: "main",
+      selectedRef: null,
+      headOid: null,
+      branches: [],
+      readme: null
+    });
+
+    const response = await createApp().fetch(
+      new Request("http://localhost/api/repos/alice/demo", {
+        headers: user ? { authorization: "Bearer session-ok" } : {}
+      }),
+      createBaseEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toHaveProperty("viewerPermission", expected);
   });
 
   it("returns branch list for readable repository", async () => {

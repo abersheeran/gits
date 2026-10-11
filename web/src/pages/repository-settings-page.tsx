@@ -140,7 +140,7 @@ export function RepositorySettingsPage({ user }: { user: AuthUser | null }) {
   if (error) return <ErrorAlert error={error} />;
   if (!detail) return <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail} user={user}>
+    <RepositoryLayout detail={detail}>
       {detail.repository.owner_username === user.username ? (
         <SettingsForm key={detail.repository.name} detail={detail} onSaved={setDetail} />
       ) : (

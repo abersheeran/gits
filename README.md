@@ -10,7 +10,7 @@ A personal Git repository host built on Cloudflare Workers, focused on Git stora
 - **Branches** — Owners can create and delete branches and set the default branch through the web UI or API.
 - **Code browsing** — README, directory trees, text files, paginated commits, commit details with diffs, and path history.
 
-Repositories belong to individuals. Git access is HTTP only; there is no SSH service, Git LFS, code search, branch protection, or recycle bin.
+Repositories belong to individuals. Git access is HTTP only and file browsing is read-only. Organizations, issues, pull requests, CI, SSH, Git LFS, code search, and branch protection are out of scope; see the [scope definition](prd/README.md#2-功能边界).
 
 ## Tech Stack
 
@@ -62,7 +62,7 @@ ALLOW_USER_REGISTRATION=true
 | Variable | Behavior |
 | --- | --- |
 | `JWT_SECRET` | Required secret for signing login JWTs |
-| `ALLOW_USER_REGISTRATION` | Registration is enabled by any nonempty value after trimming, including `false`; unset or empty disables it |
+| `ALLOW_USER_REGISTRATION` | `true` (case-insensitive) enables registration; any other value or unset disables it |
 | `UPLOAD_PACK_MAX_BODY_BYTES` | Fetch request body limit; defaults to 8 MiB |
 | `RECEIVE_PACK_MAX_BODY_BYTES` | Push request body limit; defaults to 32 MiB |
 
@@ -76,8 +76,6 @@ Local `.env` values are loaded by the development script. Configure production v
 | `GIT_BUCKET` | Production R2 `gits`; Previews use R2 `gits-preview` |
 | `REPOSITORY_OBJECTS` | `RepositoryObject`; each Preview gets its own namespace and storage |
 | `ASSETS` | Frontend build from `web/dist` |
-
-As of 2026-10, D1 and Durable Object migration histories each contain a single initial migration. Deployments from before this reset cannot be upgraded in place and must be recreated; for local development, delete `.wrangler/state` before running `npm run dev`.
 
 ## Deployment
 
@@ -132,7 +130,7 @@ The script applies remote D1 migrations, builds the frontend, then deploys the W
 npm run deploy
 ```
 
-To close registration, remove or empty the production registration variable. Check `GET /healthz` or `GET /api/healthz` after deployment. Deployments from before the reset must follow the [reset and redeployment note](docs/USAGE.zh-CN.md#45-迁移历史重置与重新部署).
+To close registration, set the production registration variable to any value other than `true`, or remove it. Check `GET /healthz` or `GET /api/healthz` after deployment.
 
 ### Apply Migrations Separately
 
@@ -200,7 +198,7 @@ API authentication accepts the login cookie or Bearer JWT/PAT. Public repository
 
 - `GET /api/public/repos` — Public repositories (`limit`)
 - `GET /api/repos`, `POST /api/repos` — List accessible repositories / create a repository
-- `GET /api/repos/:owner/:repo` — Repository detail (`ref`)
+- `GET /api/repos/:owner/:repo` — Repository detail (`ref`), including the viewer's `viewerPermission`
 - `PATCH /api/repos/:owner/:repo`, `DELETE /api/repos/:owner/:repo` — Update / delete, owner only
 - `GET /api/repos/:owner/:repo/collaborators`, `PUT /api/repos/:owner/:repo/collaborators` — List / add or update collaborators
 - `DELETE /api/repos/:owner/:repo/collaborators/:username` — Remove a collaborator

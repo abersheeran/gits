@@ -6,7 +6,7 @@
 | Panel | `panel.tsx` | 单层面板；字符串 `header` 自动使用 PanelTitle（h2），自定义头部用 PanelTitle 组合标题与 sm 操作；正文自行选择表格或 `p-4`。 |
 | EmptyState | `empty-state.tsx` | 面板内空状态，支持自定义 icon（默认 Inbox）、标题、说明与下一步操作。 |
 | ConfirmDialog | `confirm-dialog.tsx` | 所有破坏性操作的异步确认；`confirmName` 要求准确输入仓库名，失败保留对话框。 |
-| RepositoryLayout | `repository-layout.tsx` | 仓库头、下划线标签及设置二级导航；仅所有者显示设置标签。 |
+| RepositoryLayout | `repository-layout.tsx` | 仓库头、下划线标签及设置二级导航；按 `detail.viewerPermission` 显示设置：所有者有常规与协作者两项，admin 协作者只有协作者一项且不显示二级导航。 |
 | IconButton | `icon-button.tsx` | 带中文无障碍名称与 Tooltip 的 ghost 图标按钮。 |
 | ErrorAlert | `error-alert.tsx` | 对应操作区域的错误提示；支持 title，默认「操作失败」；面板顶部使用 inset 通栏底部分隔线，无错误时不渲染。 |
 | RelativeTime | `relative-time.tsx` | 毫秒时间戳显示为相对时间，完整时间放在 title；null 使用占位文案。 |
