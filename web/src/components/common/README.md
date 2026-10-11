@@ -2,7 +2,7 @@
 
 | 组件 | 文件 | 复用方式 |
 | --- | --- | --- |
-| PageHeader | `page-header.tsx` | 页面唯一 h1、可选说明与主操作；title / description 支持 ReactNode，不加面板外框。 |
+| PageHeader | `page-header.tsx` | 页面唯一 h1、可选说明与主操作；title / description 支持 ReactNode；头像或图标放入 leading，与标题和说明分列对齐，不要嵌入 title 中。不加面板外框。 |
 | Panel | `panel.tsx` | 单层面板；字符串 `header` 自动使用 PanelTitle（h2），自定义头部用 PanelTitle 组合标题与 sm 操作；正文自行选择表格或 `p-4`。 |
 | EmptyState | `empty-state.tsx` | 面板内空状态，支持自定义 icon（默认 Inbox）、标题、说明与下一步操作。 |
 | ConfirmDialog | `confirm-dialog.tsx` | 所有破坏性操作的异步确认；`confirmName` 要求准确输入仓库名，失败保留对话框。 |

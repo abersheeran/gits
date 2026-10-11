@@ -97,26 +97,18 @@ function SourceContent({ sourceId }: { sourceId: string }) {
     : [];
   return (
     <>
-      <Button asChild size="sm" variant="ghost" className="mb-4">
+      <Button asChild size="sm" variant="ghost" className="-ml-3 mb-4 gap-3">
         <Link to="/sync">
-          <ArrowLeft className="size-4" />
+          <span className="flex w-8 justify-center"><ArrowLeft className="size-4" /></span>
           返回同步
         </Link>
       </Button>
       <PageHeader
-        title={
-          source ? (
-            <span className="flex items-center gap-2">
-              <GithubAvatar login={source.accountLogin} url={source.avatarUrl} />
-              <span className="min-w-0 break-all">{source.accountLogin}</span>
-            </span>
-          ) : (
-            "GitHub 同步"
-          )
-        }
+        leading={source && <GithubAvatar login={source.accountLogin} url={source.avatarUrl} />}
+        title={source ? <span className="break-all">{source.accountLogin}</span> : "GitHub 同步"}
         description={
           source && (
-            <span className="flex flex-wrap items-center gap-2">
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span>
                 {source.status === "ok"
                   ? source.attentionCount > 0 ? `${source.attentionCount} 个仓库需处理` : "正常"
@@ -169,7 +161,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
       />
       {source?.lastError && <ErrorAlert error={githubErrorMessage(source.lastError)} />}
       {source && (
-        <nav aria-label="同步状态筛选" className="mb-4 flex min-w-0 border-b border-border">
+        <nav aria-label="同步状态筛选" className="mb-4 flex min-w-0 gap-4 border-b border-border md:gap-8">
           {filters.map(([filter, label, count]) => (
             <button
               key={filter}
@@ -177,14 +169,14 @@ function SourceContent({ sourceId }: { sourceId: string }) {
               aria-current={status === filter ? "page" : undefined}
               onClick={() => navigate(filter, 1)}
               className={cn(
-                "min-h-10 flex-1 border-b-2 px-1 py-3 text-body-xs md:flex-none md:px-4",
+                "inline-flex min-h-10 min-w-0 flex-1 items-baseline justify-center gap-1 border-b-2 py-3 text-body-xs md:flex-none md:justify-start",
                 status === filter
                   ? "border-text-primary text-text-primary"
                   : "border-transparent text-text-secondary hover:text-text-primary"
               )}
             >
               {label}
-              <span className="ml-1 text-body-micro text-text-tertiary">{count}</span>
+              <span className="text-body-micro text-text-tertiary">{count}</span>
             </button>
           ))}
         </nav>

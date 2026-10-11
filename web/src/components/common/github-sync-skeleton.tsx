@@ -101,16 +101,8 @@ export function GithubSyncSkeleton({ source = false, issues = false }: { source?
     <SkeletonRegion announce>
       {source && <Skeleton className="mb-4 h-10 w-24 md:h-8" />}
       <PageHeader
-        title={
-          source ? (
-            <span className="flex items-center gap-2">
-              <Skeleton className="size-8 rounded-full" />
-              <Skeleton className="h-8 w-40" />
-            </span>
-          ) : (
-            "GitHub 同步"
-          )
-        }
+        leading={source ? <Skeleton className="size-8 rounded-full" /> : undefined}
+        title={source ? <Skeleton className="h-8 w-40" /> : "GitHub 同步"}
         description={source ? <Skeleton className="h-5 w-48" /> : undefined}
         action={
           <div className="flex flex-wrap gap-2">
