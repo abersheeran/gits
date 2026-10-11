@@ -1,3 +1,4 @@
+import { removeGithubSource } from "./github/removal";
 import { executeMirrorTask, MIRROR_TASK_KEY } from "./github/mirror-alarm";
 import { dispatchMirrorTasks } from "./github/scheduler";
 import type { MirrorTask } from "./github/types";
@@ -123,6 +124,7 @@ export class RepositoryObject {
 
   async alarm(): Promise<void> {
     let processed = false;
+    let removedSource: string | undefined;
     try {
       await this.write(async () => {
         const task = await this.ctx.storage.get<MirrorTask>(MIRROR_TASK_KEY);
@@ -131,7 +133,7 @@ export class RepositoryObject {
         }
         processed = true;
         try {
-          await executeMirrorTask({
+          removedSource = await executeMirrorTask({
             env: this.env, task, store: this.store, refs: this.refs,
             ready: (owner, repo) => this.ready(owner, repo)
           });
@@ -144,6 +146,9 @@ export class RepositoryObject {
     }
     if (processed) {
       try {
+        if (removedSource) {
+          await removeGithubSource(this.env, removedSource);
+        }
         await dispatchMirrorTasks(this.env);
       } catch {
         console.error("Mirror dispatch failed; the scheduler will retry");

@@ -8,13 +8,6 @@ import {
   SheetDescription,
   SheetFooter
 } from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -23,24 +16,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ErrorAlert } from "./error-alert";
 import { HelpTip } from "./help-tip";
 import { formatGithubApiError as formatApiError } from "@/lib/api-error";
-import {
-  createGithubSource,
-  updateGithubSource,
-  type GithubSourceSettings
-} from "@/lib/github-api";
+import { updateGithubSource, type GithubSourceSettings } from "@/lib/github-api";
 
 // Mount for each editing session so canceled changes never leak into the next source.
 export function GithubSourceSettingsSheet({
-  ownerLogin,
-  connectionId,
+  accountLogin,
   sourceId,
   initial,
   onClose,
   onSaved
 }: {
-  ownerLogin: string;
-  connectionId: string;
-  sourceId?: string;
+  accountLogin: string;
+  sourceId: string;
   initial: GithubSourceSettings;
   onClose: () => void;
   onSaved: () => Promise<void>;
@@ -51,7 +38,6 @@ export function GithubSourceSettingsSheet({
     includeForks: initial.includeForks,
     includeArchived: initial.includeArchived,
     visibilityPolicy: initial.visibilityPolicy,
-    intervalMinutes: initial.intervalMinutes,
     paused: initial.paused
   }));
   const [pending, setPending] = useState(false);
@@ -65,8 +51,7 @@ export function GithubSourceSettingsSheet({
     setPending(true);
     setError(null);
     try {
-      if (sourceId) await updateGithubSource(sourceId, settings);
-      else await createGithubSource({ connectionId, ownerLogin, ...settings });
+      await updateGithubSource(sourceId, settings);
       await onSaved();
       onClose();
     } catch (cause) {
@@ -90,8 +75,8 @@ export function GithubSourceSettingsSheet({
         }}
       >
         <SheetHeader className="pr-10">
-          <SheetTitle>{sourceId ? "同步设置" : "启用同步"}</SheetTitle>
-          <SheetDescription className="text-body-xs">{ownerLogin}</SheetDescription>
+          <SheetTitle>同步设置</SheetTitle>
+          <SheetDescription className="text-body-xs">{accountLogin}</SheetDescription>
         </SheetHeader>
         <form onSubmit={save} className="mt-4 space-y-4">
           <ErrorAlert error={error} />
@@ -151,59 +136,31 @@ export function GithubSourceSettingsSheet({
                 </label>
               ))}
             </fieldset>
-            <div className="space-y-2">
-              <Label htmlFor="github-interval">同步频率</Label>
-              <Select
-                disabled={pending}
-                value={String(settings.intervalMinutes)}
-                onValueChange={(value) =>
-                  field("intervalMinutes", Number(value) as GithubSourceSettings["intervalMinutes"])
-                }
-              >
-                <SelectTrigger id="github-interval">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[
-                    [15, "每 15 分钟"],
-                    [60, "每小时"],
-                    [360, "每 6 小时"],
-                    [1440, "每天"]
-                  ].map(([value, label]) => (
-                    <SelectItem key={value} value={String(value)}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {sourceId && (
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.paused}
-                disabled={pending}
-                onClick={() => field("paused", !settings.paused)}
-                className="flex min-h-10 items-center gap-3 text-body-xs disabled:opacity-50"
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.paused}
+              disabled={pending}
+              onClick={() => field("paused", !settings.paused)}
+              className="flex min-h-10 items-center gap-3 text-body-xs disabled:opacity-50"
+            >
+              <span
+                aria-hidden="true"
+                className={`flex h-5 w-9 items-center rounded-full p-0.5 ${settings.paused ? "bg-action-primaryBg" : "bg-fill-primary"}`}
               >
                 <span
-                  aria-hidden="true"
-                  className={`flex h-5 w-9 items-center rounded-full p-0.5 ${settings.paused ? "bg-action-primaryBg" : "bg-fill-primary"}`}
-                >
-                  <span
-                    className={`size-4 rounded-full bg-surface-base transition-transform ${settings.paused ? "translate-x-4" : ""}`}
-                  />
-                </span>
-                暂停同步
-              </button>
-            )}
+                  className={`size-4 rounded-full bg-surface-base transition-transform ${settings.paused ? "translate-x-4" : ""}`}
+                />
+              </span>
+              暂停同步
+            </button>
           </fieldset>
           <SheetFooter>
             <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
               取消
             </Button>
             <PendingButton type="submit" pending={pending} pendingText="保存中…">
-              {sourceId ? "保存" : "启用同步"}
+              保存
             </PendingButton>
           </SheetFooter>
         </form>

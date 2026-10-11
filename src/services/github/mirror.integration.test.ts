@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
-import { githubFixture, githubRepo } from "../../test-utils/github-fixture";
+import {
+  githubFixture, githubRepo, installationAccessToken
+} from "../../test-utils/github-fixture";
 import { runGit, startAppServer } from "../../test-utils/git-cli-server";
 import { startGitHttpBackend } from "../../test-utils/git-http-backend";
 import { repositoryState } from "../../test-utils/mock-repository-object-namespace";
@@ -32,15 +34,17 @@ async function setup() {
   const server = await startGitHttpBackend(root);
   cleanups.push(server.close);
   const fixture = await githubFixture([githubRepo()]);
-  const { env, fetcher, sqlite, remote } = fixture;
+  const { env, fetcher, sqlite, remote, respond } = fixture;
   env.githubHttp!.gitBaseUrl = server.origin;
   const realFetch = workerdFetch(fetch);
   fetcher.mockImplementation(async (input, init) => {
     if (String(input).startsWith(server.origin)) {
       expect(new Headers(init?.headers).has("Git-Protocol")).toBe(false);
+      expect(new Headers(init?.headers).get("Authorization"))
+        .toBe(`Basic ${btoa(`x-access-token:${installationAccessToken}`)}`);
       return realFetch(input, init);
     }
-    return Response.json(fixture.repos);
+    return respond(input, init);
   });
   const sync = async () => {
     await discoverSource(env, "source");
@@ -135,14 +139,14 @@ it("imports an empty Git repository without requesting a pack", async () => {
     .toHaveLength(0);
 });
 
-it("records git 401 and invalidates the connection without leaking the token", async () => {
+it("records git 401 without leaking installation tokens", async () => {
   const { env, remote, sqlite, fetcher } = await githubFixture([githubRepo()]);
   await discoverSource(env, "source");
   await dispatchMirrorTasks(env);
-  fetcher.mockResolvedValue(new Response("ghp_test_secret", { status: 401 }));
+  fetcher.mockResolvedValue(new Response(installationAccessToken, { status: 401 }));
   const state = repositoryState(env.REPOSITORY_OBJECTS, remote().repository_id!);
   await new RepositoryObject(state, env).alarm();
   expect(remote()).toMatchObject({ state: "failed", lease_until: null });
-  expect(remote().last_error).not.toContain("ghp_test_secret");
-  expect(sqlite.prepare("SELECT status FROM github_connections").get()!.status).toBe("invalid");
+  expect(remote().last_error).not.toContain(installationAccessToken);
+
 });

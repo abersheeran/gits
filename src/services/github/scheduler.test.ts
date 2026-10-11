@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { githubFixture, githubRepo } from "../../test-utils/github-fixture";
+import { githubFixture, githubRepo, githubInstallation } from "../../test-utils/github-fixture";
 import { repositoryState } from "../../test-utils/mock-repository-object-namespace";
 import { RepositoryObject } from "../repository-object";
 import { discoverSource } from "./discovery";
@@ -84,24 +84,20 @@ it("requeues changed pushed_at and fences obsolete task completions", async () =
   expect(remote().next_sync_at).toBeLessThanOrEqual(Date.now());
 });
 
-it("claims at most five due sources and skips paused or invalid connections", async () => {
-  const { env, sqlite, fetcher } = await githubFixture();
+it("claims at most five due sources and skips paused installations", async () => {
+  const { env, sqlite, fetcher, seedSource } = await githubFixture();
   for (let i = 1; i <= 7; i++) {
-    sqlite.prepare(`INSERT INTO github_sync_sources (id, connection_id, user_id, owner_github_id,
-      owner_login, owner_type, next_discovery_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(`source-${i}`, "connection", "user", 100 + i, `owner-${i}`, "organization", 0, 1);
+    seedSource(`source-${i}`, githubInstallation(100 + i, true));
   }
+  const discoveries = () => fetcher.mock.calls.filter(([input]) =>
+    String(input).endsWith("/installation/repositories?per_page=100")).length;
   await runScheduler(env);
-  expect(fetcher).toHaveBeenCalledTimes(5);
+  expect(discoveries()).toBe(5);
   await runScheduler(env);
-  expect(fetcher).toHaveBeenCalledTimes(8);
-  sqlite.exec("UPDATE github_sync_sources SET next_discovery_at = 0, paused = 1");
+  expect(discoveries()).toBe(8);
+  sqlite.exec("UPDATE github_installations SET next_discovery_at = 0, paused = 1");
   await runScheduler(env);
-  expect(fetcher).toHaveBeenCalledTimes(8);
-  sqlite.exec("UPDATE github_sync_sources SET paused = 0");
-  sqlite.exec("UPDATE github_connections SET status = 'invalid'");
-  await runScheduler(env);
-  expect(fetcher).toHaveBeenCalledTimes(8);
+  expect(discoveries()).toBe(8);
 });
 
 it("catches alarm infrastructure errors without platform retries", async () => {
@@ -139,7 +135,7 @@ it("discovery does not bypass crash recovery backoff", async () => {
   await discoverSource(env, "source");
   await dispatchMirrorTasks(env);
   sqlite.exec("UPDATE github_repositories SET lease_until = 1");
-  sqlite.exec("UPDATE github_sync_sources SET next_discovery_at = 0");
+  sqlite.exec("UPDATE github_installations SET next_discovery_at = 0");
   await runScheduler(env);
   expect(remote()).toMatchObject({ state: "failed", attempts: 1, lease_until: null });
   expect(remote().next_sync_at).toBeGreaterThan(Date.now());

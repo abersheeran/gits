@@ -22,7 +22,7 @@ npm run secret:dev
 npm run build:web
 ```
 
-按提示依次输入本地 JWT 密钥和 GitHub 令牌加密密钥。首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
+按提示输入本地 JWT 密钥。首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
 
 ## 4. Cloudflare 资源与配置
 
@@ -59,30 +59,33 @@ Preview 绑定与变量在 `previews` 中显式配置，不继承生产设置；
 
 ```dotenv
 JWT_SECRET=replace-with-a-strong-secret
-GITHUB_TOKEN_ENCRYPTION_KEY=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
 | 变量 | 用途与配置 |
 | --- | --- |
 | `JWT_SECRET` | 登录 JWT 密钥；本地 `npm run secret:dev:jwt`，生产 `npm run secret:prod:jwt` |
-| `GITHUB_TOKEN_ENCRYPTION_KEY` | GitHub PAT 加密密钥；本地 `npm run secret:dev:github`，生产 `npm run secret:prod:github`；未设置时停用同步，更换后需重新填写 PAT |
+| `GITHUB_APP_ID` | GitHub App 数字 ID |
+| `GITHUB_APP_SLUG` | App 地址中的 slug |
+| `GITHUB_APP_CLIENT_ID` | OAuth Client ID，也是 App JWT 的签发者 |
+| `GITHUB_APP_CLIENT_SECRET` | OAuth Client Secret |
+| `GITHUB_APP_PRIVATE_KEY` | PKCS#1 或 PKCS#8 PEM，也接受 base64 编码的 PEM |
+| `GITHUB_APP_WEBHOOK_SECRET` | Webhook HMAC 校验密钥 |
 | `ALLOW_USER_REGISTRATION` | `true`（不区分大小写）启用注册，其他值或未设置时关闭 |
 | `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES` | fetch 默认 8 MiB；push 未设置时仅受平台请求体限制 |
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
 
-生产与 Preview 首次部署前分别设置 JWT 与 GitHub 加密密钥：
+生产与 Preview 首次部署前分别设置 JWT 密钥：
 
 ```bash
 npm run secret:prod
 npx wrangler preview base-config secret put JWT_SECRET
-npx wrangler preview base-config secret put GITHUB_TOKEN_ENCRYPTION_KEY
 ```
 
 Base 密钥用于新建的 Preview；已有 Preview 使用 `npx wrangler preview secret put JWT_SECRET --name <preview>` 更新。Preview 已在 `previews.vars` 中设置 `ALLOW_USER_REGISTRATION="true"`。
 
-生产环境的 Cron 每 5 分钟运行一次同步调度。Preview 不运行 Cron，只能通过同步源或镜像的「立即同步」手动触发；任务完成后通过 alarm 接续派发队列。`previews` 不需要配置 Cron。
+生产环境每 5 分钟运行 Cron，检查到期的发现和镜像任务。Webhook 即时触发同步，每 6 小时完整发现一次兜底。Worker Previews 不支持 GitHub 同步：App 只有一组 Webhook 与 Setup 地址，指向生产环境。不要在 `previews` 配置 App 密钥或 Cron。
 
 ### 4.4 数据库迁移
 
@@ -320,30 +323,78 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 
 各模块的详细规则见 [PRD 索引](../prd/README.md)。
 
-
 ## 13. GitHub 同步
 
-1. 在 GitHub 创建 PAT。经典 PAT 需要 `repo`、`read:org` 范围；细粒度 PAT 需要目标所有者的 Contents 与 Metadata 只读权限，每个所有者单独添加连接。组织要求 SAML SSO 时先授权令牌。
-2. 登录 gits，进入「同步」并添加 GitHub 账号，填写 PAT。
-3. 选择要同步的所有者（本人或组织），设置前缀、Fork/归档过滤、可见性与频率。组织默认使用 `<组织登录名>.` 前缀。
-4. 查看同步源仓库列表；可手动纳入、排除、处理名称冲突或立即同步。镜像只读，名称可以修改；停止同步后保留数据并恢复 push。
+### 13.1 部署者注册 App
+
+```bash
+npm run github-app:create -- --url https://git.example.com --target prod
+# 本地开发实例需有独立、GitHub 可访问的 HTTPS 地址：
+npm run github-app:create -- --url https://dev-git.example.com --target dev
+# 如需把 App 注册在组织名下，加 --org <组织>
+```
+
+脚本在本机打开注册页，完成 GitHub App Manifest 注册后自动保存六个 `GITHUB_APP_*` 配置。
+`prod` 通过 stdin 交给 Wrangler 设置 secret；`dev` 写入 `.env`，私钥以 base64 单行保存。
+不会在终端输出密钥。注册脚本的临时回调在本机；App 的 OAuth 回调、Setup 和 Webhook 地址均指向实例。
+如需使用指定浏览器，加 `--no-open`，再手动打开脚本输出的注册地址。默认 App 名称最多 34 个字符，注册时可以修改。
+
+手动注册时，App 必须选择「任何账号都可安装」，并填写：
+
+| 项目 | 配置 |
+| --- | --- |
+| Homepage URL | `https://git.example.com` |
+| 用户授权回调 URL | `https://git.example.com/api/github/oauth/callback` |
+| Setup URL | `https://git.example.com/api/github/setup`，启用安装更新后重定向 |
+| Webhook URL | `https://git.example.com/api/github/webhook`，启用 Webhook |
+| 仓库权限 | Contents 只读、Metadata 只读 |
+| 组织权限 | Members 只读 |
+| 事件 | `push`、`repository`；安装及安装仓库变更事件由 GitHub 自动投递 |
+| 安装时请求用户授权 | 关闭，由 gits 的 Setup 流程发起 OAuth |
+
+六个配置分别为 `GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_APP_CLIENT_ID`、
+`GITHUB_APP_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`、`GITHUB_APP_WEBHOOK_SECRET`。
+手动配置生产 secret 使用 `npx wrangler secret put <NAME>`；本地写入 `.env`。
+全部存在才启用同步。私钥接受 GitHub 默认的 PKCS#1、PKCS#8，以及两种 PEM 的 base64 编码。
+**Preview 不支持此功能**，不要为 Preview 配置生产 App 凭证。
+
+### 13.2 用户操作与绑定规则
+
+1. 登录 gits，在「同步」选择「添加账号或组织」。
+2. 到 GitHub 安装 App，选择全部仓库或指定仓库。组织安装和绑定需由组织管理员完成。
+3. 回到 gits 完成 OAuth，自动绑定符合资格的安装；已安装的账号也可直接「关联已有安装」。
+4. 在同步源设置中调整本地前缀、Fork/归档过滤、可见性或暂停。仓库范围在 GitHub 安装设置中调整。
+5. 镜像可浏览和 clone，但不能 push。停止同步或解除绑定后保留数据并恢复写入。
+
+个人安装仅本人能绑定；组织要求当前成员状态为 `active`、角色为 `admin`。
+一个安装只能绑定一个 gits 用户。重复绑定只刷新账号和仓库范围，不重置设置。
+绑定后不再检查绑定者是否仍为管理员；组织应在 GitHub 上管理、挂起或卸载安装。
+解除绑定不会卸载 App；GitHub 卸载事件会自动解除绑定。
+
+Webhook 使用 HMAC-SHA256 签名校验，push 即时排队，仓库和安装范围变更触发发现。
+Cron 每 5 分钟检查任务，每 6 小时兜底发现。同步进行中收到的事件在本次完成后继续处理。
+用户 OAuth 令牌不落库；安装令牌只缓存在内存中，过期前 5 分钟刷新。
+
+### 13.3 API
 
 | 方法与路径 | 用途 |
 | --- | --- |
-| `GET /api/github/connections` | 配置状态、连接与同步源摘要 |
-| `POST /api/github/connections` | 校验并保存 `{ token }` |
-| `PATCH /api/github/connections/:connectionId` | 更换同一 GitHub 账号的令牌 |
-| `DELETE /api/github/connections/:connectionId` | 移除连接，保留本地仓库 |
-| `GET /api/github/connections/:connectionId/owners` | 实时获取本人及组织 |
-| `POST /api/github/sources` | 启用 `{ connectionId, ownerLogin, ...settings }` |
+| `GET /api/github/sources` | `{ configured, installUrl, sources }` |
+| `GET /api/github/authorize` | 浏览器跳转 OAuth，含 state 与 PKCE |
+| `GET /api/github/setup` | 安装回跳，转向登录或 OAuth |
+| `GET /api/github/oauth/callback` | 校验并绑定，重定向到 `/sync` |
+| `POST /api/github/webhook` | 无需登录，验证 GitHub 签名后后台处理 |
 | `GET /api/github/sources/:sourceId` | 设置、状态与计数 |
 | `PATCH /api/github/sources/:sourceId` | 修改设置或暂停 |
-| `DELETE /api/github/sources/:sourceId` | 移除同步源，保留本地仓库 |
+| `DELETE /api/github/sources/:sourceId` | 解除绑定，保留本地仓库 |
 | `POST /api/github/sources/:sourceId/sync` | 立即发现并派发 |
-| `GET /api/github/sources/:sourceId/repositories` | `status`、`page` 筛选分页，每页 50 条 |
+| `GET /api/github/sources/:sourceId/repositories` | `status`、`page`，每页 50 条 |
 | `PATCH /api/github/sources/:sourceId/repositories/:githubRepoId` | `selection`、`localName` |
 | `POST /api/repos/:owner/:repo/mirror/sync` | 所有者立即同步镜像 |
 | `DELETE /api/repos/:owner/:repo/mirror` | 所有者停止同步，转为普通仓库 |
 
-仓库详情增加 `mirror`（普通仓库为 `null`），仓库列表增加 `is_mirror`（0 或 1）。
-镜像 push 返回 403；修改描述、可见性与分支返回 409。接口时间均为毫秒时间戳。
+JSON 接口均需登录，只能访问自己的同步源，时间使用毫秒时间戳。
+OAuth 返回 `bound=<数量>` 和可重复的 `skipped=<登录名>:<原因>`，原因包括
+`not_owner`、`not_admin`、`taken`；整体失败使用 `error`，取值包括
+`state`、`denied`、`github`、`not_configured`、`pending_approval`。
+仓库详情的 `mirror` 与列表的 `is_mirror` 保持不变；镜像 push 返回 403，修改描述、可见性和分支返回 409。

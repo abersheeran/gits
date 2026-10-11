@@ -28,7 +28,7 @@ it.each(["default", "injected"])("uses workerd-compatible REST fetch: %s", async
   const wrapped = workerdFetch(implementation);
   vi.stubGlobal("fetch", wrapped);
   const client = new GithubClient("secret", mode === "injected" ? { fetch: wrapped } : {});
-  await expect(client.user()).resolves.toEqual({ user: { id: 1 }, scopes: [] });
+  await expect(client.user()).resolves.toEqual({ id: 1 });
   expect(implementation).toHaveBeenCalledExactlyOnceWith("https://api.github.com/user",
     expect.objectContaining({ redirect: "manual" }));
 });

@@ -1,3 +1,4 @@
+import { clearInstallationToken } from "./app-auth";
 import type { AppBindings } from "../../types";
 import { createRepositoryObjectClient } from "../repository-object-client";
 import type { RemoteRow } from "./types";
@@ -13,29 +14,30 @@ export async function stopMirror(env: AppBindings, remote: RemoteRow) {
   }
 }
 
-export async function removeGithubResource(
-  env: AppBindings, kind: "connection" | "source", id: string
-) {
-  const predicate = kind === "connection"
-    ? "source_id IN (SELECT id FROM github_sync_sources WHERE connection_id = ?)"
-    : "source_id = ?";
-  const sourcePredicate = kind === "connection" ? "connection_id = ?" : "id = ?";
+export async function removeGithubSource(env: AppBindings, id: string) {
+  const source = await env.DB.prepare(
+    "SELECT installation_id FROM github_installations WHERE id = ?"
+  )
+    .bind(id).first<{ installation_id: number }>();
+  if (!source) {
+    return;
+  }
+  clearInstallationToken(env, source.installation_id);
   await env.DB.prepare(
-    `UPDATE github_sync_sources SET paused = 1, lease_until = NULL, claim_id = NULL
-     WHERE ${sourcePredicate}`
+    `UPDATE github_installations SET paused = 1, lease_until = NULL, claim_id = NULL WHERE id = ?`
   ).bind(id).run();
   const rows = await env.DB.prepare(
-    `SELECT repository_id FROM github_repositories WHERE ${predicate} AND repository_id IS NOT NULL`
+    `SELECT repository_id FROM github_repositories
+     WHERE source_id = ? AND repository_id IS NOT NULL`
   ).bind(id).all<{ repository_id: string }>();
   await env.DB.prepare(
     `UPDATE github_repositories SET claim_id = NULL, lease_until = NULL, included = 0
-     WHERE ${predicate}`
+     WHERE source_id = ?`
   ).bind(id).run();
   const client = createRepositoryObjectClient(env);
   for (let offset = 0; offset < rows.results.length; offset += 20) {
     await Promise.allSettled(rows.results.slice(offset, offset + 20)
       .map((row) => client.cancelMirrorSync(row.repository_id)));
   }
-  const table = kind === "connection" ? "github_connections" : "github_sync_sources";
-  await env.DB.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run();
+  await env.DB.prepare("DELETE FROM github_installations WHERE id = ?").bind(id).run();
 }

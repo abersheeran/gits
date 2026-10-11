@@ -10,10 +10,10 @@ import {
 import { Panel } from "./panel";
 import { PageHeader } from "./page-header";
 export function GithubTableSkeleton({
-  owners = false,
+  sources = false,
   announce = true
 }: {
-  owners?: boolean;
+  sources?: boolean;
   announce?: boolean;
 }) {
   return (
@@ -21,17 +21,19 @@ export function GithubTableSkeleton({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{owners ? "所有者" : "GitHub 仓库"}</TableHead>
-            <TableHead className={owners ? "hidden w-28 md:table-cell" : "hidden md:table-cell"}>
-              {owners ? "仓库" : "本地仓库"}
+            <TableHead>{sources ? "账号" : "GitHub 仓库"}</TableHead>
+            <TableHead className={sources ? "hidden w-24 md:table-cell" : "hidden md:table-cell"}>
+              {sources ? "仓库" : "本地仓库"}
             </TableHead>
             <TableHead
-              className={owners ? "hidden w-40 md:table-cell" : "hidden w-44 md:table-cell"}
+              className={sources ? "hidden w-32 md:table-cell" : "hidden w-44 md:table-cell"}
             >
               状态
             </TableHead>
             <TableHead className="hidden w-28 lg:table-cell">上次同步</TableHead>
-            <TableHead className="w-28 text-right md:w-24">操作</TableHead>
+            <TableHead className={sources ? "w-28 text-right md:w-40" : "w-28 text-right md:w-24"}>
+              操作
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -39,8 +41,11 @@ export function GithubTableSkeleton({
             <TableRow key={index}>
               <TableCell>
                 <div className="flex min-w-0 items-center gap-2">
-                  {owners && <Skeleton className="size-8 shrink-0 rounded-full" />}
-                  <Skeleton className="h-4 w-24 max-w-full" />
+                  {sources && <Skeleton className="size-8 shrink-0 rounded-full" />}
+                  <div className="min-w-0">
+                    <Skeleton className="h-4 w-24 max-w-full" />
+                    {sources && <Skeleton className="mt-1 h-3 w-28 max-w-full" />}
+                  </div>
                 </div>
                 <div className="mt-2 space-y-2 md:hidden">
                   <Skeleton className="h-3 w-28 max-w-full" />
@@ -58,9 +63,16 @@ export function GithubTableSkeleton({
                 <Skeleton className="h-3 w-16" />
               </TableCell>
               <TableCell>
-                <div className="flex justify-end">
-                  <Skeleton className="size-10 md:size-8" />
-                  <Skeleton className="size-10 md:size-8" />
+                <div
+                  className={
+                    sources
+                      ? "grid grid-cols-2 justify-items-end md:flex md:justify-end"
+                      : "flex justify-end"
+                  }
+                >
+                  {Array.from({ length: sources ? 4 : 2 }, (_, index) => (
+                    <Skeleton key={index} className="size-10 md:size-8" />
+                  ))}
                 </div>
               </TableCell>
             </TableRow>
@@ -87,9 +99,10 @@ export function GithubSyncSkeleton({ source = false }: { source?: boolean }) {
         }
         description={source ? <Skeleton className="h-5 w-48" /> : undefined}
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Skeleton className="h-10 w-36 md:h-9" />
-            {source && <Skeleton className="h-10 w-20 md:h-9" />}
+            <Skeleton className={source ? "h-10 w-20 md:h-9" : "h-10 w-32 md:h-9"} />
+            {source && <Skeleton className="h-10 w-40 md:h-9" />}
           </div>
         }
       />
@@ -100,28 +113,8 @@ export function GithubSyncSkeleton({ source = false }: { source?: boolean }) {
           ))}
         </div>
       )}
-      <Panel
-        header={
-          source ? undefined : (
-            <>
-              <div className="flex items-center gap-2">
-                <Skeleton className="size-8 rounded-full" />
-                <Skeleton className="h-4 w-32" />
-              </div>
-              <div className="flex">
-                <Skeleton className="size-10 md:size-8" />
-                <Skeleton className="size-10 md:size-8" />
-              </div>
-            </>
-          )
-        }
-      >
-        <GithubTableSkeleton owners={!source} announce={false} />
-        {!source && (
-          <div className="px-4 py-3">
-            <Skeleton className="h-10 w-24 md:h-8" />
-          </div>
-        )}
+      <Panel>
+        <GithubTableSkeleton sources={!source} announce={false} />
       </Panel>
     </SkeletonRegion>
   );

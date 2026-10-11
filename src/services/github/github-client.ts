@@ -1,7 +1,8 @@
-import type { GithubHttpOptions } from "./types";
+import type { GithubHttpOptions, GithubInstallation, GithubOwner } from "./types";
 
 export type GithubErrorKind =
-  | "unauthorized" | "sso_required" | "rate_limited" | "not_found" | "other";
+  | "unauthorized" | "forbidden" | "rate_limited" | "not_found" | "other"
+  | "installation_deleted" | "installation_suspended";
 
 export class GithubError extends Error {
   constructor(
@@ -21,7 +22,6 @@ export function safeError(error: unknown, token = ""): string {
   return message.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, "[redacted]").slice(0, 1000);
 }
 
-export type GithubOwner = { id: number; login: string; avatar_url: string | null };
 export type GithubRepository = {
   id: number;
   name: string;
@@ -41,25 +41,33 @@ export class GithubClient {
   private readonly fetcher: typeof fetch;
   private readonly base: string;
 
-  constructor(private readonly token: string, options: GithubHttpOptions = {}) {
-    this.fetcher = (options.fetch ?? fetch).bind(globalThis);
+  constructor(
+    private readonly token: string,
+    options: GithubHttpOptions = {},
+    private readonly onUnauthorized?: () => void
+  ) {
+    this.fetcher = options.fetch ?? fetch.bind(globalThis);
     this.base = options.apiBaseUrl ?? "https://api.github.com";
   }
 
-  private async request(path: string): Promise<Response> {
+  private async request(path: string, method = "GET", body?: unknown): Promise<Response> {
     const url = new URL(path, this.base);
     if (url.origin !== new URL(this.base).origin) {
       throw new GithubError("other", "Invalid GitHub pagination URL");
     }
     let response: Response;
+    const fetcher = this.fetcher;
     try {
-      response = await this.fetcher(url.toString(), {
+      response = await fetcher(url.toString(), {
+        method,
         headers: {
           Authorization: `Bearer ${this.token}`,
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "gits"
+          "User-Agent": "gits",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" })
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         redirect: "manual"
       });
     } catch {
@@ -73,10 +81,8 @@ export class GithubClient {
       throw new GithubError("other", "GitHub 返回了重定向");
     }
     if (response.status === 401) {
-      throw new GithubError("unauthorized", "GitHub token is invalid or expired");
-    }
-    if (response.status === 403 && response.headers.has("X-GitHub-SSO")) {
-      throw new GithubError("sso_required", "Authorize this token for organization SAML SSO");
+      this.onUnauthorized?.();
+      throw new GithubError("unauthorized", "GitHub authorization expired or was revoked");
     }
     const retry = response.headers.get("retry-after");
     if ([403, 429].includes(response.status) &&
@@ -84,11 +90,14 @@ export class GithubClient {
       const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
       const retryAt = retry === null ? 0 : /^\d+$/.test(retry)
         ? Date.now() + Number(retry) * 1000 : Date.parse(retry);
-      const resetAt = Math.max(reset || 0, retryAt || 0, Date.now() + 1000);
-      throw new GithubError("rate_limited", "GitHub rate limit exceeded", resetAt);
+      throw new GithubError("rate_limited", "GitHub rate limit exceeded",
+        Math.max(reset || 0, retryAt || 0, Date.now() + 1000));
     }
     if (response.status === 404) {
-      throw new GithubError("not_found", "GitHub owner or repository is not accessible");
+      throw new GithubError("not_found", "GitHub resource is not accessible");
+    }
+    if (response.status === 403) {
+      throw new GithubError("forbidden", "GitHub access is forbidden");
     }
     throw new GithubError("other", `GitHub request failed (${response.status})`);
   }
@@ -101,7 +110,15 @@ export class GithubClient {
     }
   }
 
-  private async list<T>(path: string): Promise<T[]> {
+  async get<T>(path: string): Promise<T> {
+    return this.json<T>(await this.request(path));
+  }
+
+  async post<T>(path: string, body: unknown): Promise<T> {
+    return this.json<T>(await this.request(path, "POST", body));
+  }
+
+  async list<T>(path: string, key: string): Promise<T[]> {
     let next: string | null = path + (path.includes("?") ? "&" : "?") + "per_page=100";
     const items: T[] = [];
     const visited = new Set<string>();
@@ -111,9 +128,10 @@ export class GithubClient {
       }
       visited.add(next);
       const response = await this.request(next);
-      const page = await this.json<T[]>(response);
+      const payload = await this.json<Record<string, T[]>>(response);
+      const page = payload[key];
       if (!Array.isArray(page)) {
-        throw new GithubError("other", "Invalid GitHub repository list");
+        throw new GithubError("other", "Invalid GitHub list response");
       }
       for (const item of page) {
         items.push(item);
@@ -123,48 +141,15 @@ export class GithubClient {
     return items;
   }
 
-  async user() {
-    const response = await this.request("/user");
-    const user = await this.json<GithubOwner>(response);
-    const scopes = (response.headers.get("X-OAuth-Scopes") ?? "")
-      .split(",").map((scope) => scope.trim()).filter(Boolean);
-    return { user, scopes };
+  user(): Promise<GithubOwner> {
+    return this.get("/user");
   }
 
-  async validateToken() {
-    const result = await this.user();
-    const tokenKind = this.token.startsWith("github_pat_") ? "fine_grained" : "classic";
-    if (tokenKind === "classic") {
-      const missing = [];
-      if (!result.scopes.includes("repo")) {
-        missing.push("repo");
-      }
-      if (!["read:org", "write:org", "admin:org"].some((s) => result.scopes.includes(s))) {
-        missing.push("read:org");
-      }
-      if (missing.length) {
-        throw new GithubError("other", `GitHub token is missing scopes: ${missing.join(", ")}`);
-      }
-    }
-    return { ...result, tokenKind } as const;
+  installations(): Promise<GithubInstallation[]> {
+    return this.list("/user/installations", "installations");
   }
 
-  organizations(): Promise<GithubOwner[]> {
-    return this.list("/user/orgs");
-  }
-
-  async organization(login: string): Promise<GithubOwner> {
-    const path = `/orgs/${encodeURIComponent(login)}`;
-    const response = await this.request(path);
-    const owner = await this.json<GithubOwner>(response);
-    const check = await this.request(`${path}/repos?per_page=1`);
-    await check.body?.cancel();
-    return owner;
-  }
-
-  repositories(type: "user" | "organization", login: string): Promise<GithubRepository[]> {
-    return this.list(type === "user"
-      ? "/user/repos?affiliation=owner&visibility=all"
-      : `/orgs/${encodeURIComponent(login)}/repos?type=all`);
+  repositories(): Promise<GithubRepository[]> {
+    return this.list("/installation/repositories", "repositories");
   }
 }

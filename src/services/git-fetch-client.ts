@@ -57,7 +57,7 @@ export async function fetchMirror(args: {
   beforeUpdate?: () => Promise<void>;
 }) {
   const fetcher = args.http?.fetch ?? fetch.bind(globalThis);
-  const base = args.http?.gitBaseUrl ?? "https://github.com";
+  const base = args.http?.gitBaseUrl ?? args.http?.webBaseUrl ?? "https://github.com";
   const path = args.fullName.split("/").map(encodeURIComponent).join("/");
   const url = `${base.replace(/\/$/, "")}/${path}.git`;
   const authorization = `Basic ${btoa(`${args.login}:${args.token}`)}`;

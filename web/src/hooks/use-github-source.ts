@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatGithubApiError as formatApiError } from "@/lib/api-error";
+import { useGithubPolling } from "./use-github-polling";
 import {
   getGithubSource,
   listGithubRepositories,
@@ -39,30 +40,7 @@ export function useGithubSource(id: string, status: GithubRepositoryFilter, page
     };
   }, [refresh]);
   const current = data?.key === key ? data : null;
-  const polling = current?.repositories.items.some(
-    (item) => item.state === "queued" || item.state === "syncing"
-  );
-  useEffect(() => {
-    if (!polling) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let stopped = false;
-    async function tick() {
-      if (stopped || document.hidden) return;
-      await refresh();
-      if (!stopped && !document.hidden) timer = setTimeout(tick, 10000);
-    }
-    function visibility() {
-      clearTimeout(timer);
-      if (!document.hidden) timer = setTimeout(tick, 10000);
-    }
-    visibility();
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, [polling, refresh]);
+  useGithubPolling(Boolean(current), refresh);
   return {
     source: data?.source.id === id ? data.source : null,
     repositories: current?.repositories ?? null,

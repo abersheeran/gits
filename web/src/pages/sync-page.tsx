@@ -1,103 +1,160 @@
-import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Github } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
-import { Pagination } from "@/components/common/pagination";
-import { GithubConnectionPanel } from "@/components/common/github-connection-panel";
-import { GithubTokenDialog } from "@/components/common/github-token-dialog";
-import { GithubSyncSkeleton } from "@/components/common/github-sync-skeleton";
+import { GithubSourceTable } from "@/components/common/github-source-table";
+import { GithubSourceSettingsSheet } from "@/components/common/github-source-settings-sheet";
+import { GithubSyncSkeleton, GithubTableSkeleton } from "@/components/common/github-sync-skeleton";
 import { Button } from "@/components/ui/button";
-import { type AuthUser } from "@/lib/api";
+import type { AuthUser } from "@/lib/api";
 import { formatGithubApiError as formatApiError } from "@/lib/api-error";
+import { readGithubCallback } from "@/lib/github-callback";
+import { useGithubPolling } from "@/hooks/use-github-polling";
 import {
-  listGithubConnections,
-  deleteGithubConnection,
-  type GithubConnection
+  listGithubSources,
+  deleteGithubSource,
+  getGithubSource,
+  syncGithubSource,
+  type GithubSource,
+  type GithubSourceSummary,
+  type GithubSourcesResponse
 } from "@/lib/github-api";
+
 export function SyncPage({ user }: { user: AuthUser | null }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof listGithubConnections>> | null>(null);
+  if (!user) return <Navigate to="/login" replace />;
+  return <SyncContent />;
+}
+function SyncContent() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [data, setData] = useState<GithubSourcesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tokenTarget, setTokenTarget] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<GithubConnection | null>(null);
-  const [page, setPage] = useState(1);
+  const [callbackMessages, setCallbackMessages] = useState<string[]>(
+    () => readGithubCallback(location.search).messages
+  );
+  const [settings, setSettings] = useState<GithubSource | null>(null);
+  const [removing, setRemoving] = useState<GithubSourceSummary | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const sequence = useRef({ value: 0 });
+  const refresh = useCallback(() => {
+    const request = ++sequence.current.value;
+    return listGithubSources().then(
+      (result) => {
+        if (sequence.current.value === request) {
+          setData(result);
+          setError(null);
+        }
+      },
+      (cause) => {
+        if (sequence.current.value === request) setError(formatApiError(cause));
+      }
+    );
+  }, []);
+  useGithubPolling(Boolean(data?.configured), refresh);
   useEffect(() => {
-    if (!user) return;
+    const counter = sequence.current;
+    void refresh();
+    return () => {
+      counter.value++;
+    };
+  }, [refresh]);
+  useEffect(() => {
+    const callback = readGithubCallback(location.search);
+    if (!callback.present) return;
     let canceled = false;
-    listGithubConnections()
-      .then((result) => {
-        if (!canceled) setData(result);
-      })
-      .catch((cause) => {
-        if (!canceled) setError(formatApiError(cause));
-      });
+    // Retain the one-time result in memory, never in history state or storage.
+    queueMicrotask(() => {
+      if (canceled) return;
+      setCallbackMessages(callback.messages);
+      navigate(
+        { pathname: location.pathname, search: callback.search, hash: location.hash },
+        { replace: true }
+      );
+      void refresh();
+    });
     return () => {
       canceled = true;
     };
-  }, [user]);
-  async function refresh() {
+  }, [location.pathname, location.search, location.hash, navigate, refresh]);
+  async function act(source: GithubSourceSummary, action: () => Promise<void>) {
+    setPendingId(source.id);
+    setError(null);
     try {
-      setData(await listGithubConnections());
-      setError(null);
+      await action();
     } catch (cause) {
       setError(formatApiError(cause));
+    } finally {
+      setPendingId(null);
     }
   }
-  if (!user) return <Navigate to="/login" replace />;
-  if (!data && !error) return <GithubSyncSkeleton />;
-  const connections = data?.connections ?? [];
-  const currentPage = Math.min(page, Math.max(1, Math.ceil(connections.length / 10)));
+  const actions = data?.configured && (
+    <div className="flex flex-wrap justify-center gap-2 md:justify-start">
+      {data.installUrl && (
+        <Button asChild>
+          <a href={data.installUrl}>添加账号或组织</a>
+        </Button>
+      )}
+      <Button asChild variant="secondary">
+        <a href="/api/github/authorize">关联已有安装</a>
+      </Button>
+    </div>
+  );
+  if (!data && !error && callbackMessages.length === 0) return <GithubSyncSkeleton />;
   return (
     <>
-      <PageHeader
-        title="GitHub 同步"
-        action={
-          data?.configured && <Button onClick={() => setTokenTarget("")}>添加 GitHub 账号</Button>
-        }
-      />
-      <ErrorAlert error={error} />
-      {data && !data.configured ? (
-        <Panel>
-          <EmptyState
-            icon={Github}
-            title="尚未配置 GitHub 同步"
-            description="请管理员先配置 GITHUB_TOKEN_ENCRYPTION_KEY，再添加 GitHub 账号。"
-          />
-        </Panel>
-      ) : data && connections.length === 0 ? (
-        <Panel>
-          <EmptyState
-            icon={Github}
-            title="还没有 GitHub 账号"
-            description="添加 GitHub 账号，开始同步个人或组织的仓库。"
-          />
-        </Panel>
-      ) : (
-        <div className="space-y-4">
-          {connections.slice((currentPage - 1) * 10, currentPage * 10).map((connection, index) => (
-            <GithubConnectionPanel
-              key={connection.id}
-              connection={connection}
-              announce={index === 0}
-              onReplace={() => setTokenTarget(connection.id)}
-              onRemove={() => setRemoving(connection)}
-              onRefresh={refresh}
-            />
+      <PageHeader title="GitHub 同步" action={actions} />
+      {callbackMessages.length > 0 && (
+        <div className="mb-4 space-y-4">
+          {callbackMessages.map((message, index) => (
+            <ErrorAlert key={index} error={message} />
           ))}
-          <Pagination
-            page={currentPage}
-            hasNext={currentPage * 10 < connections.length}
-            onChange={setPage}
-          />
         </div>
       )}
-      {tokenTarget !== null && (
-        <GithubTokenDialog
-          connectionId={tokenTarget || undefined}
-          onClose={() => setTokenTarget(null)}
+      <Panel>
+        <ErrorAlert inset error={error} />
+        {!data ? (
+          !error && <GithubTableSkeleton sources />
+        ) : !data.configured ? (
+          <EmptyState
+            icon={Github}
+            title="尚未配置 GitHub App"
+            description="请联系部署者配置 GitHub App 后，再添加账号或组织。"
+          />
+        ) : data.sources.length === 0 ? (
+          <EmptyState
+            icon={Github}
+            title="还没有同步源"
+            description="添加账号或组织，或关联已有安装，开始同步 GitHub 仓库。"
+          />
+        ) : (
+          <GithubSourceTable
+            sources={data.sources}
+            pendingId={pendingId}
+            onSync={(source) =>
+              void act(source, async () => {
+                await syncGithubSource(source.id);
+                await refresh();
+              })
+            }
+            onSettings={(source) =>
+              void act(source, async () => {
+                setSettings((await getGithubSource(source.id)).source);
+              })
+            }
+            onUnlink={setRemoving}
+          />
+        )}
+      </Panel>
+      {settings && (
+        <GithubSourceSettingsSheet
+          accountLogin={settings.accountLogin}
+          sourceId={settings.id}
+          initial={settings}
+          onClose={() => setSettings(null)}
           onSaved={refresh}
         />
       )}
@@ -106,11 +163,11 @@ export function SyncPage({ user }: { user: AuthUser | null }) {
         onOpenChange={(value) => {
           if (!value) setRemoving(null);
         }}
-        title="移除 GitHub 账号"
-        description={`移除「${removing?.githubLogin ?? ""}」后将停止同步。已同步的仓库会保留为普通仓库。`}
+        title="解除绑定"
+        description={`解除「${removing?.accountLogin ?? ""}」的绑定后，已同步的仓库会保留为普通仓库，GitHub 上的 App 安装不会被卸载。`}
         onConfirm={async () => {
           if (removing) {
-            await deleteGithubConnection(removing.id);
+            await deleteGithubSource(removing.id);
             await refresh();
           }
         }}

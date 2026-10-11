@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { githubFixture, githubRepo } from "../../test-utils/github-fixture";
+import { githubFixture, githubRepo, githubInstallation } from "../../test-utils/github-fixture";
 import { discoverSource } from "./discovery";
 import { dispatchMirrorTasks } from "./scheduler";
 import { recalculateSource } from "./source-store";
@@ -7,12 +7,13 @@ import { MAX_MIRROR_BYTES } from "./types";
 
 it("marks missing after complete pagination and restores reappearing repos", async () => {
   const fixture = await githubFixture([githubRepo()]);
-  const { env, remote, repos, fetcher } = fixture;
+  const { env, remote, repos, fetcher, installations } = fixture;
   await discoverSource(env, "source");
   expect(remote().state).toBe("queued");
-  fetcher.mockResolvedValueOnce(Response.json([], {
-    headers: { Link: "<https://api.test/user/repos?page=2>; rel=\"next\"" }
-  })).mockResolvedValueOnce(new Response("oops", { status: 500 }));
+  fetcher.mockResolvedValueOnce(Response.json(installations[0]))
+    .mockResolvedValueOnce(Response.json({ repositories: [] }, {
+      headers: { Link: '<https://api.test/installation/repositories?page=2>; rel="next"' }
+    })).mockResolvedValueOnce(new Response("oops", { status: 500 }));
   await discoverSource(env, "source");
   expect(remote().missing_since).toBeNull();
   repos.splice(0);
@@ -43,15 +44,13 @@ it("applies filters, manual selection and the size limit", async () => {
 });
 
 it("transfers by ID and updates metadata without renaming", async () => {
-  const { env, remote, sqlite, repos } = await githubFixture([githubRepo()]);
+  const { env, remote, sqlite, repos, seedSource } = await githubFixture([githubRepo()]);
   await discoverSource(env, "source");
   await dispatchMirrorTasks(env);
   const repositoryId = remote().repository_id;
   sqlite.exec(`UPDATE github_repositories SET state = 'synced', lease_until = NULL,
     last_synced_at = 1, last_synced_pushed_at = pushed_at`);
-  sqlite.prepare(`INSERT INTO github_sync_sources (id, connection_id, user_id, owner_github_id,
-    owner_login, owner_type, next_discovery_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run("org", "connection", "user", 20, "team", "organization", 0, 1);
+  seedSource("org", githubInstallation(200, true));
   repos[0] = githubRepo(1, {
     full_name: "team/renamed", description: "new description", visibility: "internal",
     pushed_at: "new-push"
@@ -65,21 +64,30 @@ it("transfers by ID and updates metadata without renaming", async () => {
   repos[0]!.visibility = "public";
   await discoverSource(env, "org");
   expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(0);
-  sqlite.exec("UPDATE github_sync_sources SET visibility_policy = 'private' WHERE id = 'org'");
+  sqlite.exec("UPDATE github_installations SET visibility_policy = 'private' WHERE id = 'org'");
   await recalculateSource(env, "org");
   expect(sqlite.prepare("SELECT is_private FROM repositories").get()!.is_private).toBe(1);
 });
 
 it.each([
-  [401, {}, "failed", "invalid"],
-  [403, { "X-GitHub-SSO": "required" }, "sso_required", "active"],
-  [500, {}, "failed", "active"]
-])("records discovery HTTP %s errors at the appropriate scope", async (status, headers, s, c) => {
+  [401, "failed"], [403, "suspended"], [500, "failed"]
+])("records discovery HTTP %s errors at the installation", async (status, expected) => {
   const { env, fetcher, sqlite } = await githubFixture();
-  fetcher.mockResolvedValue(new Response("", { status, headers }));
+  fetcher.mockResolvedValue(new Response("", { status }));
   await discoverSource(env, "source");
-  expect(sqlite.prepare("SELECT status FROM github_sync_sources").get()!.status).toBe(s);
-  expect(sqlite.prepare("SELECT status FROM github_connections").get()!.status).toBe(c);
+  expect(sqlite.prepare("SELECT status FROM github_installations").get()!.status).toBe(expected);
+});
+
+it("automatically unbinds deleted installations and preserves local repositories", async () => {
+  const { env, remote, installations, sqlite } = await githubFixture([githubRepo()]);
+  await discoverSource(env, "source");
+  await dispatchMirrorTasks(env);
+  const id = remote().repository_id;
+  installations.splice(0);
+  await discoverSource(env, "source");
+  expect(sqlite.prepare("SELECT * FROM github_installations").all()).toEqual([]);
+  expect(sqlite.prepare("SELECT * FROM repositories WHERE id = ?").get(id)).toBeDefined();
+  expect(sqlite.prepare("SELECT * FROM github_repositories").all()).toEqual([]);
 });
 
 it("defers discovery until the rate limit resets", async () => {
@@ -89,7 +97,7 @@ it("defers discovery until the rate limit resets", async () => {
     "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset)
   } }));
   await discoverSource(env, "source");
-  expect(sqlite.prepare("SELECT next_discovery_at FROM github_sync_sources").get()!
+  expect(sqlite.prepare("SELECT next_discovery_at FROM github_installations").get()!
     .next_discovery_at).toBe(reset * 1000);
 });
 
@@ -102,7 +110,7 @@ it("filter edits preserve linked mirrors and re-inclusion queues them", async ()
     last_synced_at = 1, last_synced_pushed_at = pushed_at, is_fork = 1`);
   await recalculateSource(env, "source");
   expect(remote()).toMatchObject({ included: 0, state: "synced", repository_id: repositoryId });
-  sqlite.exec("UPDATE github_sync_sources SET include_forks = 1");
+  sqlite.exec("UPDATE github_installations SET include_forks = 1");
   await recalculateSource(env, "source");
   expect(remote()).toMatchObject({ included: 1, state: "queued", repository_id: repositoryId });
   await dispatchMirrorTasks(env);
@@ -120,4 +128,24 @@ it("preserves failure backoff across unchanged discoveries", async () => {
     next_sync_at = ?`).run(retry);
   await discoverSource(env, "source");
   expect(remote()).toMatchObject({ state: "failed", next_sync_at: retry });
+});
+
+it("reads every installation repository page before marking missing", async () => {
+  const { env, remote, fetcher, respond } = await githubFixture([githubRepo(9)]);
+  await discoverSource(env, "source");
+  fetcher.mockImplementation(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname !== "/installation/repositories") {
+      return respond(input, init);
+    }
+    return url.searchParams.get("page") === "2"
+      ? Response.json({ total_count: 2, repositories: [githubRepo(2)] })
+      : Response.json({ total_count: 2, repositories: [githubRepo(1)] }, {
+        headers: { Link: '<https://api.test/installation/repositories?page=2>; rel="next"' }
+      });
+  });
+  await discoverSource(env, "source");
+  expect(remote(1).state).toBe("queued");
+  expect(remote(2).state).toBe("queued");
+  expect(remote(9).state).toBe("missing");
 });

@@ -5,7 +5,7 @@ A personal Git repository host built on Cloudflare Workers, focused on Git stora
 ## Features
 
 - **Git hosting** — Smart HTTP clone, fetch, and push, with shallow clone and object filters. Each repository stores Git objects and refs in its Durable Object SQLite database; packs stream in and out without loading the entire repository. R2 is used only to import legacy repositories.
-- **GitHub sync** — Connect GitHub PATs and mirror personal or organization repositories. Mirrors are read-only until you stop synchronization.
+- **GitHub sync** — Install a GitHub App to mirror personal or organization repositories, with Webhook updates. Mirrors are read-only until you stop synchronization.
 - **Authentication** — Register, login, logout, JWT sessions, and Personal Access Tokens (PAT). Git Basic Auth uses a username and PAT.
 - **Repositories** — Create, rename, update visibility and description, delete, and manage collaborators with `read / write / admin` permissions.
 - **Branches** — Owners can create and delete branches and set the default branch through the web UI or API.
@@ -44,7 +44,7 @@ npm run build:web
 npm run dev
 ```
 
-Enter local JWT and GitHub token encryption secrets when prompted. `npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
+Enter a local JWT secret when prompted. `npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
 
 In another terminal:
 
@@ -62,19 +62,23 @@ The local `.env` template contains:
 
 ```dotenv
 JWT_SECRET=replace-with-a-strong-secret
-GITHUB_TOKEN_ENCRYPTION_KEY=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
 | Variable | Behavior |
 | --- | --- |
 | `JWT_SECRET` | Required secret for signing login JWTs |
-| `GITHUB_TOKEN_ENCRYPTION_KEY` | Encrypts GitHub PATs; unset disables GitHub sync. Changing it requires replacing saved tokens |
+| `GITHUB_APP_ID` | GitHub App numeric ID |
+| `GITHUB_APP_SLUG` | GitHub App URL slug |
+| `GITHUB_APP_CLIENT_ID` | App OAuth client ID and JWT issuer |
+| `GITHUB_APP_CLIENT_SECRET` | App OAuth client secret |
+| `GITHUB_APP_PRIVATE_KEY` | PKCS#1 or PKCS#8 PEM, or base64-encoded PEM |
+| `GITHUB_APP_WEBHOOK_SECRET` | Webhook HMAC verification secret |
 | `ALLOW_USER_REGISTRATION` | `true` (case-insensitive) enables registration; any other value or unset disables it |
 | `UPLOAD_PACK_MAX_BODY_BYTES` | Fetch request body limit; defaults to 8 MiB |
 | `RECEIVE_PACK_MAX_BODY_BYTES` | Optional push request body limit; unset means platform limits only |
 
-Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for both production secrets.
+Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for the production JWT secret. All six GitHub App settings are required to enable synchronization.
 
 ### Cloudflare Bindings
 
@@ -103,12 +107,11 @@ npx wrangler r2 bucket create gits-preview
 
 Copy the returned production D1 ID into `wrangler.jsonc` → `d1_databases[0].database_id`. Copy the Preview D1 ID into both `wrangler.jsonc` → `previews.d1_databases[0].database_id` and `wrangler.preview-migrations.jsonc` → `d1_databases[0].database_id`; both Preview entries must point at the same database.
 
-Set separate production and Preview secrets once before deploying:
+Set separate production and Preview JWT secrets once before deploying:
 
 ```bash
 npm run secret:prod
 npx wrangler preview base-config secret put JWT_SECRET
-npx wrangler preview base-config secret put GITHUB_TOKEN_ENCRYPTION_KEY
 ```
 
 The Preview base secret applies to new Previews. To update an existing Preview, use `npx wrangler preview secret put JWT_SECRET --name <preview>`.
@@ -127,7 +130,7 @@ Worker Previews require the project's Wrangler dependency to be at least 4.135.0
 
 `npm run preview` first migrates the preview D1 database using `wrangler.preview-migrations.jsonc`, then runs `wrangler preview`. All branches share the preview D1/R2 resources, isolated from production; DO storage is separate per Preview. The `previews` block explicitly sets `DB`, `GIT_BUCKET`, `REPOSITORY_OBJECTS`, and `ALLOW_USER_REGISTRATION="true"` because production settings are not inherited. Assets, compatibility settings, and DO migrations remain top-level. See [Cloudflare Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
 
-Production Cron runs GitHub discovery and dispatch every five minutes. Worker Previews do not run Cron; use the source or mirror sync API to trigger manually. Alarms continue dispatching queued tasks after each task completes. Do not add Cron configuration to `previews`.
+Production Cron checks for due discovery and mirror tasks every five minutes. Webhooks trigger updates immediately; a full discovery every six hours provides a fallback. Worker Previews do not support GitHub synchronization: the App has one Webhook and Setup URL pointing at production. Do not configure App secrets or Cron under `previews`.
 
 ### Deploy to Cloudflare
 
@@ -168,11 +171,10 @@ These target local D1, production D1, and preview D1 respectively.
 | `npm run cf-typegen` | Generate Cloudflare binding types |
 | `npm run d1:create:remote` | Create the remote D1 database named `gits` |
 | `npm run db:migrate:local` / `npm run db:migrate` | Apply local / remote D1 migrations |
-| `npm run secret:dev` | Set local JWT and GitHub encryption secrets in sequence |
-| `npm run secret:dev:jwt` / `npm run secret:dev:github` | Set one local secret |
+| `npm run secret:dev` / `npm run secret:dev:jwt` | Set the local JWT secret |
 | `npm run secret:dev:set -- KEY FILE` | Prompt for a local variable and write it to the specified file |
-| `npm run secret:prod` | Set production JWT and GitHub encryption secrets in sequence |
-| `npm run secret:prod:jwt` / `npm run secret:prod:github` | Set one production secret |
+| `npm run secret:prod` / `npm run secret:prod:jwt` | Set the production JWT secret |
+| `npm run github-app:create -- --url <origin> --target <prod\|dev> [--org <org>]` | Register a GitHub App and save its six credentials |
 
 ## Project Structure
 
@@ -231,29 +233,71 @@ Collaborator management requires the owner or an `admin` collaborator. Repositor
 
 ### GitHub Synchronization
 
-All GitHub resources belong to the signed-in user. Times are millisecond timestamps.
+Register an App for this instance:
+
+```bash
+npm run github-app:create -- --url https://git.example.com --target prod
+# For a development instance with its own publicly reachable callback and Webhook URL:
+npm run github-app:create -- --url https://dev-git.example.com --target dev
+# Add --org <organization> to register the App under an organization.
+```
+
+The command opens a local registration page, completes GitHub's App Manifest flow and saves
+all six credentials. `prod` uses Wrangler secret prompts via stdin; `dev` updates `.env`, with
+the private key encoded as one base64 line. Secret values are not printed. The registrar's
+loopback callback is temporary; the App's OAuth callback, Setup URL and Webhook target the instance.
+Add `--no-open` to open the printed registration URL in a browser of your choice. The suggested
+App name is capped at GitHub's 34-character limit and can be edited on the registration page.
+
+For manual registration, choose **Any account** (public installation) and configure:
+
+| Setting | Value |
+| --- | --- |
+| Homepage | `https://git.example.com` |
+| User authorization callback | `https://git.example.com/api/github/oauth/callback` |
+| Setup URL | `https://git.example.com/api/github/setup`; redirect on update enabled |
+| Webhook URL | `https://git.example.com/api/github/webhook`; Webhook enabled |
+| Repository permissions | Contents: read; Metadata: read |
+| Organization permissions | Members: read |
+| Events | `push`, `repository`; installation events are delivered automatically |
+| Request user authorization during installation | Disabled; gits starts OAuth from Setup |
+
+Set each of the six `GITHUB_APP_*` secrets listed above using `npx wrangler secret put <NAME>`
+(or the corresponding local `.env` value). Private keys can be GitHub's PKCS#1 PEM or PKCS#8 PEM,
+including base64-encoded PEM. Worker Previews are not supported.
+
+Users select **Add account or organization**, install the App on GitHub, choose all or selected
+repositories, and return to gits for automatic binding. **Link existing installation** starts
+OAuth directly. Only the account owner can bind a personal installation; organizations require
+an active organization administrator. Each installation belongs to one gits user. Repeat binding
+refreshes account metadata without resetting sync settings. Repository selection stays on GitHub.
+
+Signed Webhooks request synchronization, while six-hour discovery recovers missed events.
+User access tokens are never stored; installation access tokens remain only in memory and refresh
+five minutes before expiry. Unbinding preserves local repositories and restores writes without
+uninstalling the App. Uninstalling on GitHub also unbinds automatically.
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/github/connections` | Configuration availability and connections with source summaries |
-| `POST /api/github/connections` | Validate and save `{ token }` |
-| `PATCH /api/github/connections/:connectionId` | Replace `{ token }` for the same GitHub account |
-| `DELETE /api/github/connections/:connectionId` | Remove a connection; keep local repositories |
-| `GET /api/github/connections/:connectionId/owners` | List the account and accessible organizations |
-| `POST /api/github/sources` | Enable `{ connectionId, ownerLogin, ...settings }` |
-| `GET /api/github/sources/:sourceId` | Source settings and state counts |
-| `PATCH /api/github/sources/:sourceId` | Update prefix, filters, visibility, interval or pause |
-| `DELETE /api/github/sources/:sourceId` | Remove a source; keep local repositories |
+| `GET /api/github/sources` | `{ configured, installUrl, sources }` with source summaries |
+| `GET /api/github/authorize` | Browser redirect to GitHub OAuth using state and PKCE |
+| `GET /api/github/setup` | Installation return URL; login or OAuth redirect |
+| `GET /api/github/oauth/callback` | Bind eligible installations; redirect to `/sync` |
+| `POST /api/github/webhook` | HMAC-authenticated events, no gits login required |
+| `GET /api/github/sources/:sourceId` | Settings and state counts |
+| `PATCH /api/github/sources/:sourceId` | Update prefix, filters, visibility or pause |
+| `DELETE /api/github/sources/:sourceId` | Unbind; preserve local repositories |
 | `POST /api/github/sources/:sourceId/sync` | Discover and dispatch immediately |
-| `GET /api/github/sources/:sourceId/repositories` | List by `status` and `page`, 50 per page |
-| `PATCH /api/github/sources/:sourceId/repositories/:githubRepoId` | Set `selection` or `localName` |
-| `POST /api/repos/:owner/:repo/mirror/sync` | Sync one mirror, owner only |
-| `DELETE /api/repos/:owner/:repo/mirror` | Stop syncing and restore local writes, owner only |
+| `GET /api/github/sources/:sourceId/repositories` | `status` and `page`, 50 per page |
+| `PATCH /api/github/sources/:sourceId/repositories/:githubRepoId` | `selection` or `localName` |
+| `POST /api/repos/:owner/:repo/mirror/sync` | Sync a mirror, owner only |
+| `DELETE /api/repos/:owner/:repo/mirror` | Stop syncing and restore writes, owner only |
 
-Repository details include `mirror` (or `null`); repository lists include `is_mirror` (0 or 1).
+JSON endpoints require login and return only the current user's sources. Times are milliseconds.
+OAuth returns `bound=<count>` and repeated `skipped=<login>:<reason>` (`not_owner`, `not_admin`,
+`taken`); failures return `error=state|denied|github|not_configured|pending_approval`.
+Repository details include `mirror` (or `null`); lists include `is_mirror` (0 or 1).
 Mirrors reject push with 403 and reject branch or metadata edits with 409; renaming is allowed.
-Classic PATs require `repo` and `read:org`; fine-grained PATs require Contents and Metadata read
-access for the selected owner. Add a separate connection per owner for fine-grained PATs.
 
 ### Git (Smart HTTP)
 

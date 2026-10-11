@@ -25,7 +25,12 @@ export type AppBindings = {
   REPOSITORY_OBJECTS: DurableObjectNamespace;
   ASSETS?: Fetcher;
   JWT_SECRET: string;
-  GITHUB_TOKEN_ENCRYPTION_KEY?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_SLUG?: string;
+  GITHUB_APP_CLIENT_ID?: string;
+  GITHUB_APP_CLIENT_SECRET?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  GITHUB_APP_WEBHOOK_SECRET?: string;
   githubHttp?: import("./services/github/types").GithubHttpOptions;
   ALLOW_USER_REGISTRATION?: string;
   UPLOAD_PACK_MAX_BODY_BYTES?: string;

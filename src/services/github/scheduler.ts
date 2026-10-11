@@ -1,3 +1,4 @@
+import { githubConfigured } from "./config";
 import { HTTPException } from "hono/http-exception";
 import type { AppBindings } from "../../types";
 import { createInitializedRepository } from "../repository-creation";
@@ -16,7 +17,7 @@ async function scheduleTask(env: AppBindings, remote: RemoteRow) {
   };
   try {
     if (!task.repositoryId) {
-      const source = await env.DB.prepare("SELECT * FROM github_sync_sources WHERE id = ?")
+      const source = await env.DB.prepare("SELECT * FROM github_installations WHERE id = ?")
         .bind(remote.source_id).first<SourceRow>();
       const user = await env.DB.prepare("SELECT username FROM users WHERE id = ?")
         .bind(remote.user_id).first<{ username: string }>();
@@ -54,7 +55,7 @@ async function scheduleTask(env: AppBindings, remote: RemoteRow) {
 }
 
 export async function dispatchMirrorTasks(env: AppBindings) {
-  if (!env.GITHUB_TOKEN_ENCRYPTION_KEY) {
+  if (!githubConfigured(env)) {
     return;
   }
   const now = Date.now();
@@ -68,36 +69,38 @@ export async function dispatchMirrorTasks(env: AppBindings) {
   const claimed = await env.DB.prepare(
     `UPDATE github_repositories SET state = 'syncing', lease_until = ?,
        claim_id = lower(hex(randomblob(16))), attempts = attempts + 1,
-       claimed_pushed_at = pushed_at
+       claimed_pushed_at = pushed_at, claimed_at = MAX(?, sync_requested_at)
      WHERE id IN (
        SELECT g.id FROM github_repositories g
-       JOIN github_sync_sources s ON s.id = g.source_id
-       JOIN github_connections c ON c.id = s.connection_id
+       JOIN github_installations s ON s.id = g.source_id
        WHERE g.included = 1 AND g.next_sync_at <= ?
          AND (g.lease_until IS NULL OR g.lease_until < ?)
          AND g.state IN ('queued', 'synced', 'failed') AND g.size_kb * 1024 <= ?
-         AND s.paused = 0 AND c.status = 'active' AND s.status != 'sso_required'
+         AND s.paused = 0 AND s.suspended = 0
+         AND (s.rate_limit_until IS NULL OR s.rate_limit_until <= ?)
        ORDER BY g.next_sync_at, g.id
        LIMIT MAX(0, ? - (SELECT COUNT(*) FROM github_repositories WHERE lease_until >= ?))
      ) AND (lease_until IS NULL OR lease_until < ?) RETURNING *`
-  ).bind(now + LEASE_MS, now, now, MAX_MIRROR_BYTES, 4, now, now).all<RemoteRow>();
+  ).bind(now + LEASE_MS, now, now, now, MAX_MIRROR_BYTES, now, 4, now, now).all<RemoteRow>();
   await Promise.all(claimed.results.map((remote) => scheduleTask(env, remote)));
 }
 
 export async function runScheduler(env: AppBindings) {
-  if (!env.GITHUB_TOKEN_ENCRYPTION_KEY) {
+  if (!githubConfigured(env)) {
     return;
   }
   const now = Date.now();
   const sources = await env.DB.prepare(
-    `UPDATE github_sync_sources SET lease_until = ?, claim_id = lower(hex(randomblob(16)))
-     WHERE id IN (SELECT s.id FROM github_sync_sources s
-       JOIN github_connections c ON c.id = s.connection_id
-       WHERE s.paused = 0 AND c.status = 'active' AND s.next_discovery_at <= ?
+    `UPDATE github_installations SET lease_until = ?, claim_id = lower(hex(randomblob(16))),
+       next_discovery_at = ?
+     WHERE id IN (SELECT s.id FROM github_installations s
+       WHERE s.paused = 0 AND s.next_discovery_at <= ?
+         AND (s.rate_limit_until IS NULL OR s.rate_limit_until <= ?)
          AND (s.lease_until IS NULL OR s.lease_until < ?)
        ORDER BY s.next_discovery_at LIMIT 5)
      AND (lease_until IS NULL OR lease_until < ?) RETURNING id, claim_id`
-  ).bind(now + LEASE_MS, now, now, now).all<{ id: string; claim_id: string }>();
+  ).bind(now + LEASE_MS, now + LEASE_MS, now, now, now, now)
+    .all<{ id: string; claim_id: string }>();
   for (const source of sources.results) {
     await discoverSource(env, source.id, source.claim_id);
   }

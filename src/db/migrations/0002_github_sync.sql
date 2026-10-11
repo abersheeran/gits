@@ -1,46 +1,35 @@
-CREATE TABLE github_connections (
+CREATE TABLE github_installations (
   id TEXT PRIMARY KEY,
+  installation_id INTEGER NOT NULL UNIQUE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  github_user_id INTEGER NOT NULL,
-  github_login TEXT NOT NULL,
+  account_id INTEGER NOT NULL,
+  account_login TEXT NOT NULL,
+  account_type TEXT NOT NULL CHECK (account_type IN ('user', 'organization')),
   avatar_url TEXT,
-  token_kind TEXT NOT NULL CHECK (token_kind IN ('classic', 'fine_grained')),
-  token_ciphertext TEXT NOT NULL,
-  scopes TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invalid')),
-  last_error TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE github_sync_sources (
-  id TEXT PRIMARY KEY,
-  connection_id TEXT NOT NULL REFERENCES github_connections(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  owner_github_id INTEGER NOT NULL,
-  owner_login TEXT NOT NULL,
-  owner_type TEXT NOT NULL CHECK (owner_type IN ('user', 'organization')),
-  avatar_url TEXT,
+  repository_selection TEXT NOT NULL CHECK (repository_selection IN ('all', 'selected')),
+  linked_by_github_id INTEGER NOT NULL,
+  linked_by_login TEXT NOT NULL,
   name_prefix TEXT NOT NULL DEFAULT '',
   include_forks INTEGER NOT NULL DEFAULT 0,
   include_archived INTEGER NOT NULL DEFAULT 1,
   visibility_policy TEXT NOT NULL DEFAULT 'follow'
     CHECK (visibility_policy IN ('follow', 'private')),
-  interval_minutes INTEGER NOT NULL DEFAULT 60 CHECK (interval_minutes IN (15, 60, 360, 1440)),
   paused INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'sso_required', 'failed', 'paused')),
+  suspended INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'failed', 'paused', 'suspended')),
   last_error TEXT,
   next_discovery_at INTEGER NOT NULL,
+  rate_limit_until INTEGER,
   last_discovered_at INTEGER,
   lease_until INTEGER,
   claim_id TEXT,
   created_at INTEGER NOT NULL,
-  UNIQUE(user_id, owner_github_id)
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE github_repositories (
   id TEXT PRIMARY KEY,
-  source_id TEXT NOT NULL REFERENCES github_sync_sources(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL REFERENCES github_installations(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   github_repo_id INTEGER NOT NULL,
   full_name TEXT NOT NULL,
@@ -70,12 +59,14 @@ CREATE TABLE github_repositories (
   lease_until INTEGER,
   claim_id TEXT,
   claimed_pushed_at TEXT,
+  sync_requested_at INTEGER NOT NULL DEFAULT 0,
+  claimed_at INTEGER,
   UNIQUE(user_id, github_repo_id)
 );
 
-CREATE INDEX idx_github_connections_user ON github_connections(user_id, created_at);
-CREATE INDEX idx_github_sources_due ON github_sync_sources(next_discovery_at, lease_until);
-CREATE INDEX idx_github_sources_connection ON github_sync_sources(connection_id);
+CREATE INDEX idx_github_installations_user ON github_installations(user_id, created_at);
+CREATE INDEX idx_github_installations_due
+  ON github_installations(next_discovery_at, lease_until);
 CREATE INDEX idx_github_repositories_due
   ON github_repositories(included, next_sync_at, lease_until);
 CREATE INDEX idx_github_repositories_source

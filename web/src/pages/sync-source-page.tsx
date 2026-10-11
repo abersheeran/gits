@@ -1,7 +1,7 @@
 import { githubErrorMessage } from "@/lib/github-errors";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Settings } from "lucide-react";
+import { ArrowLeft, ExternalLink, Settings } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { ErrorAlert } from "@/components/common/error-alert";
@@ -49,7 +49,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
   const [excluding, setExcluding] = useState<GithubRemoteRepository | null>(null);
   const [renaming, setRenaming] = useState<GithubRemoteRepository | null>(null);
   useEffect(() => {
-    if (source) document.title = `${source.ownerLogin} · GitHub 同步 · gits`;
+    if (source) document.title = `${source.accountLogin} · GitHub 同步 · gits`;
   }, [source]);
   function navigate(filter: GithubRepositoryFilter, nextPage: number) {
     setSearch((previous) => {
@@ -97,8 +97,8 @@ function SourceContent({ sourceId }: { sourceId: string }) {
         title={
           source ? (
             <span className="flex items-center gap-2">
-              <GithubAvatar login={source.ownerLogin} url={source.avatarUrl} />
-              <span className="min-w-0 break-all">{source.ownerLogin}</span>
+              <GithubAvatar login={source.accountLogin} url={source.avatarUrl} />
+              <span className="min-w-0 break-all">{source.accountLogin}</span>
             </span>
           ) : (
             "GitHub 同步"
@@ -112,10 +112,11 @@ function SourceContent({ sourceId }: { sourceId: string }) {
                   ? "正常"
                   : source.status === "paused"
                     ? "已暂停"
-                    : source.status === "sso_required"
-                      ? "需要 SSO 授权"
+                    : source.status === "suspended"
+                      ? "已挂起"
                       : "失败"}
               </span>
+              <span>{source.repositorySelection === "all" ? "全部仓库" : "指定仓库"}</span>
               <span>
                 上次同步 <RelativeTime timestamp={source.lastDiscoveredAt} />
               </span>
@@ -124,7 +125,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
         }
         action={
           source && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <PendingButton
                 pending={syncing}
                 pendingText="同步中…"
@@ -146,6 +147,11 @@ function SourceContent({ sourceId }: { sourceId: string }) {
               <Button variant="outline" onClick={() => setSettings(true)}>
                 <Settings className="size-4" />
                 设置
+              </Button>
+              <Button asChild variant="ghost">
+                <a href={source.manageUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-4" aria-hidden="true" />在 GitHub 上管理
+                </a>
               </Button>
             </div>
           )
@@ -219,8 +225,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
       </Panel>
       {source && settings && (
         <GithubSourceSettingsSheet
-          ownerLogin={source.ownerLogin}
-          connectionId={source.connectionId}
+          accountLogin={source.accountLogin}
           sourceId={source.id}
           initial={source}
           onClose={() => setSettings(false)}

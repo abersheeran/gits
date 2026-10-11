@@ -13,7 +13,7 @@ const labels = {
   name_conflict: "名称冲突",
   missing: "GitHub 上不可访问",
   ok: "正常",
-  sso_required: "需要 SSO 授权",
+  suspended: "已挂起",
   paused: "已暂停"
 };
 export function GithubStatusBadge({
@@ -28,7 +28,7 @@ export function GithubStatusBadge({
       variant={
         status === "ok" || status === "synced"
           ? "success"
-          : ["failed", "too_large", "name_conflict", "missing", "sso_required"].includes(status)
+          : ["failed", "too_large", "name_conflict", "missing", "suspended"].includes(status)
             ? "destructive"
             : "outline"
       }

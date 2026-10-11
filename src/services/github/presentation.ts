@@ -1,4 +1,4 @@
-import type { ConnectionRow, RemoteRow, RepositoryState, SourceRow } from "./types";
+import type { RemoteRow, RepositoryState, SourceRow } from "./types";
 
 export const repositoryStates: RepositoryState[] = [
   "excluded", "queued", "syncing", "synced", "failed", "too_large", "name_conflict", "missing"
@@ -44,15 +44,19 @@ export async function sourceView(db: D1Database, source: SourceRow) {
   for (const row of result.results) {
     counts[row.state] = row.count;
   }
-  const connection = await db.prepare("SELECT status FROM github_connections WHERE id = ?")
-    .bind(source.connection_id).first<{ status: string }>();
+  const manageUrl = source.account_type === "user"
+    ? `https://github.com/settings/installations/${source.installation_id}`
+    : `https://github.com/organizations/${encodeURIComponent(source.account_login)}`
+      + `/settings/installations/${source.installation_id}`;
   const summary = {
     id: source.id,
-    connectionId: source.connection_id,
-    ownerLogin: source.owner_login,
-    ownerType: source.owner_type,
+    installationId: source.installation_id,
+    accountLogin: source.account_login,
+    accountType: source.account_type,
     avatarUrl: source.avatar_url,
-    status: source.paused || connection?.status === "invalid" ? "paused" : source.status,
+    repositorySelection: source.repository_selection,
+    manageUrl,
+    status: source.suspended ? "suspended" : source.paused ? "paused" : source.status,
     lastError: source.last_error,
     lastDiscoveredAt: source.last_discovered_at,
     repositoryCount: Object.values(counts).reduce((sum, count) => sum + count, 0),
@@ -67,29 +71,10 @@ export async function sourceView(db: D1Database, source: SourceRow) {
       includeForks: Boolean(source.include_forks),
       includeArchived: Boolean(source.include_archived),
       visibilityPolicy: source.visibility_policy,
-      intervalMinutes: source.interval_minutes,
+      linkedBy: source.linked_by_login,
       paused: Boolean(source.paused),
       counts
     }
-  };
-}
-
-export async function connectionView(db: D1Database, row: ConnectionRow) {
-  const sources = await db.prepare(
-    "SELECT * FROM github_sync_sources WHERE connection_id = ? ORDER BY created_at, id"
-  ).bind(row.id).all<SourceRow>();
-  return {
-    id: row.id,
-    githubLogin: row.github_login,
-    githubUserId: row.github_user_id,
-    avatarUrl: row.avatar_url,
-    tokenKind: row.token_kind,
-    status: row.status,
-    lastError: row.last_error,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    sources: await Promise.all(sources.results.map(async (source) =>
-      (await sourceView(db, source)).summary))
   };
 }
 

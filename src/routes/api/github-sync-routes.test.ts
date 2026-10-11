@@ -5,7 +5,7 @@ import { AuthService } from "../../services/auth-service";
 import { discoverSource } from "../../services/github/discovery";
 import { dispatchMirrorTasks } from "../../services/github/scheduler";
 import {
-  githubFixture, githubRepo, githubUser, githubToken
+  githubFixture, githubRepo
 } from "../../test-utils/github-fixture";
 import { repositoryState } from "../../test-utils/mock-repository-object-namespace";
 
@@ -30,87 +30,38 @@ async function request(
   }), env);
 }
 
-it("validates tokens and returns exact connection and configuration shapes", async () => {
-  const { env, sqlite, fetcher } = await githubFixture();
-  const response = await request(env, "/github/connections", "POST", { token: githubToken });
-  expect(response.status).toBe(201);
-  const { connection } = await response.json();
-  expect(Object.keys(connection).sort()).toEqual([
-    "id", "githubLogin", "githubUserId", "avatarUrl", "tokenKind", "status", "lastError",
-    "createdAt", "updatedAt", "sources"
+it("returns the exact v2 source list and configuration availability", async () => {
+  const { env } = await githubFixture();
+  const list = await (await request(env, "/github/sources")).json();
+  expect(Object.keys(list).sort()).toEqual(["configured", "installUrl", "sources"]);
+  expect(list.installUrl).toBe("https://web.test/apps/gits-test/installations/new");
+  expect(Object.keys(list.sources[0]).sort()).toEqual([
+    "id", "installationId", "accountLogin", "accountType", "avatarUrl", "repositorySelection",
+    "manageUrl", "status", "lastError", "lastDiscoveredAt", "repositoryCount", "syncedCount",
+    "attentionCount"
   ].sort());
-  expect(connection).toMatchObject({ githubLogin: "upstream", tokenKind: "classic", sources: [] });
-  const saved = sqlite.prepare("SELECT token_ciphertext FROM github_connections WHERE id = ?")
-    .get(connection.id)!;
-  expect(saved.token_ciphertext).not.toContain(githubToken);
-  const list = await (await request(env, "/github/connections")).json();
-  expect(list.configured).toBe(true);
-  expect(list.connections).toHaveLength(2);
-  expect(Object.keys(list.connections[0].sources[0]).sort()).toEqual([
-    "id", "connectionId", "ownerLogin", "ownerType", "avatarUrl", "status", "lastError",
-    "lastDiscoveredAt", "repositoryCount", "syncedCount", "attentionCount"
-  ].sort());
-  expect((await request(env, "/github/connections", "GET", undefined, "bob")).status).toBe(200);
-  expect((await (await request(env, "/github/connections", "GET", undefined, "bob")).json())
-    .connections).toEqual([]);
-  expect((await request(env, "/github/connections", "POST", {}, "")).status).toBe(401);
-  expect((await request(env, "/github/connections", "GET", undefined, "")).status).toBe(401);
-  fetcher.mockResolvedValueOnce(new Response("", { status: 401 }));
-  const invalid = await request(env, "/github/connections", "POST", { token: githubToken });
-  expect(invalid.status).toBe(400);
-  delete env.GITHUB_TOKEN_ENCRYPTION_KEY;
-  expect(await (await request(env, "/github/connections")).json())
-    .toEqual({ configured: false, connections: [] });
-  const disabled = await request(env, "/github/connections", "POST", { token: githubToken });
+  expect(list.sources[0].manageUrl).toBe("https://github.com/settings/installations/100");
+  expect((await (await request(env, "/github/sources", "GET", undefined, "bob")).json())
+    .sources).toEqual([]);
+  expect((await request(env, "/github/sources", "GET", undefined, "")).status).toBe(401);
+  delete env.GITHUB_APP_WEBHOOK_SECRET;
+  expect(await (await request(env, "/github/sources")).json())
+    .toEqual({ configured: false, installUrl: null, sources: [] });
+  const disabled = await request(env, "/github/sources/source", "PATCH", { paused: true });
   expect(disabled.status).toBe(503);
 });
 
-it("replaces only the same account token, resumes discovery, and lists live owners", async () => {
-  const { env, sqlite, fetcher } = await githubFixture();
-  sqlite.exec("UPDATE github_connections SET status = 'invalid'");
-  const replacement = await request(env, "/github/connections/connection", "PATCH", {
-    token: "github_pat_new"
-  });
-  expect(replacement.status).toBe(200);
-  expect((await replacement.json()).connection.status).toBe("active");
-  expect(sqlite.prepare("SELECT next_discovery_at FROM github_sync_sources").get()!
-    .next_discovery_at).toBeGreaterThan(1);
-  fetcher.mockResolvedValueOnce(Response.json({ ...githubUser, id: 999 }));
-  expect((await request(env, "/github/connections/connection", "PATCH", {
-    token: "github_pat_other"
-  })).status).toBe(409);
-  const owners = await (await request(env, "/github/connections/connection/owners")).json();
-  expect(owners).toEqual({ owners: [
-    { login: "upstream", type: "user", githubId: 10, avatarUrl: null, sourceId: "source" },
-    { login: "team", type: "organization", githubId: 20,
-      avatarUrl: "https://example.com/team.png", sourceId: null }
-  ] });
-  const duplicate = await (await request(env, "/github/connections", "POST", {
-    token: "github_pat_other_resource"
-  })).json();
-  const otherOwners = await (await request(env,
-    `/github/connections/${duplicate.connection.id}/owners`)).json();
-  expect(otherOwners.owners[0].sourceId).toBeNull();
-});
-
-it("creates and updates sources with exact response and pagination shapes", async () => {
+it("updates bound sources with exact v2 detail and pagination shapes", async () => {
   const { env, repos } = await githubFixture([githubRepo()]);
-  const created = await request(env, "/github/sources", "POST", {
-    connectionId: "connection", ownerLogin: "team", paused: true
-  });
-  expect(created.status).toBe(201);
-  const { source } = await created.json();
-  expect(source).toMatchObject({ namePrefix: "team.", paused: true, repositoryCount: 0 });
+  const { source } = await (await request(env, "/github/sources/source")).json();
   expect(Object.keys(source).sort()).toEqual([
-    "id", "connectionId", "ownerLogin", "ownerType", "avatarUrl", "status", "lastError",
-    "lastDiscoveredAt", "repositoryCount", "syncedCount", "attentionCount", "namePrefix",
-    "includeForks", "includeArchived", "visibilityPolicy", "intervalMinutes", "paused", "counts"
+    "id", "installationId", "accountLogin", "accountType", "avatarUrl", "repositorySelection",
+    "manageUrl", "status", "lastError", "lastDiscoveredAt", "repositoryCount", "syncedCount",
+    "attentionCount", "namePrefix", "includeForks", "includeArchived", "visibilityPolicy",
+    "paused", "linkedBy", "counts"
   ].sort());
-  expect((await request(env, "/github/sources", "POST", {
-    connectionId: "connection", ownerLogin: "team"
-  })).status).toBe(409);
   expect((await request(env, `/github/sources/${source.id}`, "PATCH", {
-    includeForks: true, visibilityPolicy: "private", intervalMinutes: 15, paused: false
+    includeForks: true, visibilityPolicy: "private", paused: false
   })).status).toBe(200);
   const synced = await request(env, `/github/sources/${source.id}/sync`, "POST");
   expect((await synced.json()).source.repositoryCount).toBe(1);
@@ -141,10 +92,6 @@ it("creates and updates sources with exact response and pagination shapes", asyn
 });
 
 const privateEndpoints: Array<[string, string, unknown?]> = [
-  ["PATCH", "/github/connections/connection", { token: githubToken }],
-  ["DELETE", "/github/connections/connection"],
-  ["GET", "/github/connections/connection/owners"],
-  ["POST", "/github/sources", { connectionId: "connection", ownerLogin: "team" }],
   ["GET", "/github/sources/source"],
   ["PATCH", "/github/sources/source", { paused: true }],
   ["DELETE", "/github/sources/source"],
@@ -157,13 +104,13 @@ it.each(privateEndpoints)("returns 404 for another user's %s %s", async (method,
   expect((await request(env, path, method, body, "bob")).status).toBe(404);
 });
 
-it.each(["source", "connection"])("removes a %s and preserves local repositories", async (kind) => {
+it("unbinds an installation and preserves local repositories", async () => {
   const { env, remote, sqlite } = await githubFixture([githubRepo()]);
   await discoverSource(env, "source");
   await dispatchMirrorTasks(env);
   const id = remote().repository_id!;
   const state = repositoryState(env.REPOSITORY_OBJECTS, id);
-  const path = kind === "source" ? "/github/sources/source" : "/github/connections/connection";
+  const path = "/github/sources/source";
   expect((await request(env, path, "DELETE")).status).toBe(200);
   expect(await state.storage.getAlarm()).toBeNull();
   expect(sqlite.prepare("SELECT COUNT(*) n FROM repositories").get()!.n).toBe(1);

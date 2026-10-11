@@ -10,23 +10,24 @@ export type GithubRepositoryState =
   | "name_conflict"
   | "missing";
 
-export type GithubSourceStatus = "ok" | "sso_required" | "failed" | "paused";
+export type GithubSourceStatus = "ok" | "failed" | "paused" | "suspended";
 
 export type GithubSourceSettings = {
   namePrefix: string;
   includeForks: boolean;
   includeArchived: boolean;
   visibilityPolicy: "follow" | "private";
-  intervalMinutes: 15 | 60 | 360 | 1440;
   paused: boolean;
 };
 
 export type GithubSourceSummary = {
   id: string;
-  connectionId: string;
-  ownerLogin: string;
-  ownerType: "user" | "organization";
+  installationId: number;
+  accountLogin: string;
+  accountType: "user" | "organization";
   avatarUrl: string | null;
+  repositorySelection: "all" | "selected";
+  manageUrl: string;
   status: GithubSourceStatus;
   lastError: string | null;
   lastDiscoveredAt: number | null;
@@ -37,29 +38,9 @@ export type GithubSourceSummary = {
 
 export type GithubSource = GithubSourceSummary &
   GithubSourceSettings & {
+    linkedBy: string;
     counts: Record<GithubRepositoryState, number>;
   };
-
-export type GithubConnection = {
-  id: string;
-  githubLogin: string;
-  githubUserId: number;
-  avatarUrl: string | null;
-  tokenKind: "classic" | "fine_grained";
-  status: "active" | "invalid";
-  lastError: string | null;
-  createdAt: number;
-  updatedAt: number;
-  sources: GithubSourceSummary[];
-};
-
-export type GithubOwner = {
-  login: string;
-  type: "user" | "organization";
-  githubId: number;
-  avatarUrl: string | null;
-  sourceId: string | null;
-};
 
 export type GithubRemoteRepository = {
   githubRepoId: number;
@@ -96,36 +77,15 @@ export type GithubRepositoryPage = {
   hasNextPage: boolean;
 };
 const segment = encodeURIComponent;
-const connectionPath = (id: string) => `/api/github/connections/${segment(id)}`;
 const sourcePath = (id: string) => `/api/github/sources/${segment(id)}`;
 const mirrorPath = (owner: string, repo: string) =>
   `/api/repos/${segment(owner)}/${segment(repo)}/mirror`;
-export const listGithubConnections = () =>
-  requestJson<{ configured: boolean; connections: GithubConnection[] }>("/api/github/connections");
-export const createGithubConnection = (token: string) =>
-  requestJson<{ connection: GithubConnection }>("/api/github/connections", {
-    method: "POST",
-    bodyJson: { token }
-  });
-export const replaceGithubToken = (id: string, token: string) =>
-  requestJson<{ connection: GithubConnection }>(connectionPath(id), {
-    method: "PATCH",
-    bodyJson: { token }
-  });
-export const deleteGithubConnection = (id: string) =>
-  requestJson<{ ok: true }>(connectionPath(id), { method: "DELETE" });
-export const listGithubOwners = (id: string) =>
-  requestJson<{ owners: GithubOwner[] }>(`${connectionPath(id)}/owners`);
-export const createGithubSource = (
-  input: {
-    connectionId: string;
-    ownerLogin: string;
-  } & Partial<GithubSourceSettings>
-) =>
-  requestJson<{ source: GithubSource }>("/api/github/sources", {
-    method: "POST",
-    bodyJson: input
-  });
+export type GithubSourcesResponse = {
+  configured: boolean;
+  installUrl: string | null;
+  sources: GithubSourceSummary[];
+};
+export const listGithubSources = () => requestJson<GithubSourcesResponse>("/api/github/sources");
 export const getGithubSource = (id: string) =>
   requestJson<{ source: GithubSource }>(sourcePath(id));
 export const updateGithubSource = (id: string, input: Partial<GithubSourceSettings>) =>
@@ -161,16 +121,3 @@ export const syncRepositoryMirror = (owner: string, repo: string) =>
   });
 export const stopRepositoryMirror = (owner: string, repo: string) =>
   requestJson<{ ok: true }>(mirrorPath(owner, repo), { method: "DELETE" });
-export function defaultGithubSourceSettings(
-  login: string,
-  type: "user" | "organization"
-): GithubSourceSettings {
-  return {
-    namePrefix: type === "organization" ? `${login}.` : "",
-    includeForks: false,
-    includeArchived: true,
-    visibilityPolicy: "follow",
-    intervalMinutes: 60,
-    paused: false
-  };
-}

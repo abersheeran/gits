@@ -3,9 +3,9 @@ import { fetchMirror } from "../git-fetch-client";
 import type { ObjectStore } from "../git-store/object-store";
 import type { RefStore } from "../git-store/ref-store";
 import { GithubError, safeError } from "./github-client";
-import { invalidateConnection } from "./source-store";
+import { deferSource, suspendSource } from "./source-store";
 import { completeTask, failTask } from "./task-state";
-import { decryptToken } from "./token-crypto";
+import { clearInstallationToken, installationToken } from "./app-auth";
 import { MAX_MIRROR_BYTES, type MirrorTask, type RemoteRow } from "./types";
 
 export const MIRROR_TASK_KEY = "mirror-sync-task";
@@ -13,20 +13,18 @@ export const MIRROR_TASK_KEY = "mirror-sync-task";
 type TaskRow = RemoteRow & {
   owner: string;
   name: string;
-  github_login: string;
-  token_ciphertext: string;
-  connection_id: string;
+  installation_id: number;
 };
 
 async function currentTask(env: AppBindings, task: MirrorTask) {
   return env.DB.prepare(
-    `SELECT g.*, r.name, u.username AS owner, c.github_login, c.token_ciphertext, c.id connection_id
+    `SELECT g.*, r.name, u.username AS owner, s.installation_id
      FROM github_repositories g
-     JOIN github_sync_sources s ON s.id = g.source_id
-     JOIN github_connections c ON c.id = s.connection_id
+     JOIN github_installations s ON s.id = g.source_id
      JOIN repositories r ON r.id = g.repository_id JOIN users u ON u.id = r.owner_id
      WHERE g.id = ? AND g.claim_id = ? AND g.repository_id = ? AND g.lease_until >= ?
-       AND g.state = 'syncing' AND g.size_kb * 1024 <= ?`
+       AND g.state = 'syncing' AND g.size_kb * 1024 <= ?
+       AND s.paused = 0 AND s.suspended = 0`
   ).bind(task.remoteId, task.claimId, task.repositoryId, Date.now(), MAX_MIRROR_BYTES)
     .first<TaskRow>();
 }
@@ -46,12 +44,12 @@ export async function executeMirrorTask(args: {
   let token = "";
   try {
     await args.ready(row.owner, row.name);
-    token = await decryptToken(row.token_ciphertext, env.GITHUB_TOKEN_ENCRYPTION_KEY ?? "");
+    token = await installationToken(env, row.installation_id);
     await fetchMirror({
       store: args.store,
       refs: args.refs,
       fullName: row.full_name,
-      login: row.github_login,
+      login: "x-access-token",
       token,
       ...(env.githubHttp ? { http: env.githubHttp } : {}),
       beforeUpdate: async () => {
@@ -63,9 +61,20 @@ export async function executeMirrorTask(args: {
     await completeTask(env, task);
   } catch (error) {
     const message = safeError(error, token);
-    if (error instanceof GithubError && error.kind === "unauthorized") {
-      await invalidateConnection(env, row.connection_id, message);
-    }
     await failTask(env, task, row.attempts, message);
+    if (error instanceof GithubError) {
+      if (error.kind === "rate_limited") {
+        await deferSource(env, row.source_id, error.resetAt!);
+      }
+      if (error.kind === "unauthorized") {
+        clearInstallationToken(env, row.installation_id);
+      }
+      if (error.kind === "installation_suspended") {
+        await suspendSource(env, row.source_id, message);
+      }
+      if (error.kind === "installation_deleted") {
+        return row.source_id;
+      }
+    }
   }
 }

@@ -2,42 +2,47 @@ export type RepositoryState =
   | "excluded" | "queued" | "syncing" | "synced" | "failed"
   | "too_large" | "name_conflict" | "missing";
 
-export type ConnectionRow = {
-  id: string;
-  user_id: string;
-  github_user_id: number;
-  github_login: string;
-  avatar_url: string | null;
-  token_kind: "classic" | "fine_grained";
-  token_ciphertext: string;
-  scopes: string;
-  status: "active" | "invalid";
-  last_error: string | null;
-  created_at: number;
-  updated_at: number;
-};
-
 export type SourceRow = {
   id: string;
-  connection_id: string;
+  installation_id: number;
   user_id: string;
-  owner_github_id: number;
-  owner_login: string;
-  owner_type: "user" | "organization";
+  account_id: number;
+  account_login: string;
+  account_type: "user" | "organization";
   avatar_url: string | null;
+  repository_selection: "all" | "selected";
+  linked_by_github_id: number;
+  linked_by_login: string;
   name_prefix: string;
   include_forks: number;
   include_archived: number;
   visibility_policy: "follow" | "private";
-  interval_minutes: number;
   paused: number;
-  status: "ok" | "sso_required" | "failed" | "paused";
+  suspended: number;
+  status: "ok" | "failed" | "paused" | "suspended";
   last_error: string | null;
   next_discovery_at: number;
+  rate_limit_until: number | null;
   last_discovered_at: number | null;
   lease_until: number | null;
   claim_id: string | null;
   created_at: number;
+  updated_at: number;
+};
+
+export type GithubOwner = {
+  id: number;
+  login: string;
+  avatar_url: string | null;
+  type: "User" | "Organization";
+};
+
+export type GithubInstallation = {
+  id: number;
+  app_id: number;
+  account: GithubOwner;
+  repository_selection: "all" | "selected";
+  suspended_at: string | null;
 };
 
 export type RemoteRow = {
@@ -69,6 +74,8 @@ export type RemoteRow = {
   lease_until: number | null;
   claim_id: string | null;
   claimed_pushed_at: string | null;
+  sync_requested_at: number;
+  claimed_at: number | null;
 };
 
 export type MirrorTask = {
@@ -81,7 +88,10 @@ export type GithubHttpOptions = {
   fetch?: typeof fetch;
   apiBaseUrl?: string;
   gitBaseUrl?: string;
+  webBaseUrl?: string;
 };
 
 export const MAX_MIRROR_BYTES = 10 * 1024 * 1024 * 1024;
 export const LEASE_MS = 20 * 60 * 1000;
+
+export const DISCOVERY_INTERVAL_MS = 6 * 60 * 60 * 1000;

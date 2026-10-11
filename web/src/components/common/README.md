@@ -35,10 +35,9 @@
 | HelpTip | `help-tip.tsx` | 带问号图标的说明 Tooltip；label 为无障碍名称，children 可提供较长说明。 |
 | GithubAvatar | `github-avatar.tsx` | GitHub 头像；无头像或加载失败时复用 AuthorAvatar。 |
 | GithubStatusBadge | `github-status-badge.tsx` | 同步源与远端仓库的中文状态 Badge；error 在可聚焦的 Tooltip 中显示。 |
-| GithubTokenDialog | `github-token-dialog.tsx` | 添加账号与更换令牌共用；失败保留输入，成功清除令牌。 |
-| GithubConnectionPanel | `github-connection-panel.tsx` | 连接头与所有者表格；合并已启用同步源，20 条分页，支持添加组织与设置。 |
-| GithubSourceSettingsSheet | `github-source-settings-sheet.tsx` | 启用与编辑共用；initial 传入设置，编辑时传 sourceId，每次打开重新挂载。 |
+| GithubSourceSettingsSheet | `github-source-settings-sheet.tsx` | 编辑已有同步源；传入 accountLogin、sourceId 与 initial，支持前缀、过滤、可见性与暂停，每次打开重新挂载。 |
 | GithubRepositoryTable | `github-repository-table.tsx` | 远端仓库表格及响应式信息；操作回调由页面处理，配合 Pagination 使用。 |
 | GithubLocalNameDialog | `github-local-name-dialog.tsx` | 名称冲突时指定本地名称，校验后保存并纳入同步。 |
-| GithubSyncSkeleton / GithubTableSkeleton | `github-sync-skeleton.tsx` | 同步页面、连接面板与源详情的同形状骨架；source / owners 区分内容，announce 控制播报。 |
+| GithubSyncSkeleton / GithubTableSkeleton | `github-sync-skeleton.tsx` | 同步总览单面板与源详情的同形状骨架；source / sources 区分内容，announce 控制播报。 |
 | RepositoryMirrorPanel | `repository-mirror-panel.tsx` | 仓库设置的同步区，展示来源与状态，支持立即同步、确认停止并刷新详情。 |
+| GithubSourceTable | `github-source-table.tsx` | GitHub App 同步源表格，每页 50 条，复用 Pagination；展示账号、仓库范围与状态，通过回调同步、设置和解除绑定，manageUrl 打开 GitHub 安装设置。 |

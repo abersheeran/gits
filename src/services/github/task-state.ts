@@ -21,8 +21,10 @@ export async function completeTask(env: AppBindings, task: MirrorTask) {
   const now = Date.now();
   await env.DB.prepare(
     `UPDATE github_repositories SET
-       state = CASE WHEN pushed_at IS claimed_pushed_at THEN 'synced' ELSE 'queued' END,
-       next_sync_at = CASE WHEN pushed_at IS claimed_pushed_at THEN ? ELSE ? END,
+       state = CASE WHEN pushed_at IS claimed_pushed_at AND sync_requested_at <= claimed_at
+         THEN 'synced' ELSE 'queued' END,
+       next_sync_at = CASE
+         WHEN pushed_at IS claimed_pushed_at AND sync_requested_at <= claimed_at THEN ? ELSE ? END,
        last_synced_pushed_at = claimed_pushed_at, last_synced_at = ?, last_error = NULL,
        attempts = 0, lease_until = NULL, claim_id = NULL
      WHERE id = ? AND claim_id = ? AND repository_id = ? AND lease_until >= ?`
