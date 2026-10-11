@@ -9,13 +9,26 @@ function toRequest(input: RequestInfo | URL, init?: RequestInit): Request {
   return new Request(String(input), init);
 }
 
+const namespaceStates = new WeakMap<
+  DurableObjectNamespace,
+  Map<string, ReturnType<typeof createMockDurableObjectState>>
+>();
+
+export function repositoryState(namespace: DurableObjectNamespace, id: string) {
+  const state = namespaceStates.get(namespace)?.get(id);
+  if (!state) {
+    throw new Error(`Repository state not found: ${id}`);
+  }
+  return state;
+}
+
 export function createMockRepositoryObjectNamespace(
   getEnv: () => AppBindings
 ): DurableObjectNamespace {
   const instances = new Map<string, RepositoryObject>();
-  const states = new Map<string, DurableObjectState<unknown>>();
+  const states = new Map<string, ReturnType<typeof createMockDurableObjectState>>();
 
-  return {
+  const namespace = {
     getByName(name: string) {
       let state = states.get(name);
       if (!state) {
@@ -34,4 +47,6 @@ export function createMockRepositoryObjectNamespace(
       } as DurableObjectStub;
     }
   } as DurableObjectNamespace;
+  namespaceStates.set(namespace, states);
+  return namespace;
 }

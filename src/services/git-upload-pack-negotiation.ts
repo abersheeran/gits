@@ -1,5 +1,8 @@
-import * as git from "isomorphic-git";
-import { NegotiationError } from "./git-errors";
+import { NegotiationError, NegotiationLimitError } from "./git-errors";
+import { ObjectStore } from "./git-store/object-store";
+import { RefStore } from "./git-store/ref-store";
+import { RepositoryGraph } from "./git-store/repository-graph";
+export { computeObjectClosureForPack } from "./git-pack-object-selection";
 
 const OID_REGEX = /^[0-9a-f]{40}$/i;
 const DEFAULT_MAX_HAVE_LINES = 256;
@@ -7,52 +10,18 @@ const DEFAULT_MAX_COMMITS = 50000;
 const DEFAULT_MAX_OBJECTS = 250000;
 const DEFAULT_MAX_DEEPEN_NOT_COMMITS = 100000;
 
-type GitContext = {
-  fs: unknown;
-  dir: string;
-  gitdir: string;
-  cache?: object;
-};
-
-function withCache(cache: object | undefined): { cache?: object } {
-  if (cache === undefined) {
-    return {};
-  }
-  return { cache };
-}
+export type GitContext = { store: ObjectStore; refs: RefStore };
 
 function normalizeOidList(input: string[]): string[] {
   return [...new Set(input.map((oid) => oid.toLowerCase()))].filter((oid) => OID_REGEX.test(oid));
 }
 
 async function tryReadCommit(args: GitContext, oid: string): Promise<boolean> {
-  try {
-    await git.readCommit({
-      fs: args.fs as never,
-      dir: args.dir,
-      gitdir: args.gitdir,
-      oid,
-      ...withCache(args.cache)
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return args.store.readHeader(oid)?.type === "commit";
 }
 
 async function objectExists(args: GitContext, oid: string): Promise<boolean> {
-  try {
-    await git.readObject({
-      fs: args.fs as never,
-      dir: args.dir,
-      gitdir: args.gitdir,
-      oid,
-      ...withCache(args.cache)
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return args.store.has(oid);
 }
 
 type TagResolution = {
@@ -78,13 +47,7 @@ async function peelTagToCommit(args: GitContext, oid: string): Promise<TagResolu
     }
 
     try {
-      const tag = await git.readTag({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        oid: current,
-        ...withCache(args.cache)
-      });
+      const tag = args.store.readTag(current);
       chain.push(current);
       current = tag.tag.object.toLowerCase();
       continue;
@@ -129,6 +92,12 @@ export async function resolveWants(args: GitContext & { wants: string[] }): Prom
       throw new NegotiationError(`want object not found: ${want}`);
     }
     extraObjectWants.add(want);
+    if (resolution.terminalOid !== want) {
+      if (!args.store.has(resolution.terminalOid)) {
+        throw new NegotiationError(`want object not found: ${resolution.terminalOid}`);
+      }
+      extraObjectWants.add(resolution.terminalOid);
+    }
   }
 
   return {
@@ -144,44 +113,8 @@ export async function findCommonHaves(
     maxHaveLines?: number;
   }
 ): Promise<string[]> {
-  const wants = normalizeOidList(args.wantCommits);
   const haves = normalizeOidList(args.haves).slice(0, args.maxHaveLines ?? DEFAULT_MAX_HAVE_LINES);
-  if (wants.length === 0 || haves.length === 0) {
-    return [];
-  }
-
-  const common = new Set<string>();
-  for (const have of haves) {
-    if (!(await tryReadCommit(args, have))) {
-      continue;
-    }
-
-    for (const want of wants) {
-      if (want === have) {
-        common.add(have);
-        break;
-      }
-
-      try {
-        const isAncestor = await git.isDescendent({
-          fs: args.fs as never,
-          dir: args.dir,
-          gitdir: args.gitdir,
-          oid: want,
-          ancestor: have,
-          ...withCache(args.cache)
-        });
-        if (isAncestor) {
-          common.add(have);
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  return [...common];
+  return haves.filter((oid) => args.store.readHeader(oid)?.type === "commit");
 }
 
 async function resolveDeepenNotRefToCommitOid(
@@ -203,13 +136,7 @@ async function resolveDeepenNotRefToCommitOid(
   for (const candidate of candidates) {
     let oid: string;
     try {
-      oid = await git.resolveRef({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        ref: candidate,
-        ...withCache(args.cache)
-      });
+      oid = new RepositoryGraph(args.store, args.refs).resolveRef(candidate);
     } catch {
       continue;
     }
@@ -237,17 +164,9 @@ async function collectAncestors(
       continue;
     }
 
-    let commit:
-      | Awaited<ReturnType<typeof git.readCommit>>
-      | undefined;
+    let commit: Awaited<ReturnType<ObjectStore["readCommit"]>> | undefined;
     try {
-      commit = await git.readCommit({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        oid: next,
-        ...withCache(args.cache)
-      });
+      commit = args.store.readCommit(next);
     } catch {
       continue;
     }
@@ -268,10 +187,7 @@ async function collectAncestors(
   return visited;
 }
 
-async function resolveDeepenNotExcludeSet(
-  args: GitContext,
-  refs: string[]
-): Promise<Set<string>> {
+async function resolveDeepenNotExcludeSet(args: GitContext, refs: string[]): Promise<Set<string>> {
   if (refs.length === 0) {
     return new Set<string>();
   }
@@ -322,17 +238,9 @@ export async function computeCommitSetForPack(
       continue;
     }
 
-    let commit:
-      | Awaited<ReturnType<typeof git.readCommit>>
-      | undefined;
+    let commit: Awaited<ReturnType<ObjectStore["readCommit"]>> | undefined;
     try {
-      commit = await git.readCommit({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        oid: next.oid,
-        ...withCache(args.cache)
-      });
+      commit = args.store.readCommit(next.oid);
     } catch {
       continue;
     }
@@ -344,7 +252,7 @@ export async function computeCommitSetForPack(
 
     visited.add(next.oid);
     if (visited.size > maxCommits) {
-      throw new NegotiationError(`pack commit limit exceeded (${maxCommits})`);
+      throw new NegotiationLimitError(`pack commit limit exceeded (${maxCommits})`);
     }
 
     if (args.deepen !== undefined && next.depth >= args.deepen) {
@@ -368,17 +276,9 @@ export async function computeCommitSetForPack(
       }
 
       if (args.deepenSince !== undefined) {
-        let parentCommit:
-          | Awaited<ReturnType<typeof git.readCommit>>
-          | undefined;
+        let parentCommit: Awaited<ReturnType<ObjectStore["readCommit"]>> | undefined;
         try {
-          parentCommit = await git.readCommit({
-            fs: args.fs as never,
-            dir: args.dir,
-            gitdir: args.gitdir,
-            oid: parentOid,
-            ...withCache(args.cache)
-          });
+          parentCommit = args.store.readCommit(parentOid);
         } catch {
           continue;
         }
@@ -400,108 +300,4 @@ export async function computeCommitSetForPack(
     commitOids: [...visited],
     shallowOids: [...shallow]
   };
-}
-
-export async function computeObjectClosureForPack(
-  args: GitContext & {
-    commitOids: string[];
-    extraOids?: string[];
-    filter?: {
-      blobNone?: boolean;
-      blobLimitBytes?: number;
-    };
-    maxObjects?: number;
-  }
-): Promise<string[]> {
-  const objects = new Set<string>(normalizeOidList(args.extraOids ?? []));
-  const treeQueue: string[] = [];
-  const processedTrees = new Set<string>();
-  const maxObjects = args.maxObjects ?? DEFAULT_MAX_OBJECTS;
-
-  for (const oid of normalizeOidList(args.commitOids)) {
-    try {
-      const commit = await git.readCommit({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        oid,
-        ...withCache(args.cache)
-      });
-      objects.add(oid);
-      const treeOid = commit.commit.tree.toLowerCase();
-      treeQueue.push(treeOid);
-    } catch {
-      continue;
-    }
-  }
-
-  while (treeQueue.length > 0) {
-    const treeOid = treeQueue.pop();
-    if (!treeOid || processedTrees.has(treeOid)) {
-      continue;
-    }
-    processedTrees.add(treeOid);
-    if (!objects.has(treeOid)) {
-      objects.add(treeOid);
-      if (objects.size > maxObjects) {
-        throw new NegotiationError(`pack object limit exceeded (${maxObjects})`);
-      }
-    }
-
-    let tree:
-      | Awaited<ReturnType<typeof git.readTree>>
-      | undefined;
-    try {
-      tree = await git.readTree({
-        fs: args.fs as never,
-        dir: args.dir,
-        gitdir: args.gitdir,
-        oid: treeOid,
-        ...withCache(args.cache)
-      });
-    } catch {
-      continue;
-    }
-
-    for (const entry of tree.tree) {
-      const entryOid = entry.oid.toLowerCase();
-      // Tree gitlinks (submodules) point to commits outside this repository object DB.
-      if (entry.type === "commit") {
-        continue;
-      }
-      if (entry.type === "blob" && args.filter?.blobNone) {
-        continue;
-      }
-      if (entry.type === "blob" && args.filter?.blobLimitBytes !== undefined) {
-        let blob:
-          | Awaited<ReturnType<typeof git.readBlob>>
-          | undefined;
-        try {
-          blob = await git.readBlob({
-            fs: args.fs as never,
-            dir: args.dir,
-            gitdir: args.gitdir,
-            oid: entryOid,
-            ...withCache(args.cache)
-          });
-        } catch {
-          continue;
-        }
-        if (blob.blob.byteLength > args.filter.blobLimitBytes) {
-          continue;
-        }
-      }
-      if (!objects.has(entryOid)) {
-        objects.add(entryOid);
-        if (objects.size > maxObjects) {
-          throw new NegotiationError(`pack object limit exceeded (${maxObjects})`);
-        }
-      }
-      if (entry.type === "tree" && !processedTrees.has(entryOid)) {
-        treeQueue.push(entryOid);
-      }
-    }
-  }
-
-  return [...objects];
 }

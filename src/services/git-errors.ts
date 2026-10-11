@@ -18,3 +18,5 @@ export class NegotiationError extends ProtocolError {
     this.name = "NegotiationError";
   }
 }
+
+export class NegotiationLimitError extends NegotiationError {}

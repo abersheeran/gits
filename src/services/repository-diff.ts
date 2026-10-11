@@ -1,5 +1,7 @@
-import * as git from "isomorphic-git";
 import { createTwoFilesPatch, diffLines } from "diff";
+import { GitObjectTooLargeError } from "./git-store/object-store";
+import { RepositoryGraph } from "./git-store/repository-graph";
+import { parseUnifiedDiffHunks, type RepositoryDiffHunk } from "./repository-diff-hunks";
 
 const BINARY_SAMPLE_BYTES = 8000;
 const MAX_DIFF_TEXT_BYTES = 256 * 1024;
@@ -19,22 +21,6 @@ export type RepositoryDiffChange = {
   hunks: RepositoryDiffHunk[];
   oldContent: string | null;
   newContent: string | null;
-};
-
-type RepositoryDiffLine = {
-  kind: "context" | "add" | "delete" | "meta";
-  content: string;
-  oldLineNumber: number | null;
-  newLineNumber: number | null;
-};
-
-type RepositoryDiffHunk = {
-  header: string;
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: RepositoryDiffLine[];
 };
 
 export function looksBinary(content: Uint8Array): boolean {
@@ -59,143 +45,19 @@ type TextBlobInfo = {
   isBinary: boolean;
 };
 
-const HUNK_HEADER_REGEX = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@.*$/;
-
-function parseHunkLineCount(value: string | undefined, start: number): number {
-  if (value !== undefined) {
-    return Number.parseInt(value, 10);
-  }
-  return start === 0 ? 0 : 1;
-}
-
-function parseUnifiedDiffHunks(patch: string | null): RepositoryDiffHunk[] {
-  if (!patch) {
-    return [];
-  }
-
-  const patchLines = patch.split("\n");
-  const hunks: RepositoryDiffHunk[] = [];
-  let index = 0;
-
-  while (index < patchLines.length) {
-    const headerLine = patchLines[index] ?? "";
-    const match = headerLine.match(HUNK_HEADER_REGEX);
-    if (!match) {
-      index += 1;
-      continue;
-    }
-
-    const oldStart = Number.parseInt(match[1] ?? "0", 10);
-    const oldLines = parseHunkLineCount(match[2], oldStart);
-    const newStart = Number.parseInt(match[3] ?? "0", 10);
-    const newLines = parseHunkLineCount(match[4], newStart);
-    const lines: RepositoryDiffLine[] = [];
-    let oldLineNumber = oldStart;
-    let newLineNumber = newStart;
-    index += 1;
-
-    while (index < patchLines.length) {
-      const currentLine = patchLines[index] ?? "";
-      if (HUNK_HEADER_REGEX.test(currentLine)) {
-        break;
-      }
-      if (currentLine.startsWith("\\ No newline at end of file")) {
-        lines.push({
-          kind: "meta",
-          content: currentLine,
-          oldLineNumber: null,
-          newLineNumber: null
-        });
-        index += 1;
-        continue;
-      }
-
-      const marker = currentLine[0];
-      const content = currentLine.slice(1);
-      if (marker === " ") {
-        lines.push({
-          kind: "context",
-          content,
-          oldLineNumber,
-          newLineNumber
-        });
-        oldLineNumber += 1;
-        newLineNumber += 1;
-        index += 1;
-        continue;
-      }
-      if (marker === "+") {
-        lines.push({
-          kind: "add",
-          content,
-          oldLineNumber: null,
-          newLineNumber
-        });
-        newLineNumber += 1;
-        index += 1;
-        continue;
-      }
-      if (marker === "-") {
-        lines.push({
-          kind: "delete",
-          content,
-          oldLineNumber,
-          newLineNumber: null
-        });
-        oldLineNumber += 1;
-        index += 1;
-        continue;
-      }
-
-      if (currentLine.length === 0) {
-        index += 1;
-        continue;
-      }
-
-      lines.push({
-        kind: "meta",
-        content: currentLine,
-        oldLineNumber: null,
-        newLineNumber: null
-      });
-      index += 1;
-    }
-
-    hunks.push({
-      header: headerLine,
-      oldStart,
-      oldLines,
-      newStart,
-      newLines,
-      lines
-    });
-  }
-
-  return hunks;
-}
-
 async function flattenTree(args: {
-  fs: unknown;
-  dir: string;
-  gitdir: string;
+  graph: RepositoryGraph;
   oid: string;
   basePath?: string;
   output?: Map<string, FlatTreeEntry>;
 }): Promise<Map<string, FlatTreeEntry>> {
   const output = args.output ?? new Map<string, FlatTreeEntry>();
-  const tree = await git.readTree({
-    fs: args.fs as never,
-    dir: args.dir,
-    gitdir: args.gitdir,
-    oid: args.oid
-  });
+  const tree = args.graph.readTree(args.oid);
   for (const entry of tree.tree) {
     const path = args.basePath ? `${args.basePath}/${entry.path}` : entry.path;
     if (entry.type === "tree") {
       await flattenTree({
-        fs: args.fs,
-        dir: args.dir,
-        gitdir: args.gitdir,
+        graph: args.graph,
         oid: entry.oid,
         basePath: path,
         output
@@ -213,9 +75,7 @@ async function flattenTree(args: {
 }
 
 async function readTextBlob(args: {
-  fs: unknown;
-  dir: string;
-  gitdir: string;
+  graph: RepositoryGraph;
   oid: string | null;
 }): Promise<TextBlobInfo> {
   if (!args.oid) {
@@ -224,23 +84,18 @@ async function readTextBlob(args: {
       isBinary: false
     };
   }
-  const blob = await git.readBlob({
-    fs: args.fs as never,
-    dir: args.dir,
-    gitdir: args.gitdir,
-    oid: args.oid
-  });
-  if (looksBinary(blob.blob)) {
-    return {
-      content: null,
-      isBinary: true
-    };
+  try {
+    const blob = args.graph.store.readPrefix(args.oid, MAX_DIFF_TEXT_BYTES);
+    if (looksBinary(blob.content)) {
+      return { content: null, isBinary: true };
+    }
+    return { content: new TextDecoder().decode(blob.content), isBinary: false };
+  } catch (error) {
+    if (error instanceof GitObjectTooLargeError) {
+      return { content: null, isBinary: true };
+    }
+    throw error;
   }
-  const limited = blob.blob.byteLength > MAX_DIFF_TEXT_BYTES ? blob.blob.slice(0, MAX_DIFF_TEXT_BYTES) : blob.blob;
-  return {
-    content: new TextDecoder().decode(limited),
-    isBinary: false
-  };
 }
 
 function buildDiffChange(args: {
@@ -251,11 +106,7 @@ function buildDiffChange(args: {
   nextText: TextBlobInfo;
 }): RepositoryDiffChange {
   const status =
-    args.previousEntry && args.nextEntry
-      ? "modified"
-      : args.nextEntry
-        ? "added"
-        : "deleted";
+    args.previousEntry && args.nextEntry ? "modified" : args.nextEntry ? "added" : "deleted";
   const isBinary = args.previousText.isBinary || args.nextText.isBinary;
   if (isBinary) {
     return {
@@ -318,9 +169,7 @@ function buildDiffChange(args: {
 }
 
 export async function diffCommitTrees(args: {
-  fs: unknown;
-  dir: string;
-  gitdir: string;
+  graph: RepositoryGraph;
   previousOid: string | null;
   nextOid: string | null;
 }): Promise<{
@@ -331,22 +180,18 @@ export async function diffCommitTrees(args: {
 }> {
   const previousEntries = args.previousOid
     ? await flattenTree({
-        fs: args.fs,
-        dir: args.dir,
-        gitdir: args.gitdir,
+        graph: args.graph,
         oid: args.previousOid
       })
     : new Map<string, FlatTreeEntry>();
   const nextEntries = args.nextOid
     ? await flattenTree({
-        fs: args.fs,
-        dir: args.dir,
-        gitdir: args.gitdir,
+        graph: args.graph,
         oid: args.nextOid
       })
     : new Map<string, FlatTreeEntry>();
-  const paths = Array.from(new Set([...previousEntries.keys(), ...nextEntries.keys()])).sort((left, right) =>
-    left.localeCompare(right)
+  const paths = Array.from(new Set([...previousEntries.keys(), ...nextEntries.keys()])).sort(
+    (left, right) => left.localeCompare(right)
   );
 
   const changes: RepositoryDiffChange[] = [];
@@ -368,17 +213,13 @@ export async function diffCommitTrees(args: {
     const [previousText, nextText] = await Promise.all([
       previousEntry?.type === "blob"
         ? readTextBlob({
-            fs: args.fs,
-            dir: args.dir,
-            gitdir: args.gitdir,
+            graph: args.graph,
             oid: previousEntry.oid
           })
         : Promise.resolve({ content: "", isBinary: false }),
       nextEntry?.type === "blob"
         ? readTextBlob({
-            fs: args.fs,
-            dir: args.dir,
-            gitdir: args.gitdir,
+            graph: args.graph,
             oid: nextEntry.oid
           })
         : Promise.resolve({ content: "", isBinary: false })

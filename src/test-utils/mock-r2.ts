@@ -1,4 +1,5 @@
 const textEncoder = new TextEncoder();
+
 const textDecoder = new TextDecoder();
 
 function toUint8Array(data: ArrayBuffer | ArrayBufferView): Uint8Array {
@@ -47,7 +48,6 @@ export class MockR2Bucket {
     if (!item) {
       return null;
     }
-
     const bytes = item.bytes;
     return {
       key,
@@ -55,13 +55,26 @@ export class MockR2Bucket {
       uploaded: item.uploaded,
       etag: `etag-${key}`,
       checksums: {},
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        }
+      }),
       text: async () => textDecoder.decode(bytes),
-      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
     } as unknown as R2ObjectBody;
   }
 
-  async delete(key: string): Promise<void> {
-    this.objects.delete(key);
+  async delete(keys: string | string[]): Promise<void> {
+    const batch = typeof keys === "string" ? [keys] : keys;
+    if (batch.length > 1000) {
+      throw new Error("R2 delete exceeds 1000 keys");
+    }
+    for (const key of batch) {
+      this.objects.delete(key);
+    }
   }
 
   clear(): void {
@@ -73,11 +86,9 @@ export class MockR2Bucket {
     const cursor = Number.parseInt(options?.cursor ?? "0", 10);
     const start = Number.isFinite(cursor) ? cursor : 0;
     const limit = options?.limit ?? 1000;
-
     const keys = [...this.objects.keys()].filter((key) => key.startsWith(prefix)).sort();
     const sliced = keys.slice(start, start + limit);
     const nextIndex = start + sliced.length;
-
     return {
       objects: sliced.map((key) => {
         const item = this.objects.get(key);

@@ -4,7 +4,7 @@ A personal Git repository host built on Cloudflare Workers, focused on Git stora
 
 ## Features
 
-- **Git hosting** — Smart HTTP clone, fetch, and push, with shallow clone and object filters. R2 stores Git objects; a per-repository Durable Object caches repository state and persists a storage snapshot.
+- **Git hosting** — Smart HTTP clone, fetch, and push, with shallow clone and object filters. Each repository stores Git objects and refs in its Durable Object SQLite database; packs stream in and out without loading the entire repository. R2 is used only to import legacy repositories.
 - **Authentication** — Register, login, logout, JWT sessions, and Personal Access Tokens (PAT). Git Basic Auth uses a username and PAT.
 - **Repositories** — Create, rename, update visibility and description, delete, and manage collaborators with `read / write / admin` permissions.
 - **Branches** — Owners can create and delete branches and set the default branch through the web UI or API.
@@ -19,11 +19,16 @@ Repositories belong to individuals. Git access is HTTP only and file browsing is
 | Runtime | Cloudflare Workers |
 | Backend | Hono, TypeScript |
 | Metadata | Cloudflare D1 (SQLite) |
-| Git storage | Cloudflare R2 |
-| Repository state | `RepositoryObject` Durable Object, memory cache and DO storage snapshot |
+| Git storage | Per-repository Durable Object SQLite; R2 for legacy import only |
+| Repository state | `RepositoryObject` Durable Object, SQLite refs and bounded object cache |
 | Frontend | React 19, React Router v7, Vite |
 | UI | shadcn/ui, Tailwind CSS, Monaco Editor |
-| Git | isomorphic-git, memfs |
+| Git | SQLite object store, streaming pack processing with pako |
+
+Repository data is read on demand; clone and push stream pack data. Full object resolution is
+limited to 32 MiB, while previews of full objects read only a prefix. Storage remains subject to
+the SQLite Durable Object capacity limit of 10 GB per repository, and request CPU time is
+configured to 300,000 ms.
 
 ## Quick Start
 
@@ -64,7 +69,7 @@ ALLOW_USER_REGISTRATION=true
 | `JWT_SECRET` | Required secret for signing login JWTs |
 | `ALLOW_USER_REGISTRATION` | `true` (case-insensitive) enables registration; any other value or unset disables it |
 | `UPLOAD_PACK_MAX_BODY_BYTES` | Fetch request body limit; defaults to 8 MiB |
-| `RECEIVE_PACK_MAX_BODY_BYTES` | Push request body limit; defaults to 32 MiB |
+| `RECEIVE_PACK_MAX_BODY_BYTES` | Optional push request body limit; unset means platform limits only |
 
 Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for the production JWT secret.
 
@@ -73,7 +78,7 @@ Local `.env` values are loaded by the development script. Configure production v
 | Binding | Configuration |
 | --- | --- |
 | `DB` | Production D1 `gits`; Preview D1 `gits-preview`; IDs configured in [wrangler.jsonc](wrangler.jsonc) |
-| `GIT_BUCKET` | Production R2 `gits`; Previews use R2 `gits-preview` |
+| `GIT_BUCKET` | Legacy import only; production R2 `gits`, Preview R2 `gits-preview` |
 | `REPOSITORY_OBJECTS` | `RepositoryObject`; each Preview gets its own namespace and storage |
 | `ASSETS` | Frontend build from `web/dist` |
 

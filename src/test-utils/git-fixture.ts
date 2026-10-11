@@ -1,5 +1,8 @@
 import * as git from "isomorphic-git";
-import { Volume, createFsFromVolume } from "memfs";
+import nativeFs from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MockR2Bucket } from "./mock-r2";
 
 type FsLike = {
@@ -36,75 +39,77 @@ export async function seedSampleRepositoryToR2(
   owner: string,
   repo: string
 ): Promise<{ latestCommit: string; initialCommit: string }> {
-  const volume = new Volume();
-  const fs = createFsFromVolume(volume) as unknown as FsLike;
-  const dir = "/repo";
-  const gitdir = "/repo/.git";
+  const fs = nativeFs as unknown as FsLike;
+  const dir = await mkdtemp(join(tmpdir(), "gits-fixture-"));
+  const gitdir = `${dir}/.git`;
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    await git.init({
+      fs: fs as never,
+      dir,
+      defaultBranch: "main"
+    });
 
-  await fs.promises.mkdir(dir, { recursive: true });
-  await git.init({
-    fs: fs as never,
-    dir,
-    defaultBranch: "main"
-  });
+    await fs.promises.writeFile(`${dir}/README.md`, "# Demo\n");
+    await git.add({
+      fs: fs as never,
+      dir,
+      filepath: "README.md"
+    });
+    const initialCommit = await git.commit({
+      fs: fs as never,
+      dir,
+      message: "initial commit",
+      author: {
+        name: "alice",
+        email: "alice@example.com"
+      }
+    });
 
-  await fs.promises.writeFile(`${dir}/README.md`, "# Demo\n");
-  await git.add({
-    fs: fs as never,
-    dir,
-    filepath: "README.md"
-  });
-  const initialCommit = await git.commit({
-    fs: fs as never,
-    dir,
-    message: "initial commit",
-    author: {
-      name: "alice",
-      email: "alice@example.com"
+    await fs.promises.mkdir(`${dir}/src`, { recursive: true });
+    await fs.promises.writeFile(`${dir}/README.md`, "# Demo\n\nUpdated\n");
+    await fs.promises.writeFile(`${dir}/src/app.txt`, "console.log('hello')\n");
+    await git.add({
+      fs: fs as never,
+      dir,
+      filepath: "README.md"
+    });
+    await git.add({
+      fs: fs as never,
+      dir,
+      filepath: "src/app.txt"
+    });
+    const latestCommit = await git.commit({
+      fs: fs as never,
+      dir,
+      message: "second commit",
+      author: {
+        name: "alice",
+        email: "alice@example.com"
+      }
+    });
+
+    await git.branch({
+      fs: fs as never,
+      dir,
+      ref: "feature"
+    });
+
+    const objectFiles = await listFilesRecursive(fs, `${gitdir}/objects`);
+    const refFiles = await listFilesRecursive(fs, `${gitdir}/refs/heads`);
+    const extraFiles = [`${gitdir}/HEAD`];
+
+    for (const path of [...objectFiles, ...refFiles, ...extraFiles]) {
+      const body = await fs.promises.readFile(path);
+      const relative = relativePath(gitdir, path);
+      await bucket.put(`${owner}/${repo}/${relative}`, body);
     }
-  });
 
-  await fs.promises.mkdir(`${dir}/src`, { recursive: true });
-  await fs.promises.writeFile(`${dir}/README.md`, "# Demo\n\nUpdated\n");
-  await fs.promises.writeFile(`${dir}/src/app.txt`, "console.log('hello')\n");
-  await git.add({
-    fs: fs as never,
-    dir,
-    filepath: "README.md"
-  });
-  await git.add({
-    fs: fs as never,
-    dir,
-    filepath: "src/app.txt"
-  });
-  const latestCommit = await git.commit({
-    fs: fs as never,
-    dir,
-    message: "second commit",
-    author: {
-      name: "alice",
-      email: "alice@example.com"
-    }
-  });
-
-  await git.branch({
-    fs: fs as never,
-    dir,
-    ref: "feature"
-  });
-
-  const objectFiles = await listFilesRecursive(fs, `${gitdir}/objects`);
-  const refFiles = await listFilesRecursive(fs, `${gitdir}/refs/heads`);
-  const extraFiles = [`${gitdir}/HEAD`];
-
-  for (const path of [...objectFiles, ...refFiles, ...extraFiles]) {
-    const body = await fs.promises.readFile(path);
-    const relative = relativePath(gitdir, path);
-    await bucket.put(`${owner}/${repo}/${relative}`, body);
+    return {
+      latestCommit,
+      initialCommit
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
-
-  return {
-    latestCommit,
-    initialCommit
-  };
 }

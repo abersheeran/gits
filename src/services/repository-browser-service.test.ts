@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { seedSampleRepositoryToR2 } from "../test-utils/git-fixture";
 import { MockR2Bucket } from "../test-utils/mock-r2";
+import { importTestRepository } from "../test-utils/sqlite-repository";
 import {
-  RepositoryBrowserService,
   RepositoryBrowseInvalidPathError,
-  RepositoryBrowsePathNotFoundError
+  RepositoryBrowsePathNotFoundError,
+  RepositoryBrowserService
 } from "./repository-browser-service";
-import { StorageService } from "./storage-service";
 
 async function createServiceWithFixture() {
   const bucket = new MockR2Bucket();
   await seedSampleRepositoryToR2(bucket, "alice", "demo");
-  const storage = new StorageService(bucket as unknown as R2Bucket);
-  return new RepositoryBrowserService(storage);
+  const { store, refs } = await importTestRepository(bucket, "alice", "demo");
+  return new RepositoryBrowserService(store, refs);
 }
 
 describe("RepositoryBrowserService", () => {
@@ -25,8 +25,12 @@ describe("RepositoryBrowserService", () => {
 
     expect(result.kind).toBe("tree");
     expect(result.path).toBe("");
-    expect(result.entries.some((entry) => entry.type === "tree" && entry.path === "src")).toBe(true);
-    expect(result.entries.some((entry) => entry.type === "blob" && entry.path === "README.md")).toBe(true);
+    expect(result.entries.some((entry) => entry.type === "tree" && entry.path === "src")).toBe(
+      true
+    );
+    expect(
+      result.entries.some((entry) => entry.type === "blob" && entry.path === "README.md")
+    ).toBe(true);
     expect(result.readme?.path).toBe("README.md");
     expect(result.readme?.content).toContain("# Demo");
   });
@@ -73,8 +77,8 @@ describe("RepositoryBrowserService", () => {
   it("returns structured diff hunks for commit detail", async () => {
     const bucket = new MockR2Bucket();
     const seeded = await seedSampleRepositoryToR2(bucket, "alice", "demo");
-    const storage = new StorageService(bucket as unknown as R2Bucket);
-    const service = new RepositoryBrowserService(storage);
+    const { store, refs } = await importTestRepository(bucket, "alice", "demo");
+    const service = new RepositoryBrowserService(store, refs);
 
     const detail = await service.getCommitDetail({
       owner: "alice",

@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | 01 认证与访问控制 | 注册（可关闭）、登录、登出、个人访问令牌（PAT）、Git Basic Auth、仓库级权限 | [认证与访问控制](01-auth-and-access.md) |
 | 02 仓库管理与协作 | 个人仓库的创建、重命名、描述、可见性与删除；`read / write / admin` 协作者；分支创建、删除与默认分支 | [仓库管理与协作](02-repository-management-and-collaboration.md) |
-| 03 Git 托管与存储 | Smart HTTP clone / fetch / push，浅克隆与对象过滤；R2 持久化与 DO 快照 | [Git 托管与存储](03-git-hosting-and-storage.md) |
+| 03 Git 托管与存储 | Smart HTTP clone / fetch / push，浅克隆与对象过滤；每仓库 DO SQLite 对象存储，旧格式自动迁移 | [Git 托管与存储](03-git-hosting-and-storage.md) |
 | 04 代码浏览与历史 | README、目录、只读文件预览、分页提交历史、提交差异、路径历史 | [代码浏览与历史](04-code-browsing-and-history.md) |
 
 以下能力不在范围内：
@@ -33,8 +33,8 @@
 | --- | --- |
 | Worker（Hono） | 提供静态资源、`/api` 接口（`src/routes/api/index.ts`）与 Git Smart HTTP（`src/routes/git.ts`），负责鉴权和 D1 元数据查询 |
 | D1 `DB` | 用户、仓库、协作者和 PAT 元数据 |
-| R2 `GIT_BUCKET` | Git 对象、引用与 `HEAD` |
-| Durable Object `REPOSITORY_OBJECTS` | `RepositoryObject` 按仓库 ID 处理 Git 请求、分支操作和代码浏览；内存缓存配合 DO storage 快照，缺失快照时从 R2 恢复 |
+| R2 `GIT_BUCKET` | 旧存储格式的仓库数据，首次访问时导入 DO 后删除 |
+| Durable Object `REPOSITORY_OBJECTS` | `RepositoryObject` 按仓库 ID 处理 Git 请求、分支操作和代码浏览；Git 对象与引用存在该 DO 的 SQLite 中，按需读取 |
 | React SPA | 账户、仓库、代码、提交、分支、设置和协作者页面 |
 
 部署与环境配置见 [README](../README.md#deployment)。
@@ -54,4 +54,4 @@
 - 公开仓库可匿名读取；私有仓库仅所有者和协作者可读，无读权限的 API 请求返回 404。
 - 仓库设置、删除和分支管理仅限所有者；所有者及 `admin` 协作者可管理协作者。
 - Git push 需要 PAT 和仓库写权限。
-- 删除为硬删除，同时清理 D1 元数据、R2 数据和 DO 快照，不可恢复。
+- 删除为硬删除，同时清理 D1 元数据、DO 存储和残留的 R2 旧格式数据，不可恢复。

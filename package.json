@@ -29,13 +29,14 @@
     "bcryptjs": "^2.4.3",
     "diff": "^8.0.3",
     "hono": "^4.12.3",
-    "isomorphic-git": "^1.35.1",
     "jose": "^5.10.0",
-    "memfs": "^4.51.0"
+    "pako": "2.1.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^25.3.3",
+    "@types/pako": "^2.0.4",
+    "isomorphic-git": "^1.35.1",
     "shadcn": "^3.8.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",

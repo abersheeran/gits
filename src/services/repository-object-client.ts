@@ -5,20 +5,22 @@ import {
   RepositoryBrowseInvalidPathError,
   RepositoryBrowsePathNotFoundError,
   type RepositoryBrowseResult,
-  type RepositoryCommitHistoryResult,
   type RepositoryCommitDetail,
+  type RepositoryCommitHistoryResult,
   type RepositoryDetail,
   type RepositoryPathHistoryResult
 } from "./repository-browser-service";
 import type {
-  RepositoryObjectJsonOperation,
-  RepositoryObjectJsonRequest,
-  RepositoryHeadRef,
   RepositoryBranchMutationResult,
-  RepositoryObjectErrorPayload
+  RepositoryHeadRef,
+  RepositoryObjectErrorPayload,
+  RepositoryObjectJsonOperation,
+  RepositoryObjectJsonRequest
 } from "./repository-object-protocol";
 
-async function parseRepositoryObjectError(response: Response): Promise<RepositoryObjectErrorPayload> {
+async function parseRepositoryObjectError(
+  response: Response
+): Promise<RepositoryObjectErrorPayload> {
   try {
     return (await response.json()) as RepositoryObjectErrorPayload;
   } catch {
@@ -37,7 +39,8 @@ function toContentfulStatusCode(status: number): ContentfulStatusCode {
 }
 
 export class RepositoryObjectClient {
-  constructor(private readonly namespace: DurableObjectNamespace) {}
+  constructor(private readonly namespace: DurableObjectNamespace) {
+  }
 
   private getStub(repositoryId: string): DurableObjectStub {
     return this.namespace.getByName(repositoryId);
@@ -67,7 +70,9 @@ export class RepositoryObjectClient {
         case "path_not_found":
           throw new RepositoryBrowsePathNotFoundError(error.message);
         default:
-          throw new HTTPException(toContentfulStatusCode(response.status), { message: error.message });
+          throw new HTTPException(toContentfulStatusCode(response.status), {
+            message: error.message
+          });
       }
     }
 
@@ -287,29 +292,38 @@ export class RepositoryObjectClient {
     });
   }
 
+  private streamRequest(body: ReadableStream<Uint8Array>) {
+    return { method: "POST", body, duplex: "half" as const };
+  }
+
+  private gitUrl(path: string, args: { owner: string; repo: string; service?: string }): string {
+    const url = new URL(`https://repository-object/git/${path}`);
+    url.searchParams.set("owner", args.owner);
+    url.searchParams.set("repo", args.repo);
+    if (args.service) {
+      url.searchParams.set("service", args.service);
+    }
+    return url.toString();
+  }
+
   async handleInfoRefs(args: {
     repositoryId: string;
     owner: string;
     repo: string;
     service: GitServiceName;
   }): Promise<Response> {
-    return this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/info/refs?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}&service=${encodeURIComponent(args.service)}`
-    );
+    return this.getStub(args.repositoryId).fetch(this.gitUrl("info/refs", args));
   }
 
   async handleUploadPack(args: {
     repositoryId: string;
     owner: string;
     repo: string;
-    body: ArrayBuffer;
+    body: ReadableStream<Uint8Array>;
   }): Promise<Response> {
     return this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/upload-pack?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}`,
-      {
-        method: "POST",
-        body: args.body
-      }
+      this.gitUrl("upload-pack", args),
+      this.streamRequest(args.body)
     );
   }
 
@@ -317,14 +331,11 @@ export class RepositoryObjectClient {
     repositoryId: string;
     owner: string;
     repo: string;
-    body: ArrayBuffer;
+    body: ReadableStream<Uint8Array>;
   }): Promise<Response> {
     return this.getStub(args.repositoryId).fetch(
-      `https://repository-object/git/receive-pack?owner=${encodeURIComponent(args.owner)}&repo=${encodeURIComponent(args.repo)}`,
-      {
-        method: "POST",
-        body: args.body
-      }
+      this.gitUrl("receive-pack", args),
+      this.streamRequest(args.body)
     );
   }
 }

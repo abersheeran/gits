@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RepositoryRecord } from "../types";
 import { GitService } from "./git-service";
+import { RefStore } from "./git-store/ref-store";
+import { testStore } from "./git-store/test-helpers";
 import { RepositoryService } from "./repository-service";
-import { StorageService } from "./storage-service";
 
 const repoRecord: RepositoryRecord = {
   id: "repo-1",
@@ -29,30 +30,24 @@ function createService(options?: {
     canWriteRepository: vi.fn().mockResolvedValue(options?.canWrite ?? true)
   } as unknown as RepositoryService;
 
-  const storageService = {
-    repoPrefix: vi.fn().mockImplementation((owner: string, repo: string) => `${owner}/${repo}`),
-    listRefs: vi
-      .fn()
-      .mockResolvedValue(options?.refs ?? [{ name: "refs/heads/main", oid: MAIN_OID }]),
-    listRepositoryKeys: vi.fn().mockResolvedValue([]),
-    getBytes: vi.fn().mockResolvedValue(null),
-    listHeadRefs: vi
-      .fn()
-      .mockResolvedValue(options?.refs ?? [{ name: "refs/heads/main", oid: MAIN_OID }]),
-    readHead: vi.fn().mockResolvedValue("ref: refs/heads/main")
-  } as unknown as StorageService;
+  const { store, storage } = testStore();
+  const refs = new RefStore(storage);
+  refs.updateRefs(
+    (options?.refs ?? [{ name: "refs/heads/main", oid: MAIN_OID }]).map((ref) => ({
+      name: ref.name,
+      oldOid: undefined,
+      newOid: ref.oid
+    })),
+    { head: "ref: refs/heads/main" }
+  );
+  const service = new GitService(store, refs, repositoryService);
 
-  const service = new GitService(repositoryService, storageService);
   return {
     service,
     repositoryService: repositoryService as unknown as {
       findRepository: ReturnType<typeof vi.fn>;
       canReadRepository: ReturnType<typeof vi.fn>;
       canWriteRepository: ReturnType<typeof vi.fn>;
-    },
-    storageService: storageService as unknown as {
-      listHeadRefs: ReturnType<typeof vi.fn>;
-      readHead: ReturnType<typeof vi.fn>;
     }
   };
 }
@@ -67,7 +62,9 @@ describe("GitService", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/x-git-upload-pack-advertisement");
+    expect(response.headers.get("content-type")).toBe(
+      "application/x-git-upload-pack-advertisement"
+    );
     const payload = new TextDecoder().decode(await response.arrayBuffer());
     expect(payload).toContain("# service=git-upload-pack");
     expect(payload).toContain(`${MAIN_OID} refs/heads/main`);
@@ -115,7 +112,7 @@ describe("GitService", () => {
       service.handleReceivePack({
         owner: "alice",
         repo: "demo",
-        body: new TextEncoder().encode("0000").buffer,
+        body: new Response("0000").body!,
         user: { id: "u2", username: "bob" }
       })
     ).rejects.toHaveProperty("status", 403);

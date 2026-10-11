@@ -1,158 +1,24 @@
 import { HTTPException } from "hono/http-exception";
-import * as git from "isomorphic-git";
-import {
-  buildReceivePackReport,
-  buildUploadPackNegotiationResponse,
-  buildUploadPackResponse,
-  encodeFlushPktLine,
-  encodeProtocolError,
-  encodeTextPktLine,
-  isZeroOid,
-  parseReceivePackRequest,
-  parseUploadPackRequest
-} from "./git-protocol";
-import {
-  listRepositoryRefsFromFs,
-  loadRepositoryFromStorage,
-  persistRepositoryToStorage,
-  syncLoadedRepositoryHeadState,
-  type LoadedRepository,
-  type RepositorySnapshotStorage
-} from "./git-repo-loader";
-import { ProtocolError, UnsupportedFeatureError } from "./git-errors";
-import {
-  computeCommitSetForPack,
-  computeObjectClosureForPack,
-  findCommonHaves,
-  resolveWants
-} from "./git-upload-pack-negotiation";
-import { RepositoryService } from "./repository-service";
-import { StorageService } from "./storage-service";
 import type { AuthUser, GitServiceName } from "../types";
+import { ProtocolError } from "./git-errors";
+import { buildInfoRefsResponse } from "./git-info-refs";
+import { encodeProtocolError, parseUploadPackRequest } from "./git-protocol";
+import { receivePack } from "./git-receive-pack";
+import { ObjectStore } from "./git-store/object-store";
+import { RefStore } from "./git-store/ref-store";
+import { uploadPack } from "./git-upload-pack";
+import { RepositoryService } from "./repository-service";
 
-type RefsArgs = {
-  owner: string;
-  repo: string;
-  service: GitServiceName;
-  user?: AuthUser;
-};
-
-type RepoAccessArgs = {
-  owner: string;
-  repo: string;
-  user?: AuthUser;
-};
-
-type UploadPackArgs = RepoAccessArgs & {
-  body: ArrayBuffer;
-};
-
-type ReceivePackArgs = RepoAccessArgs & {
-  body: ArrayBuffer;
-};
-
-const MAX_DEEPEN = 10000;
-const MAX_FILTER_BLOB_LIMIT = 50 * 1024 * 1024;
-
-function concatChunks(chunks: Uint8Array[]): Uint8Array {
-  const size = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const output = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return output;
-}
-
-function resolveHeadRef(
-  refs: Array<{ name: string; oid: string }>,
-  storedHead: string | null
-): { headRef: string | null; headOid: string | null } {
-  let headRef: string | null = null;
-  if (storedHead?.startsWith("ref: ")) {
-    const parsed = storedHead.slice("ref: ".length).trim();
-    if (parsed.startsWith("refs/")) {
-      headRef = parsed;
-    }
-  }
-
-  if (!headRef) {
-    const main = refs.find((item) => item.name === "refs/heads/main");
-    headRef = main?.name ?? refs[0]?.name ?? null;
-  }
-
-  const headOid =
-    (headRef && refs.find((item) => item.name === headRef)?.oid) ?? refs[0]?.oid ?? null;
-
-  return { headRef, headOid };
-}
-
-function capabilityListFor(service: GitServiceName, headRef: string | null): string {
-  if (service === "git-upload-pack") {
-    const capabilities = [
-      "multi_ack_detailed",
-      "no-done",
-      "side-band",
-      "side-band-64k",
-      "ofs-delta",
-      "shallow",
-      "filter",
-      "agent=gits/0.1"
-    ];
-    if (headRef) {
-      capabilities.unshift(`symref=HEAD:${headRef}`);
-    }
-    return capabilities.join(" ");
-  }
-  return "report-status side-band-64k delete-refs ofs-delta agent=gits/0.1";
-}
-
-type PackObjectFilter = {
-  blobNone?: boolean;
-  blobLimitBytes?: number;
-};
-
-function parsePackObjectFilter(filterSpec: string | undefined): PackObjectFilter | undefined {
-  if (!filterSpec) {
-    return undefined;
-  }
-  if (filterSpec === "blob:none") {
-    return { blobNone: true };
-  }
-  if (filterSpec.startsWith("blob:limit=")) {
-    const value = Number.parseInt(filterSpec.slice("blob:limit=".length), 10);
-    if (!Number.isFinite(value) || Number.isNaN(value) || value < 0) {
-      throw new ProtocolError("invalid blob:limit filter");
-    }
-    if (value > MAX_FILTER_BLOB_LIMIT) {
-      throw new ProtocolError(`blob:limit exceeds maximum (${MAX_FILTER_BLOB_LIMIT})`);
-    }
-    return {
-      blobLimitBytes: value
-    };
-  }
-  throw new UnsupportedFeatureError("filter");
-}
-
-type MutableFs = {
-  promises: {
-    mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
-    writeFile(path: string, data: Uint8Array | string): Promise<void>;
-    readFile(path: string, options?: unknown): Promise<Uint8Array | string>;
-    readdir(path: string): Promise<string[]>;
-    lstat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
-    rm(path: string, options?: { force?: boolean; recursive?: boolean }): Promise<void>;
-  };
-};
+type RepoAccessArgs = { owner: string; repo: string; user?: AuthUser };
+type RefsArgs = RepoAccessArgs & { service: GitServiceName };
 
 export class GitService {
   constructor(
-    private readonly repositories: RepositoryService,
-    private readonly storage: StorageService,
-    private readonly snapshotStorage?: RepositorySnapshotStorage
-  ) {}
-
+    private readonly store: ObjectStore,
+    private readonly refs: RefStore,
+    private readonly repositories?: RepositoryService
+  ) {
+  }
   private throwGitAuthChallenge(message: string): never {
     throw new HTTPException(401, {
       message,
@@ -166,12 +32,12 @@ export class GitService {
   }
 
   private async resolveRepo(args: RefsArgs | RepoAccessArgs, write = false) {
-    const repo = await this.repositories.findRepository(args.owner, args.repo);
+    const repo = await this.repositories!.findRepository(args.owner, args.repo);
     if (!repo) {
       throw new HTTPException(404, { message: "Repository not found" });
     }
 
-    const canRead = await this.repositories.canReadRepository(repo, args.user?.id);
+    const canRead = await this.repositories!.canReadRepository(repo, args.user?.id);
     if (!canRead) {
       if (!args.user && repo.is_private !== 0) {
         this.throwGitAuthChallenge("Authentication required");
@@ -180,7 +46,7 @@ export class GitService {
     }
 
     if (write) {
-      const canWrite = await this.repositories.canWriteRepository(repo, args.user?.id);
+      const canWrite = await this.repositories!.canWriteRepository(repo, args.user?.id);
       if (!canWrite) {
         throw new HTTPException(403, { message: "Forbidden" });
       }
@@ -189,530 +55,47 @@ export class GitService {
     return repo;
   }
 
-  private uploadPackResponse(payload: Uint8Array, status = 200): Response {
-    const body = new Uint8Array(payload.byteLength);
-    body.set(payload);
-    return new Response(body.buffer, {
-      status,
-      headers: {
-        "Content-Type": "application/x-git-upload-pack-result",
-        "Cache-Control": "no-store"
-      }
-    });
-  }
-
-  private receivePackResponse(payload: Uint8Array, status = 200): Response {
-    const body = new Uint8Array(payload.byteLength);
-    body.set(payload);
-    return new Response(body.buffer, {
-      status,
-      headers: {
-        "Content-Type": "application/x-git-receive-pack-result",
-        "Cache-Control": "no-store"
-      }
-    });
-  }
-
-  private async listFilesRecursive(fs: MutableFs, root: string): Promise<string[]> {
-    let names: string[] = [];
-    try {
-      names = await fs.promises.readdir(root);
-    } catch {
-      return [];
-    }
-
-    const files: string[] = [];
-    for (const name of names) {
-      const fullPath = `${root}/${name}`;
-      let stats: { isDirectory(): boolean; isFile(): boolean };
-      try {
-        stats = await fs.promises.lstat(fullPath);
-      } catch {
-        continue;
-      }
-      if (stats.isDirectory()) {
-        files.push(...(await this.listFilesRecursive(fs, fullPath)));
-      } else if (stats.isFile()) {
-        files.push(fullPath);
-      }
-    }
-    return files;
-  }
-
-  private async ensureHeadAfterReceivePack(args: {
-    fs: MutableFs;
-    gitdir: string;
-  }): Promise<boolean> {
-    const refsRoot = `${args.gitdir}/refs/heads`;
-    const files = await this.listFilesRecursive(args.fs, refsRoot);
-    const branchRefs = files
-      .map((file) => file.slice(args.gitdir.length + 1))
-      .map((name) => name.replace(/^refs\/heads\//, "refs/heads/"))
-      .sort();
-
-    let currentHead: string | null = null;
-    try {
-      const headFile = await args.fs.promises.readFile(`${args.gitdir}/HEAD`, "utf8");
-      const headText = typeof headFile === "string" ? headFile : new TextDecoder().decode(headFile);
-      if (headText.startsWith("ref: ")) {
-        currentHead = headText.slice("ref: ".length).trim();
-      }
-    } catch {
-      currentHead = null;
-    }
-
-    if (currentHead && branchRefs.includes(currentHead)) {
-      return false;
-    }
-
-    const nextHead =
-      (branchRefs.includes("refs/heads/main") ? "refs/heads/main" : branchRefs[0]) ??
-      "refs/heads/main";
-    await args.fs.promises.writeFile(`${args.gitdir}/HEAD`, `ref: ${nextHead}\n`);
-    return true;
-  }
-
-  private buildInfoRefsResponse(args: {
-    service: GitServiceName;
-    refs: Array<{ name: string; oid: string }>;
-    storedHead: string | null;
-  }): Response {
-    const { headRef, headOid } = resolveHeadRef(args.refs, args.storedHead);
-    const capabilities = capabilityListFor(args.service, headRef);
-    const advertisedRefs =
-      headOid !== null
-        ? [{ name: "HEAD", oid: headOid }, ...args.refs]
-        : args.refs;
-    const chunks: Uint8Array[] = [
-      encodeTextPktLine(`# service=${args.service}\n`),
-      encodeFlushPktLine()
-    ];
-
-    if (advertisedRefs.length === 0) {
-      chunks.push(
-        encodeTextPktLine(
-          `0000000000000000000000000000000000000000 capabilities^{}\0${capabilities}\n`
-        )
-      );
-      chunks.push(encodeFlushPktLine());
-    } else {
-      advertisedRefs.forEach((ref, index) => {
-        const suffix = index === 0 ? `\0${capabilities}` : "";
-        chunks.push(encodeTextPktLine(`${ref.oid} ${ref.name}${suffix}\n`));
-      });
-      chunks.push(encodeFlushPktLine());
-    }
-
-    const payload = concatChunks(chunks);
-    const body = new Uint8Array(payload.byteLength);
-    body.set(payload);
-    return new Response(body, {
-      status: 200,
-      headers: {
-        "Content-Type": `application/x-${args.service}-advertisement`,
-        "Cache-Control": "no-store"
-      }
-    });
-  }
-
-  private async executeUploadPack(args: {
-    body: ArrayBuffer;
-    loaded: LoadedRepository;
-  }): Promise<Response> {
-    let capabilities: Set<string> | undefined;
-    try {
-      const request = parseUploadPackRequest(args.body);
-      capabilities = request.capabilities;
-      const packFilter = parsePackObjectFilter(request.filterSpec);
-      if (request.deepen !== undefined && request.deepen > MAX_DEEPEN) {
-        throw new ProtocolError(`deepen exceeds maximum (${MAX_DEEPEN})`);
-      }
-
-      const cache: Record<string, unknown> = {};
-      const resolvedWants = await resolveWants({
-        fs: args.loaded.fs,
-        dir: args.loaded.dir,
-        gitdir: args.loaded.gitdir,
-        wants: request.wants,
-        cache
-      });
-      const common = await findCommonHaves({
-        fs: args.loaded.fs,
-        dir: args.loaded.dir,
-        gitdir: args.loaded.gitdir,
-        wantCommits: resolvedWants.commitWants,
-        haves: request.haves,
-        cache
-      });
-      const supportsNoDone =
-        request.capabilities.has("no-done") && request.capabilities.has("multi_ack_detailed");
-
-      if (!request.done && (!supportsNoDone || common.length === 0)) {
-        const negotiationPayload = buildUploadPackNegotiationResponse(common);
-        return this.uploadPackResponse(negotiationPayload);
-      }
-
-      const commitSelection = await computeCommitSetForPack({
-        fs: args.loaded.fs,
-        dir: args.loaded.dir,
-        gitdir: args.loaded.gitdir,
-        wantCommits: resolvedWants.commitWants,
-        commonOids: common,
-        ...(request.deepen !== undefined ? { deepen: request.deepen } : {}),
-        ...(request.deepenSince !== undefined ? { deepenSince: request.deepenSince } : {}),
-        ...(request.deepenNot.length > 0 ? { deepenNot: request.deepenNot } : {}),
-        cache
-      });
-      const packObjectOids = await computeObjectClosureForPack({
-        fs: args.loaded.fs,
-        dir: args.loaded.dir,
-        gitdir: args.loaded.gitdir,
-        commitOids: commitSelection.commitOids,
-        extraOids: resolvedWants.extraObjectWants,
-        ...(packFilter ? { filter: packFilter } : {}),
-        cache
-      });
-
-      let packfile: Uint8Array | undefined;
-      try {
-        const pack = await git.packObjects({
-          fs: args.loaded.fs as never,
-          dir: args.loaded.dir,
-          gitdir: args.loaded.gitdir,
-          oids: packObjectOids,
-          write: false,
-          cache
-        });
-        packfile = pack.packfile;
-      } catch {
-        throw new ProtocolError("failed to create packfile");
-      }
-      if (!packfile) {
-        throw new ProtocolError("Unable to produce packfile");
-      }
-
-      const payload = buildUploadPackResponse({
-        capabilities: request.capabilities,
-        ...(supportsNoDone && !request.done && common.length > 0
-          ? {
-              ackLines: [
-                ...common.map((oid) => `ACK ${oid} common\n`),
-                `ACK ${common.at(-1)} ready\n`,
-                "NAK\n",
-                `ACK ${common.at(-1)}\n`
-              ]
-            }
-          : {}),
-        ackOids: common,
-        shallowOids: commitSelection.shallowOids,
-        packfile,
-        progressMessages: [`counting objects: ${packObjectOids.length}\n`, "pack complete\n"]
-      });
-      return this.uploadPackResponse(payload);
-    } catch (error) {
-      if (error instanceof ProtocolError) {
-        const payload = encodeProtocolError(error.message, capabilities);
-        return this.uploadPackResponse(payload);
-      }
-      if (error instanceof HTTPException) {
-        throw error;
-      }
-      throw new HTTPException(500, { message: "upload-pack failed" });
-    }
-  }
-
-  private async executeReceivePack(args: {
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-    loaded: LoadedRepository;
-  }): Promise<{
-    repositoryUpdated: boolean;
-    response: Response;
-  }> {
-    let capabilities: Set<string> | undefined;
-    try {
-      const request = parseReceivePackRequest(args.body);
-      capabilities = request.capabilities;
-      const fs = args.loaded.fs as MutableFs;
-      const changedPaths = new Set<string>();
-      const deletedPaths = new Set<string>();
-
-      const hasWriteCommand = request.commands.some((command) => !isZeroOid(command.newOid));
-      if (hasWriteCommand) {
-        if (!request.packfile || request.packfile.byteLength === 0) {
-          throw new ProtocolError("missing packfile");
-        }
-        const packDir = `${args.loaded.gitdir}/objects/pack`;
-        const packFilename = `pack-${crypto.randomUUID().replaceAll("-", "")}.pack`;
-        const packPath = `${packDir}/${packFilename}`;
-        const packRelativePath = `objects/pack/${packFilename}`;
-        const packIndexRelativePath = packRelativePath.replace(/\.pack$/, ".idx");
-        const relativeGitdir = args.loaded.gitdir.startsWith(`${args.loaded.dir}/`)
-          ? args.loaded.gitdir.slice(args.loaded.dir.length + 1)
-          : ".git";
-        const packFilepath = `${relativeGitdir}/objects/pack/${packFilename}`;
-
-        await fs.promises.mkdir(packDir, { recursive: true });
-        await fs.promises.writeFile(packPath, request.packfile);
-
-        try {
-          await git.indexPack({
-            fs: args.loaded.fs as never,
-            dir: args.loaded.dir,
-            gitdir: args.loaded.gitdir,
-            filepath: packFilepath
-          });
-          changedPaths.add(packRelativePath);
-          changedPaths.add(packIndexRelativePath);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : "unpack failed";
-          const payload = buildReceivePackReport({
-            capabilities: request.capabilities,
-            unpackError: "error unpacking objects",
-            refStatuses: request.commands.map((command) => ({
-              refName: command.refName,
-              ok: false,
-              message: reason
-            }))
-          });
-          return {
-            repositoryUpdated: false,
-            response: this.receivePackResponse(payload)
-          };
-        }
-      }
-
-      const refStatuses: Array<{ refName: string; ok: boolean; message?: string }> = [];
-      const seenRefs = new Set<string>();
-      for (const command of request.commands) {
-        if (seenRefs.has(command.refName)) {
-          refStatuses.push({
-            refName: command.refName,
-            ok: false,
-            message: "duplicate command"
-          });
-          continue;
-        }
-        seenRefs.add(command.refName);
-
-        if (
-          !command.refName.startsWith("refs/heads/") &&
-          !command.refName.startsWith("refs/tags/")
-        ) {
-          refStatuses.push({
-            refName: command.refName,
-            ok: false,
-            message: "ref not allowed"
-          });
-          continue;
-        }
-
-        let currentRefValue: string | null = null;
-        try {
-          currentRefValue = await git.resolveRef({
-            fs: args.loaded.fs as never,
-            dir: args.loaded.dir,
-            gitdir: args.loaded.gitdir,
-            ref: command.refName
-          });
-        } catch {
-          currentRefValue = null;
-        }
-
-        const expectedRefValue = isZeroOid(command.oldOid) ? null : command.oldOid;
-        if ((currentRefValue ?? null) !== expectedRefValue) {
-          refStatuses.push({
-            refName: command.refName,
-            ok: false,
-            message: "stale info"
-          });
-          continue;
-        }
-
-        if (!isZeroOid(command.newOid)) {
-          try {
-            const object = await git.readObject({
-              fs: args.loaded.fs as never,
-              dir: args.loaded.dir,
-              gitdir: args.loaded.gitdir,
-              oid: command.newOid
-            });
-            if (command.refName.startsWith("refs/heads/") && object.type !== "commit") {
-              refStatuses.push({
-                refName: command.refName,
-                ok: false,
-                message: "branch update must point to a commit"
-              });
-              continue;
-            }
-          } catch {
-            refStatuses.push({
-              refName: command.refName,
-              ok: false,
-              message: "missing object"
-            });
-            continue;
-          }
-        }
-
-        refStatuses.push({
-          refName: command.refName,
-          ok: true
-        });
-      }
-
-      if (refStatuses.some((status) => !status.ok)) {
-        const payload = buildReceivePackReport({
-          capabilities: request.capabilities,
-          refStatuses
-        });
-        return {
-          repositoryUpdated: false,
-          response: this.receivePackResponse(payload)
-        };
-      }
-
-      for (const command of request.commands) {
-        if (isZeroOid(command.newOid)) {
-          await fs.promises.rm(`${args.loaded.gitdir}/${command.refName}`, { force: true });
-          changedPaths.delete(command.refName);
-          deletedPaths.add(command.refName);
-          continue;
-        }
-        await git.writeRef({
-          fs: args.loaded.fs as never,
-          dir: args.loaded.dir,
-          gitdir: args.loaded.gitdir,
-          ref: command.refName,
-          value: command.newOid,
-          force: true
-        });
-        deletedPaths.delete(command.refName);
-        changedPaths.add(command.refName);
-      }
-
-      const headUpdated = await this.ensureHeadAfterReceivePack({
-        fs,
-        gitdir: args.loaded.gitdir
-      });
-      if (headUpdated) {
-        changedPaths.add("HEAD");
-      }
-      await persistRepositoryToStorage({
-        storage: this.storage,
-        fs,
-        gitdir: args.loaded.gitdir,
-        owner: args.owner,
-        repo: args.repo,
-        changedPaths: [...changedPaths],
-        deletedPaths: [...deletedPaths],
-        ...(this.snapshotStorage ? { snapshotStorage: this.snapshotStorage } : {})
-      });
-      await syncLoadedRepositoryHeadState(args.loaded);
-
-      const payload = buildReceivePackReport({
-        capabilities: request.capabilities,
-        refStatuses
-      });
-      return {
-        repositoryUpdated: true,
-        response: this.receivePackResponse(payload)
-      };
-    } catch (error) {
-      if (error instanceof ProtocolError) {
-        const payload = buildReceivePackReport({
-          capabilities: capabilities ?? ["report-status"],
-          unpackError: error.message,
-          refStatuses: []
-        });
-        return {
-          repositoryUpdated: false,
-          response: this.receivePackResponse(payload)
-        };
-      }
-      if (error instanceof HTTPException) {
-        throw error;
-      }
-      throw new HTTPException(500, { message: "receive-pack failed" });
-    }
-  }
-
   async handleInfoRefs(args: RefsArgs): Promise<Response> {
-    await this.resolveRepo(args, args.service === "git-receive-pack");
-
-    const refs = await this.storage.listRefs(args.owner, args.repo, "refs/");
-    const storedHead = await this.storage.readHead(args.owner, args.repo);
-    return this.buildInfoRefsResponse({
+    if (this.repositories) {
+      await this.resolveRepo(args, args.service === "git-receive-pack");
+    }
+    return buildInfoRefsResponse({
       service: args.service,
-      refs,
-      storedHead
+      refs: this.refs.listRefs(),
+      storedHead: this.refs.getHead()
     });
   }
 
-  async handleInfoRefsWithLoaded(args: {
-    loaded: LoadedRepository;
-    service: GitServiceName;
-  }): Promise<Response> {
-    const refs = await listRepositoryRefsFromFs({
-      fs: args.loaded.fs as MutableFs,
-      gitdir: args.loaded.gitdir,
-      prefix: "refs"
-    });
-    return this.buildInfoRefsResponse({
-      service: args.service,
-      refs,
-      storedHead: args.loaded.head
-    });
+  async handleUploadPack(args: RepoAccessArgs & { body: ArrayBuffer }): Promise<Response> {
+    if (this.repositories) {
+      await this.resolveRepo(args);
+    }
+    let response: Response;
+    try {
+      response = await uploadPack(this.store, this.refs, args.body);
+    } catch (error) {
+      if (!(error instanceof ProtocolError)) {
+        throw error;
+      }
+      let capabilities: Set<string> | undefined;
+      try {
+        capabilities = parseUploadPackRequest(args.body).capabilities;
+      } catch {
+        capabilities = undefined;
+      }
+      response = new Response(Uint8Array.from(encodeProtocolError(error.message, capabilities)));
+    }
+    response.headers.set("Content-Type", "application/x-git-upload-pack-result");
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   }
 
-  async handleUploadPack(args: UploadPackArgs): Promise<Response> {
-    await this.resolveRepo(args, false);
-    const loaded = await loadRepositoryFromStorage(
-      this.storage,
-      args.owner,
-      args.repo,
-      this.snapshotStorage
-    );
-    return this.executeUploadPack({
-      body: args.body,
-      loaded
-    });
-  }
-
-  async handleUploadPackWithLoaded(args: {
-    body: ArrayBuffer;
-    loaded: LoadedRepository;
-  }): Promise<Response> {
-    return this.executeUploadPack(args);
-  }
-
-  async handleReceivePack(args: ReceivePackArgs): Promise<Response> {
-    await this.resolveRepo(args, true);
-    const loaded = await loadRepositoryFromStorage(
-      this.storage,
-      args.owner,
-      args.repo,
-      this.snapshotStorage
-    );
-    const result = await this.executeReceivePack({
-      owner: args.owner,
-      repo: args.repo,
-      body: args.body,
-      loaded
-    });
-    return result.response;
-  }
-
-  async handleReceivePackWithLoaded(args: {
-    owner: string;
-    repo: string;
-    body: ArrayBuffer;
-    loaded: LoadedRepository;
-  }): Promise<{
-    repositoryUpdated: boolean;
-    response: Response;
-  }> {
-    return this.executeReceivePack(args);
+  async handleReceivePack(
+    args: RepoAccessArgs & { body: ReadableStream<Uint8Array> }
+  ): Promise<Response> {
+    if (this.repositories) {
+      await this.resolveRepo(args, true);
+    }
+    return receivePack({ store: this.store, refs: this.refs, body: args.body });
   }
 }

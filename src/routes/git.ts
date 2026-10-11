@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { optionalSession, requireGitBasicAuth } from "../middleware/auth";
+import { bodyLimit, limitGitBody } from "../services/git-body-limit";
 import { createRepositoryObjectClient } from "../services/repository-object-client";
 import { RepositoryService } from "../services/repository-service";
 import type { AppEnv, AuthUser, GitServiceName, RepositoryRecord } from "../types";
@@ -58,55 +59,6 @@ async function resolveGitRepositoryAccess(args: {
   return repository;
 }
 
-const MAX_UPLOAD_PACK_BODY_BYTES = 8 * 1024 * 1024;
-const MAX_RECEIVE_PACK_BODY_BYTES = 32 * 1024 * 1024;
-
-function uploadPackBodyLimit(c: { env: AppEnv["Bindings"] }): number {
-  const raw = c.env.UPLOAD_PACK_MAX_BODY_BYTES;
-  if (!raw) {
-    return MAX_UPLOAD_PACK_BODY_BYTES;
-  }
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || Number.isNaN(value) || value <= 0) {
-    return MAX_UPLOAD_PACK_BODY_BYTES;
-  }
-  return value;
-}
-
-function receivePackBodyLimit(c: { env: AppEnv["Bindings"] }): number {
-  const raw = c.env.RECEIVE_PACK_MAX_BODY_BYTES;
-  if (!raw) {
-    return MAX_RECEIVE_PACK_BODY_BYTES;
-  }
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || Number.isNaN(value) || value <= 0) {
-    return MAX_RECEIVE_PACK_BODY_BYTES;
-  }
-  return value;
-}
-
-async function readBodyWithLimit(
-  c: {
-    req: { header(name: string): string | undefined; arrayBuffer(): Promise<ArrayBuffer> };
-    env: AppEnv["Bindings"];
-  },
-  maxBytes: number
-): Promise<ArrayBuffer> {
-  const contentLengthHeader = c.req.header("content-length");
-  if (contentLengthHeader) {
-    const value = Number.parseInt(contentLengthHeader, 10);
-    if (Number.isFinite(value) && value > maxBytes) {
-      throw new HTTPException(413, { message: "Request body too large" });
-    }
-  }
-
-  const body = await c.req.arrayBuffer();
-  if (body.byteLength > maxBytes) {
-    throw new HTTPException(413, { message: "Request body too large" });
-  }
-  return body;
-}
-
 const router = new Hono<AppEnv>();
 
 router.get("/:owner/:repo/info/refs", optionalSession, async (c) => {
@@ -154,7 +106,10 @@ router.post("/:owner/:repo/git-upload-pack", optionalSession, async (c) => {
   }
 
   const repositoryService = new RepositoryService(c.env.DB);
-  const body = await readBodyWithLimit(c, uploadPackBodyLimit(c));
+  const body = limitGitBody(
+    c.req.raw,
+    bodyLimit(c.env.UPLOAD_PACK_MAX_BODY_BYTES, 8 * 1024 * 1024)
+  );
 
   const user = c.get("basicAuthUser") ?? c.get("sessionUser");
   const repository = await resolveGitRepositoryAccess({
@@ -163,12 +118,16 @@ router.post("/:owner/:repo/git-upload-pack", optionalSession, async (c) => {
     repo,
     ...(user ? { user } : {})
   });
-  return createRepositoryObjectClient(c.env).handleUploadPack({
+  const response = await createRepositoryObjectClient(c.env).handleUploadPack({
     repositoryId: repository.id,
     owner,
     repo,
-    body
+    body: body.stream
   });
+  if (body.exceeded()) {
+    return new Response(response.body, { status: 413, headers: response.headers });
+  }
+  return response;
 });
 
 router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => {
@@ -181,7 +140,7 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
   }
 
   const repositoryService = new RepositoryService(c.env.DB);
-  const body = await readBodyWithLimit(c, receivePackBodyLimit(c));
+  const body = limitGitBody(c.req.raw, bodyLimit(c.env.RECEIVE_PACK_MAX_BODY_BYTES));
   const user = c.get("basicAuthUser");
   const repository = await resolveGitRepositoryAccess({
     repositoryService,
@@ -190,12 +149,16 @@ router.post("/:owner/:repo/git-receive-pack", requireGitBasicAuth, async (c) => 
     ...(user ? { user } : {}),
     write: true
   });
-  return createRepositoryObjectClient(c.env).handleReceivePack({
+  const response = await createRepositoryObjectClient(c.env).handleReceivePack({
     repositoryId: repository.id,
     owner,
     repo,
-    body
+    body: body.stream
   });
+  if (body.exceeded()) {
+    return new Response(response.body, { status: 413, headers: response.headers });
+  }
+  return response;
 });
 
 export default router;

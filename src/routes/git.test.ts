@@ -4,6 +4,9 @@ import { errorHandler } from "../middleware/error-handler";
 import { AuthService } from "../services/auth-service";
 import { createMockD1Database } from "../test-utils/mock-d1";
 import { MockR2Bucket } from "../test-utils/mock-r2";
+import {
+  createMockRepositoryObjectNamespace
+} from "../test-utils/mock-repository-object-namespace";
 import type { AppEnv } from "../types";
 import gitRoutes from "./git";
 
@@ -62,7 +65,7 @@ describe("Git routes validation", () => {
     expect(response.status).toBe(400);
   });
 
-  it("returns 401 challenge for private upload-pack info/refs when credentials are missing", async () => {
+  it("challenges anonymous access to private upload-pack info/refs", async () => {
     const app = createApp();
     const response = await app.fetch(
       new Request("http://localhost/alice/demo/info/refs?service=git-upload-pack"),
@@ -171,4 +174,42 @@ describe("Git routes validation", () => {
     );
     expect(response.status).toBe(413);
   });
+});
+
+it("returns 413 for a chunked receive-pack that crosses the configured limit", async () => {
+  const verify = vi.spyOn(AuthService.prototype, "verifyAccessToken").mockResolvedValue({
+    id: "user-1",
+    username: "alice"
+  });
+  try {
+    const env = createPrivateRepositoryEnv("alice", "demo");
+    env.RECEIVE_PACK_MAX_BODY_BYTES = "16";
+    env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
+    let remaining = 128;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!remaining) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode("0034".repeat(4)));
+        remaining -= 16;
+      }
+    });
+    const response = await createApp().fetch(
+      new Request("http://localhost/alice/demo/git-receive-pack", {
+        method: "POST",
+        duplex: "half",
+        body,
+        headers: {
+          authorization: `Basic ${Buffer.from("alice:pat-ok").toString("base64")}`,
+          "content-type": "application/x-git-receive-pack-request"
+        }
+      }),
+      env
+    );
+    expect(response.status).toBe(413);
+  } finally {
+    verify.mockRestore();
+  }
 });

@@ -2,12 +2,29 @@ import { describe, expect, it } from "vitest";
 import {
   buildReceivePackReport,
   buildUploadPackNegotiationResponse,
-  buildUploadPackResponse,
   encodeAckNak,
   encodeProtocolError,
-  parseReceivePackRequest,
   parseUploadPackRequest
 } from "./git-protocol";
+
+import { parseReceivePackStream } from "./git-receive-request";
+import { createUploadPackResponse } from "./git-upload-response";
+
+async function readResponse(args: {
+  capabilities: string[];
+  ackOids: string[];
+  packfile: Uint8Array;
+  progressMessages?: string[];
+}) {
+  const stream = createUploadPackResponse({
+    capabilities: new Set(args.capabilities),
+    ackOids: args.ackOids,
+    shallowOids: [],
+    pack: new Response(Uint8Array.from(args.packfile)).body!,
+    progressMessages: args.progressMessages ?? []
+  });
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 
 function pktLine(line: string): Uint8Array {
   const bytes = new TextEncoder().encode(line);
@@ -74,9 +91,7 @@ function parsePktLineLengths(raw: Uint8Array): number[] {
 describe("git-protocol", () => {
   it("parses upload-pack request lines and options", () => {
     const req = concat(
-      pktLine(
-        "want 0123456789abcdef0123456789abcdef01234567 side-band-64k ofs-delta\n"
-      ),
+      pktLine("want 0123456789abcdef0123456789abcdef01234567 side-band-64k ofs-delta\n"),
       pktLine("shallow bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"),
       pktLine("deepen 1\n"),
       pktLine("filter blob:none\n"),
@@ -95,12 +110,14 @@ describe("git-protocol", () => {
     expect(parsed.clientShallows).toEqual(["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
   });
 
-  it("encodes a single ACK and side-band response with pack payload", () => {
+  it("encodes a single ACK and side-band response with pack payload", async () => {
     const ack = encodeAckNak(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
-    expect(new TextDecoder().decode(ack[0])).toContain("ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(new TextDecoder().decode(ack[0])).toContain(
+      "ACK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
 
     const pack = new Uint8Array([1, 2, 3, 4, 5]);
-    const response = buildUploadPackResponse({
+    const response = await readResponse({
       capabilities: ["side-band-64k"],
       ackOids: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
       packfile: pack,
@@ -139,10 +156,10 @@ describe("git-protocol", () => {
     expect(message).toContain("ERR filter unsupported");
   });
 
-  it("keeps side-band-64k pkt-line lengths within protocol limit", () => {
+  it("keeps side-band-64k pkt-line lengths within protocol limit", async () => {
     const pack = new Uint8Array(200_000);
     pack.fill(0x61);
-    const response = buildUploadPackResponse({
+    const response = await readResponse({
       capabilities: ["side-band-64k"],
       ackOids: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
       packfile: pack
@@ -154,8 +171,8 @@ describe("git-protocol", () => {
     expect(nonFlush.every((length) => length <= 0xfff0)).toBe(true);
   });
 
-  it("emits only one ACK line ahead of side-band pack data", () => {
-    const response = buildUploadPackResponse({
+  it("emits only one ACK line ahead of side-band pack data", async () => {
+    const response = await readResponse({
       capabilities: ["side-band-64k"],
       ackOids: [
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -203,18 +220,22 @@ describe("git-protocol", () => {
     expect(() => parseUploadPackRequest(req.buffer)).toThrow("No want lines found");
   });
 
-  it("parses receive-pack command list and packfile bytes", () => {
+  it("parses receive-pack command list and packfile bytes", async () => {
     const commandLine =
       "0000000000000000000000000000000000000000 " +
       "0123456789abcdef0123456789abcdef01234567 refs/heads/main\0report-status delete-refs\n";
     const packBytes = new Uint8Array([0x50, 0x41, 0x43, 0x4b, 0x00, 0x01]);
     const req = concat(pktLine(commandLine), new TextEncoder().encode("0000"), packBytes);
 
-    const parsed = parseReceivePackRequest(req.buffer);
+    const parsed = await parseReceivePackStream(new Response(req).body!);
     expect(parsed.commands).toHaveLength(1);
     expect(parsed.commands[0]?.refName).toBe("refs/heads/main");
     expect(parsed.capabilities.has("report-status")).toBe(true);
-    expect(parsed.packfile).toEqual(packBytes);
+    const received: Uint8Array[] = [];
+    for await (const chunk of parsed.pack) {
+      received.push(chunk);
+    }
+    expect(concat(...received)).toEqual(packBytes);
   });
 
   it("encodes receive-pack report-status response", () => {

@@ -31,7 +31,7 @@ npm run build:web
 | 绑定 | 用途 | 默认配置 |
 | --- | --- | --- |
 | `DB` | D1 元数据 | 生产 `gits`；Preview `gits-preview`；ID 以 [wrangler.jsonc](../wrangler.jsonc) 为准 |
-| `GIT_BUCKET` | Git 对象与引用 | 生产 R2 桶 `gits`；Preview R2 桶 `gits-preview` |
+| `GIT_BUCKET` | 仅用于导入旧格式仓库；对象与引用保存在每仓库 DO SQLite | 生产 R2 桶 `gits`；Preview R2 桶 `gits-preview` |
 | `REPOSITORY_OBJECTS` | 仓库 Durable Object | `RepositoryObject`，每个 Preview 独立命名空间和存储 |
 | `ASSETS` | 前端静态文件 | `web/dist` |
 
@@ -64,7 +64,7 @@ ALLOW_USER_REGISTRATION=true
 
 - `JWT_SECRET`：必须替换为自己的密钥；本地用 `npm run secret:dev`，生产用 `npm run secret:prod` 设置。
 - `ALLOW_USER_REGISTRATION`：设为 `true`（不区分大小写）启用注册，其他值或未设置时关闭。
-- `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES`：可选的 fetch / push 请求体上限，默认分别为 8 MiB / 32 MiB。
+- `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES`：可选的 fetch / push 请求体上限，fetch 默认 8 MiB；push 未设置时仅受平台请求体限制。
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
 
@@ -298,7 +298,7 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 | 操作返回 403 | push 需要写权限；设置、删除、分支管理 API 需要所有者身份 |
 | 分支创建失败 | 起点必须为已有提交 OID，分支名不能重复或与已有分支路径冲突 |
 | 删除分支返回 409 | 不能删除默认分支或最后一个分支 |
-| 请求返回 413 | 请求体超过限制，检查两个 Git 请求体上限变量 |
+| 请求返回 413 | fetch 默认上限 8 MiB；push 检查平台请求体限制及可选的 `RECEIVE_PACK_MAX_BODY_BYTES`，大仓库可分批推送提交 |
 | 本地页面无法调用 API | Worker 是否在 8787 端口，是否通过 Vite 地址访问，cookie 是否属于当前主机 |
 | 静态资源目录不存在 | 先安装前端依赖并运行 `npm run build:web` |
 

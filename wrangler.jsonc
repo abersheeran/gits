@@ -2,6 +2,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "gits",
 	"main": "src/index.ts",
+	"limits": { "cpu_ms": 300000 },
 	"compatibility_date": "2026-02-28",
 	"compatibility_flags": [
 		"nodejs_compat"
