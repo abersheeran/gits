@@ -51,6 +51,7 @@ export function RepositoryList({
                     <span className="text-text-secondary">{repo.owner_username} / </span>
                     <span className="font-medium">{repo.name}</span>
                   </Link>
+                  {repo.is_mirror === 1 && <Badge variant="outline">镜像</Badge>}
                   {!publicOnly && (
                     <Badge variant="outline">{repo.is_private ? "私有" : "公开"}</Badge>
                   )}

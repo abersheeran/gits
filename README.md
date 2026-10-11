@@ -5,12 +5,13 @@ A personal Git repository host built on Cloudflare Workers, focused on Git stora
 ## Features
 
 - **Git hosting** — Smart HTTP clone, fetch, and push, with shallow clone and object filters. Each repository stores Git objects and refs in its Durable Object SQLite database; packs stream in and out without loading the entire repository. R2 is used only to import legacy repositories.
+- **GitHub sync** — Connect GitHub PATs and mirror personal or organization repositories. Mirrors are read-only until you stop synchronization.
 - **Authentication** — Register, login, logout, JWT sessions, and Personal Access Tokens (PAT). Git Basic Auth uses a username and PAT.
 - **Repositories** — Create, rename, update visibility and description, delete, and manage collaborators with `read / write / admin` permissions.
 - **Branches** — Owners can create and delete branches and set the default branch through the web UI or API.
 - **Code browsing** — README, directory trees, text files, paginated commits, commit details with diffs, and path history.
 
-Repositories belong to individuals. Git access is HTTP only and file browsing is read-only. Organizations, issues, pull requests, CI, SSH, Git LFS, code search, and branch protection are out of scope; see the [scope definition](prd/README.md#2-功能边界).
+Repositories belong to individuals. Git access is HTTP only and file browsing is read-only. GitHub organization repositories can sync into a personal namespace. Issues, pull requests, CI, SSH, Git LFS, code search, and branch protection are out of scope; see the [scope definition](prd/README.md#2-功能边界).
 
 ## Tech Stack
 
@@ -43,7 +44,7 @@ npm run build:web
 npm run dev
 ```
 
-Enter a local JWT secret when prompted. `npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
+Enter local JWT and GitHub token encryption secrets when prompted. `npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
 
 In another terminal:
 
@@ -61,17 +62,19 @@ The local `.env` template contains:
 
 ```dotenv
 JWT_SECRET=replace-with-a-strong-secret
+GITHUB_TOKEN_ENCRYPTION_KEY=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
 | Variable | Behavior |
 | --- | --- |
 | `JWT_SECRET` | Required secret for signing login JWTs |
+| `GITHUB_TOKEN_ENCRYPTION_KEY` | Encrypts GitHub PATs; unset disables GitHub sync. Changing it requires replacing saved tokens |
 | `ALLOW_USER_REGISTRATION` | `true` (case-insensitive) enables registration; any other value or unset disables it |
 | `UPLOAD_PACK_MAX_BODY_BYTES` | Fetch request body limit; defaults to 8 MiB |
 | `RECEIVE_PACK_MAX_BODY_BYTES` | Optional push request body limit; unset means platform limits only |
 
-Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for the production JWT secret.
+Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for both production secrets.
 
 ### Cloudflare Bindings
 
@@ -100,11 +103,12 @@ npx wrangler r2 bucket create gits-preview
 
 Copy the returned production D1 ID into `wrangler.jsonc` → `d1_databases[0].database_id`. Copy the Preview D1 ID into both `wrangler.jsonc` → `previews.d1_databases[0].database_id` and `wrangler.preview-migrations.jsonc` → `d1_databases[0].database_id`; both Preview entries must point at the same database.
 
-Set separate JWT secrets once before deploying:
+Set separate production and Preview secrets once before deploying:
 
 ```bash
 npm run secret:prod
 npx wrangler preview base-config secret put JWT_SECRET
+npx wrangler preview base-config secret put GITHUB_TOKEN_ENCRYPTION_KEY
 ```
 
 The Preview base secret applies to new Previews. To update an existing Preview, use `npx wrangler preview secret put JWT_SECRET --name <preview>`.
@@ -122,6 +126,8 @@ Connect this repository to the `gits` Worker in Workers Builds, select the produ
 Worker Previews require the project's Wrangler dependency to be at least 4.135.0; a global installation is not used. Preview URLs use `<branch>-gits.<subdomain>.workers.dev`.
 
 `npm run preview` first migrates the preview D1 database using `wrangler.preview-migrations.jsonc`, then runs `wrangler preview`. All branches share the preview D1/R2 resources, isolated from production; DO storage is separate per Preview. The `previews` block explicitly sets `DB`, `GIT_BUCKET`, `REPOSITORY_OBJECTS`, and `ALLOW_USER_REGISTRATION="true"` because production settings are not inherited. Assets, compatibility settings, and DO migrations remain top-level. See [Cloudflare Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
+
+Production Cron runs GitHub discovery and dispatch every five minutes. Worker Previews do not run Cron; use the source or mirror sync API to trigger manually. Alarms continue dispatching queued tasks after each task completes. Do not add Cron configuration to `previews`.
 
 ### Deploy to Cloudflare
 
@@ -162,9 +168,11 @@ These target local D1, production D1, and preview D1 respectively.
 | `npm run cf-typegen` | Generate Cloudflare binding types |
 | `npm run d1:create:remote` | Create the remote D1 database named `gits` |
 | `npm run db:migrate:local` / `npm run db:migrate` | Apply local / remote D1 migrations |
-| `npm run secret:dev` / `npm run secret:dev:jwt` | Prompt for `JWT_SECRET` and write it to `.env` |
+| `npm run secret:dev` | Set local JWT and GitHub encryption secrets in sequence |
+| `npm run secret:dev:jwt` / `npm run secret:dev:github` | Set one local secret |
 | `npm run secret:dev:set -- KEY FILE` | Prompt for a local variable and write it to the specified file |
-| `npm run secret:prod` / `npm run secret:prod:jwt` | Set the production `JWT_SECRET` |
+| `npm run secret:prod` | Set production JWT and GitHub encryption secrets in sequence |
+| `npm run secret:prod:jwt` / `npm run secret:prod:github` | Set one production secret |
 
 ## Project Structure
 
@@ -220,6 +228,32 @@ Collaborator management requires the owner or an `admin` collaborator. Repositor
 - `GET /api/repos/:owner/:repo/commits` — Commit history (`ref`, `page`, `limit`)
 - `GET /api/repos/:owner/:repo/commits/:oid` — Commit detail
 - `GET /api/repos/:owner/:repo/history` — Path history (required `path`, optional `ref`, `limit`)
+
+### GitHub Synchronization
+
+All GitHub resources belong to the signed-in user. Times are millisecond timestamps.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/github/connections` | Configuration availability and connections with source summaries |
+| `POST /api/github/connections` | Validate and save `{ token }` |
+| `PATCH /api/github/connections/:connectionId` | Replace `{ token }` for the same GitHub account |
+| `DELETE /api/github/connections/:connectionId` | Remove a connection; keep local repositories |
+| `GET /api/github/connections/:connectionId/owners` | List the account and accessible organizations |
+| `POST /api/github/sources` | Enable `{ connectionId, ownerLogin, ...settings }` |
+| `GET /api/github/sources/:sourceId` | Source settings and state counts |
+| `PATCH /api/github/sources/:sourceId` | Update prefix, filters, visibility, interval or pause |
+| `DELETE /api/github/sources/:sourceId` | Remove a source; keep local repositories |
+| `POST /api/github/sources/:sourceId/sync` | Discover and dispatch immediately |
+| `GET /api/github/sources/:sourceId/repositories` | List by `status` and `page`, 50 per page |
+| `PATCH /api/github/sources/:sourceId/repositories/:githubRepoId` | Set `selection` or `localName` |
+| `POST /api/repos/:owner/:repo/mirror/sync` | Sync one mirror, owner only |
+| `DELETE /api/repos/:owner/:repo/mirror` | Stop syncing and restore local writes, owner only |
+
+Repository details include `mirror` (or `null`); repository lists include `is_mirror` (0 or 1).
+Mirrors reject push with 403 and reject branch or metadata edits with 409; renaming is allowed.
+Classic PATs require `repo` and `read:org`; fine-grained PATs require Contents and Metadata read
+access for the selected owner. Add a separate connection per owner for fine-grained PATs.
 
 ### Git (Smart HTTP)
 

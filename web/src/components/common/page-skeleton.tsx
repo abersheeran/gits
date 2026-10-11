@@ -1,3 +1,4 @@
+import { GithubSyncSkeleton } from "./github-sync-skeleton";
 import { matchPath, useLocation } from "react-router-dom";
 import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
 import { FormSkeleton } from "@/components/common/form-skeleton";
@@ -18,6 +19,8 @@ const titles: Record<string, string> = {
 
 export function PageSkeleton({ user }: { user?: AuthUser | null }) {
   const { pathname } = useLocation();
+  if (pathname === "/sync" || matchPath("/sync/sources/:sourceId", pathname))
+    return <GithubSyncSkeleton source={pathname !== "/sync"} />;
   const match = matchPath("/repo/:owner/:repo/*", pathname);
   if (match?.params.owner && match.params.repo) {
     return (

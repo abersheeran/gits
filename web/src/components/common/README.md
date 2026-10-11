@@ -2,7 +2,7 @@
 
 | 组件 | 文件 | 复用方式 |
 | --- | --- | --- |
-| PageHeader | `page-header.tsx` | 页面唯一 h1、可选说明与主操作，不加面板外框。 |
+| PageHeader | `page-header.tsx` | 页面唯一 h1、可选说明与主操作；title / description 支持 ReactNode，不加面板外框。 |
 | Panel | `panel.tsx` | 单层面板；字符串 `header` 自动使用 PanelTitle（h2），自定义头部用 PanelTitle 组合标题与 sm 操作；正文自行选择表格或 `p-4`。 |
 | EmptyState | `empty-state.tsx` | 面板内空状态，支持自定义 icon（默认 Inbox）、标题、说明与下一步操作。 |
 | ConfirmDialog | `confirm-dialog.tsx` | 所有破坏性操作的异步确认；`confirmName` 要求准确输入仓库名，失败保留对话框。 |
@@ -11,7 +11,7 @@
 | ErrorAlert | `error-alert.tsx` | 对应操作区域的错误提示；支持 title，默认「操作失败」；面板顶部使用 inset 通栏底部分隔线，无错误时不渲染。 |
 | RelativeTime | `relative-time.tsx` | 毫秒时间戳显示为相对时间，完整时间放在 title；null 使用占位文案。 |
 | Pagination | `pagination.tsx` | 上一页、下一页与当前页；支持加载时禁用。 |
-| RepositoryList | `repository-list.tsx` | 仓库表格与空状态，20 条一页；可见性 Badge 跟随名称，探索页隐藏 Badge。 |
+| RepositoryList | `repository-list.tsx` | 仓库表格与空状态，20 条一页；可见性 Badge 跟随名称，探索页仅隐藏可见性，镜像 Badge 始终显示。 |
 | BranchSelect / BranchSelectSkeleton | `branch-select.tsx` | 代码与提交页共用的分支选择，兼容完整引用与提交 SHA；BranchSelectSkeleton 为页面与路由 fallback 提供同尺寸占位。 |
 | PermissionSelect | `permission-select.tsx` | 中文权限选择，值保持 read / write / admin，className 透传给触发器；表格内用 h-8 w-24。 |
 | CommitRow | `commit-row.tsx` | 提交标题、作者、相对时间、可复制 SHA 与可选的快照入口；compact 用于文件面板头，同一行显示作者和标题，actions 传入额外操作。 |
@@ -21,7 +21,7 @@
 | ChangesFileTree | `changes-file-tree.tsx` | 可折叠目录树，显示中文变更状态，点击文件定位差异。 |
 | ShaCopyButton | `sha-copy-button.tsx` | 短 SHA 本身即复制按钮，复制完整 SHA，提供 Tooltip 与短暂勾选反馈；Clone URL 和新令牌使用 CopyField。 |
 | CopyField | `copy-field.tsx` | 只读等宽值与相连的复制图标按钮；用于 Clone 地址和新令牌，点击值选中全文；label 表示值本身（「Clone 地址」「令牌」），用作字段无障碍名称，复制按钮名称为「复制${label}」。 |
-| VisibilityField | `visibility-field.tsx` | 原生私有 / 公开单选，附图标与含义说明；新建仓库与设置页共用 value、onChange、name。 |
+| VisibilityField | `visibility-field.tsx` | 原生私有 / 公开单选，附图标与含义说明；新建仓库与设置页共用 value、onChange、name；disabled 与 help 用于镜像的只读说明。 |
 | EmptyRepositoryGuide | `empty-repository-guide.tsx` | 无分支时展示 Clone 地址、推送命令与访问令牌入口；defaultBranch 为空时使用 main。 |
 | PathBreadcrumbs | `path-breadcrumbs.tsx` | 代码页工具栏路径导航，根目录不显示，子路径以仓库名为根；通过 link 生成各级目录和当前文件地址。 |
 | CopyIconButton | `copy-icon-button.tsx` | 通过 value、label、className 复用复制图标按钮；统一图标切换、Tooltip 和 sr-only 状态播报，label 为复制动作名称。 |
@@ -32,3 +32,13 @@
 | FormSkeleton | `form-skeleton.tsx` | variant 选择 login / register / repository / settings，匹配字段、可见性与按钮位置。 |
 | RepositoryPageSkeleton | `repository-page-skeleton.tsx` | PageSkeleton 的仓库路由占位，复用对应页面的工具栏、面板标题与内容骨架。 |
 | RepositoryCodeToolbar | `repository-code-toolbar.tsx` | 代码页与路由 fallback 共用分支区域、URL 面包屑和 Clone 地址；branch 传入选择器或骨架。 |
+| HelpTip | `help-tip.tsx` | 带问号图标的说明 Tooltip；label 为无障碍名称，children 可提供较长说明。 |
+| GithubAvatar | `github-avatar.tsx` | GitHub 头像；无头像或加载失败时复用 AuthorAvatar。 |
+| GithubStatusBadge | `github-status-badge.tsx` | 同步源与远端仓库的中文状态 Badge；error 在可聚焦的 Tooltip 中显示。 |
+| GithubTokenDialog | `github-token-dialog.tsx` | 添加账号与更换令牌共用；失败保留输入，成功清除令牌。 |
+| GithubConnectionPanel | `github-connection-panel.tsx` | 连接头与所有者表格；合并已启用同步源，20 条分页，支持添加组织与设置。 |
+| GithubSourceSettingsSheet | `github-source-settings-sheet.tsx` | 启用与编辑共用；initial 传入设置，编辑时传 sourceId，每次打开重新挂载。 |
+| GithubRepositoryTable | `github-repository-table.tsx` | 远端仓库表格及响应式信息；操作回调由页面处理，配合 Pagination 使用。 |
+| GithubLocalNameDialog | `github-local-name-dialog.tsx` | 名称冲突时指定本地名称，校验后保存并纳入同步。 |
+| GithubSyncSkeleton / GithubTableSkeleton | `github-sync-skeleton.tsx` | 同步页面、连接面板与源详情的同形状骨架；source / owners 区分内容，announce 控制播报。 |
+| RepositoryMirrorPanel | `repository-mirror-panel.tsx` | 仓库设置的同步区，展示来源与状态，支持立即同步、确认停止并刷新详情。 |

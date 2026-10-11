@@ -1,3 +1,5 @@
+import { HelpTip } from "@/components/common/help-tip";
+import { RepositoryMirrorPanel } from "@/components/common/repository-mirror-panel";
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useRepository } from "@/hooks/use-repository";
@@ -51,8 +53,9 @@ function SettingsForm({
     try {
       await updateRepository(owner, repo, {
         name,
-        description: description.trim() || null,
-        isPrivate: visibility === "private"
+        ...(!detail.mirror
+          ? { description: description.trim() || null, isPrivate: visibility === "private" }
+          : {})
       });
       if (name !== repo) {
         navigate(`/repo/${owner}/${name}/settings`, { replace: true });
@@ -81,15 +84,21 @@ function SettingsForm({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="repo-description">描述</Label>
+            <div className="flex items-center gap-1">
+              <Label htmlFor="repo-description">描述</Label>
+              {detail.mirror && <HelpTip label="由 GitHub 同步" />}
+            </div>
             <Textarea
               id="repo-description"
+              disabled={!!detail.mirror}
               rows={3}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
           <VisibilityField
+            disabled={!!detail.mirror}
+            help={detail.mirror ? <HelpTip label="由 GitHub 同步" /> : undefined}
             value={visibility}
             onChange={(value) => {
               setVisibility(value);
@@ -112,6 +121,9 @@ function SettingsForm({
           </div>
         </form>
       </Panel>
+      {detail.mirror && (
+        <RepositoryMirrorPanel owner={owner} repo={repo} mirror={detail.mirror} onSaved={onSaved} />
+      )}
       <Panel header={<PanelTitle className="text-danger-text">危险操作</PanelTitle>}>
         <div className="flex flex-wrap items-center justify-between gap-4 p-4">
           <p className="text-body-xs text-text-secondary">删除仓库及其全部文件，此操作无法撤销。</p>
@@ -124,7 +136,7 @@ function SettingsForm({
         open={deleting}
         onOpenChange={setDeleting}
         title="删除仓库"
-        description="仓库及其提交历史将被永久删除。"
+        description={`仓库及其提交历史将被永久删除。${detail.mirror ? "删除后该仓库不会再被同步。" : ""}`}
         confirmName={repo}
         onConfirm={async () => {
           await deleteRepository(owner, repo);
@@ -145,7 +157,11 @@ export function RepositorySettingsPage({ user }: { user: AuthUser | null }) {
           <FormSkeleton variant="settings" />
         </Panel>
       ) : detail.repository.owner_username === user.username ? (
-        <SettingsForm key={detail.repository.name} detail={detail} onSaved={setDetail} />
+        <SettingsForm
+          key={`${detail.repository.name}/${Boolean(detail.mirror)}`}
+          detail={detail}
+          onSaved={setDetail}
+        />
       ) : (
         <ErrorAlert error="只有仓库所有者可以修改设置。" />
       )}

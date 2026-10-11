@@ -24,7 +24,7 @@
 1. 只支持 PAT。经典 PAT 必须包含 `repo` 与 `read:org`，缺少任一范围时拒绝保存并返回缺失项；细粒度 PAT 需对目标所有者授予 Contents 与 Metadata 只读权限，权限不足在发现时报告。
 2. 保存时调用 GitHub `GET /user` 校验，记录 GitHub 登录名、用户 ID、令牌类型（按 `ghp_` / `github_pat_` 前缀判断）和经典 PAT 的范围。
 3. 令牌以 AES-256-GCM 加密存入 D1，密钥由 secret `GITHUB_TOKEN_ENCRYPTION_KEY` 经 HKDF 派生；明文不返回前端、不写日志，错误信息去除令牌。更换该 secret 后已保存的令牌需重新填写。
-4. GitHub 返回 401 时连接标记为失效，其下同步源暂停；用户更换令牌后恢复。
+4. GitHub 返回 401 时连接标记为失效，其下同步源暂停；用户更换令牌后恢复。更换的令牌必须属于同一 GitHub 账号，否则拒绝。
 5. 组织启用 SAML SSO 且令牌未授权时（403 且带 `X-GitHub-SSO`），只有该同步源标记为「需要 SSO 授权」。
 
 ## 4. 同步规则
@@ -59,7 +59,7 @@
 
 ### 4.5 只读与解除
 
-- 镜像仓库拒绝一切写入：Git push、创建与删除分支、切换默认分支。push 在 `git-receive-pack` 引用发现阶段返回 403，提示仓库为 GitHub 镜像。
+- 镜像仓库拒绝一切写入：Git push、创建与删除分支、切换默认分支。push 在 `git-receive-pack` 引用发现阶段返回 403，并以 `text/plain` 说明仓库为 GitHub 镜像，git 客户端会显示该说明。
 - 协作者照常管理，但镜像期间任何权限都不能写入。
 - 停止同步：所有者确认后镜像转为普通仓库，保留全部数据并恢复写入；对应远端仓库改为手动排除，不会重新创建镜像。
 - 删除镜像仓库同样把对应远端仓库改为手动排除。
@@ -71,7 +71,7 @@
 1. Cron 每 5 分钟运行调度器：对到期的同步源执行发现，再派发到期的镜像任务。同步源频率可选 15 分钟、1 小时（默认）、6 小时、每天。
 2. 镜像任务由对应仓库的 `RepositoryObject` 通过 alarm 执行。新远端仓库在派发时才创建本地仓库，超出大小限制或名称冲突的不创建。
 3. 全实例同时最多运行 4 个镜像任务。每个任务结束后立即派发下一个到期任务，初次导入不必等待 Cron 周期。
-4. 派发通过 D1 条件更新领取任务并设置 20 分钟租约，任务带领取标识，过期或被重新领取的任务直接放弃。重复派发只会产生一次无变化的拉取。
+4. 派发通过 D1 条件更新领取任务并设置 20 分钟租约，任务带领取标识，过期或被重新领取的任务直接放弃。重复派发只会产生一次无变化的拉取。任务执行期间发现了更新的 `pushed_at` 时，任务结束后立即重新排队。
 5. 领取时即计入尝试次数，因此进程被平台终止（内存或 CPU 超限）也按失败处理。失败按 5 分钟、15 分钟、1 小时、6 小时、24 小时退避；GitHub REST 速率限制耗尽时，同步源推迟到重置时间。
 6. 「立即同步」：同步源立即执行一次发现并派发；单个镜像立即派发。
 7. Worker Previews 不运行 Cron，Preview 中只能手动触发；触发后的后续任务仍由任务结束时的接续派发推进。
@@ -155,16 +155,17 @@ GitHub 接口均需登录，只能访问自己的连接与同步源。
 
 ## 12. 关键代码文件
 
-- `src/services/github/`：GitHub REST 客户端、令牌加密、发现与调度派发
-- `src/services/git-fetch-client.ts`
+- `src/services/github/`：令牌加密、GitHub REST 客户端、发现、调度与派发、镜像 alarm、停止同步
+- `src/services/git-fetch-client.ts`、`src/services/git-fetch-protocol.ts`
+- `src/services/repository-creation.ts`
 - `src/services/repository-object.ts`
-- `src/services/git-service.ts`
-- `src/routes/api/github-sync-routes.ts`
+- `src/routes/api/github-sync-routes.ts`、`github-connection-routes.ts`、`github-source-routes.ts`、`github-repository-routes.ts`
 - `src/routes/git.ts`
 - `src/index.ts`
-- `src/db/migrations/`
-- `web/src/pages/sync-page.tsx`
-- `web/src/pages/sync-source-page.tsx`
+- `src/db/migrations/0002_github_sync.sql`
+- `web/src/pages/sync-page.tsx`、`web/src/pages/sync-source-page.tsx`
+- `web/src/components/common/github-*.tsx`、`repository-mirror-panel.tsx`
+- `web/src/lib/github-api.ts`
 - `web/src/components/common/repository-layout.tsx`
 - `web/src/pages/repository-settings-page.tsx`
 - `web/src/pages/repository-branches-page.tsx`

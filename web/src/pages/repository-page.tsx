@@ -1,3 +1,5 @@
+import { githubErrorMessage } from "@/lib/github-errors";
+import { EmptyState } from "@/components/common/empty-state";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCommitDetail } from "@/hooks/use-commit-detail";
@@ -95,11 +97,25 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
   return (
     <RepositoryLayout owner={owner} repo={repo} detail={detail}>
       {detail && detail.branches.length === 0 && !loading && !error ? (
-        <EmptyRepositoryGuide
-          cloneUrl={cloneUrl}
-          defaultBranch={detail.defaultBranch}
-          user={user}
-        />
+        detail.mirror ? (
+          <Panel>
+            <ErrorAlert
+              inset
+              error={
+                detail.mirror.state === "failed"
+                  ? (githubErrorMessage(detail.mirror.lastError) ?? "同步失败，请稍后重试。")
+                  : null
+              }
+            />
+            <EmptyState title="等待首次同步" description="同步完成后即可浏览和克隆仓库。" />
+          </Panel>
+        ) : (
+          <EmptyRepositoryGuide
+            cloneUrl={cloneUrl}
+            defaultBranch={detail.defaultBranch}
+            user={user}
+          />
+        )
       ) : (
         <>
           <RepositoryCodeToolbar

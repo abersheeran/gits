@@ -1,7 +1,15 @@
-import type { CollaboratorPermission, RepositoryRecord } from "../types";
+import type { RemoteRow } from "./github/types";
+import type {
+  CollaboratorPermission, RepositoryListRecord, RepositoryRecord
+} from "../types";
 
 export class RepositoryService {
   constructor(private readonly db: D1Database) {}
+
+  async findMirror(repositoryId: string): Promise<RemoteRow | null> {
+    return this.db.prepare("SELECT * FROM github_repositories WHERE repository_id = ?")
+      .bind(repositoryId).first<RemoteRow>();
+  }
 
   async findCollaboratorPermission(
     repositoryId: string,
@@ -20,7 +28,7 @@ export class RepositoryService {
     return membership?.permission ?? null;
   }
 
-  async listPublicRepositories(limit = 50): Promise<RepositoryRecord[]> {
+  async listPublicRepositories(limit = 50): Promise<RepositoryListRecord[]> {
     const rows = await this.db
       .prepare(
         `SELECT DISTINCT
@@ -30,7 +38,8 @@ export class RepositoryService {
           r.name,
           r.description,
           r.is_private,
-          r.created_at
+          r.created_at,
+          EXISTS(SELECT 1 FROM github_repositories g WHERE g.repository_id = r.id) AS is_mirror
          FROM repositories r
          JOIN users u ON u.id = r.owner_id
          WHERE r.is_private = 0
@@ -38,12 +47,12 @@ export class RepositoryService {
          LIMIT ?`
       )
       .bind(limit)
-      .all<RepositoryRecord>();
+      .all<RepositoryListRecord>();
 
     return rows.results;
   }
 
-  async listRepositoriesForUser(userId: string): Promise<RepositoryRecord[]> {
+  async listRepositoriesForUser(userId: string): Promise<RepositoryListRecord[]> {
     const rows = await this.db
       .prepare(
         `SELECT DISTINCT
@@ -53,7 +62,8 @@ export class RepositoryService {
           r.name,
           r.description,
           r.is_private,
-          r.created_at
+          r.created_at,
+          EXISTS(SELECT 1 FROM github_repositories g WHERE g.repository_id = r.id) AS is_mirror
          FROM repositories r
          JOIN users u ON u.id = r.owner_id
          LEFT JOIN repository_collaborators rc ON rc.repository_id = r.id
@@ -61,7 +71,7 @@ export class RepositoryService {
          ORDER BY r.created_at DESC`
       )
       .bind(userId, userId)
-      .all<RepositoryRecord>();
+      .all<RepositoryListRecord>();
 
     return rows.results;
   }

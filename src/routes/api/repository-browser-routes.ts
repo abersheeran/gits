@@ -1,3 +1,4 @@
+import { mirrorView } from "../../services/github/presentation";
 import {
   HTTPException,
   RepositoryBrowseInvalidPathError,
@@ -70,7 +71,8 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     if (detailRef) {
       detailInput.ref = detailRef;
     }
-    const [viewerPermission, details] = await Promise.all([
+    const [mirror, viewerPermission, details] = await Promise.all([
+      repositoryService.findMirror(repository.id),
       repositoryService.findViewerPermission(repository, sessionUser?.id),
       repositoryClient.getRepositoryDetail({
         repositoryId: repository.id,
@@ -81,6 +83,7 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     return c.json({
       repository,
       viewerPermission,
+      mirror: mirror ? mirrorView(mirror) : null,
       ...details
     });
   });
@@ -101,7 +104,9 @@ export function registerRepositoryBrowserRoutes(router: ApiRouter): void {
     }
 
     const repositoryClient = createRepositoryObjectClient(c.env);
-    const historyInput: { owner: string; repo: string; ref?: string; limit: number; page: number } = {
+    const historyInput: {
+      owner: string; repo: string; ref?: string; limit: number; page: number
+    } = {
       owner,
       repo,
       limit: parseLimit(c.req.query("limit"), 20),

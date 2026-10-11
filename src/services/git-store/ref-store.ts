@@ -130,15 +130,25 @@ export class RefStore {
           finalNames.add(update.name);
         }
       }
+      const conflicts = new Set<string>();
+      for (const name of finalNames) {
+        let index = name.indexOf("/", 5);
+        while (index !== -1) {
+          const prefix = name.slice(0, index);
+          if (finalNames.has(prefix)) {
+            conflicts.add(prefix);
+            conflicts.add(name);
+          }
+          index = name.indexOf("/", index + 1);
+        }
+      }
       const statuses: RefStatus[] = normalized.map((update) => {
         if (update.oldOid !== undefined && this.getRef(update.name) !== update.oldOid) {
           return { name: update.name, status: "stale info" };
         }
         if (
           update.newOid !== null &&
-          [...finalNames].some(
-            (name) => name.startsWith(update.name + "/") || update.name.startsWith(name + "/")
-          )
+          conflicts.has(update.name)
         ) {
           return { name: update.name, status: "refname conflict" };
         }

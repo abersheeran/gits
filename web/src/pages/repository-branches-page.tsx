@@ -57,7 +57,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const isOwner = owner === user?.username;
+  const isOwner = owner === user?.username && !!detail && !detail.mirror;
   async function create(event: FormEvent) {
     event.preventDefault();
     if (pending || !detail) return;
@@ -121,7 +121,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
         {!detail ? (
           <TableSkeleton variant="branches" />
         ) : branches.length === 0 ? (
-          <EmptyState title="暂无分支" description="推送首次提交后即可浏览和管理分支。" />
+          <EmptyState title="暂无分支" description={detail.mirror ? "同步完成后即可浏览分支。" : "推送首次提交后即可浏览和管理分支。"} />
         ) : (
           <>
             <Table>

@@ -1,3 +1,6 @@
+import { executeMirrorTask, MIRROR_TASK_KEY } from "./github/mirror-alarm";
+import { dispatchMirrorTasks } from "./github/scheduler";
+import type { MirrorTask } from "./github/types";
 import { HTTPException } from "hono/http-exception";
 import type { AppBindings } from "../types";
 import { GitService } from "./git-service";
@@ -37,7 +40,7 @@ export class RepositoryObject {
 
   constructor(
     private readonly ctx: DurableObjectState<unknown>,
-    env: AppBindings
+    private readonly env: AppBindings
   ) {
     this.source = new StorageService(env.GIT_BUCKET);
     this.resetStore();
@@ -118,6 +121,36 @@ export class RepositoryObject {
     return result;
   }
 
+  async alarm(): Promise<void> {
+    let processed = false;
+    try {
+      await this.write(async () => {
+        const task = await this.ctx.storage.get<MirrorTask>(MIRROR_TASK_KEY);
+        if (!task) {
+          return;
+        }
+        processed = true;
+        try {
+          await executeMirrorTask({
+            env: this.env, task, store: this.store, refs: this.refs,
+            ready: (owner, repo) => this.ready(owner, repo)
+          });
+        } finally {
+          await this.ctx.storage.delete(MIRROR_TASK_KEY);
+        }
+      });
+    } catch {
+      console.error("Mirror alarm failed; the scheduler will recover expired leases");
+    }
+    if (processed) {
+      try {
+        await dispatchMirrorTasks(this.env);
+      } catch {
+        console.error("Mirror dispatch failed; the scheduler will retry");
+      }
+    }
+  }
+
   private async handleJson(request: Request): Promise<Response> {
     let input: RepositoryObjectJsonRequest;
     try {
@@ -129,6 +162,21 @@ export class RepositoryObject {
     const owner = String(payload.owner ?? "");
     const repo = String(payload.repo ?? "");
     const operation = async () => {
+      if (input.operation === "schedule-mirror-sync") {
+        const task: MirrorTask = {
+          repositoryId: String(payload.repositoryId),
+          remoteId: String(payload.remoteId),
+          claimId: String(payload.claimId)
+        };
+        await this.ctx.storage.put(MIRROR_TASK_KEY, task);
+        await this.ctx.storage.setAlarm(Date.now());
+        return json({ ok: true });
+      }
+      if (input.operation === "cancel-mirror-sync") {
+        await this.ctx.storage.delete(MIRROR_TASK_KEY);
+        await this.ctx.storage.deleteAlarm();
+        return json({ ok: true });
+      }
       if (input.operation === "initialize-repository") {
         const head = branchRef(payload.defaultBranch ?? "main", "defaultBranch");
         this.refs.updateRefs([], { head: `ref: ${head}`, meta: { initialized: "1" } });
@@ -197,6 +245,8 @@ export class RepositoryObject {
       }
     };
     const writes = [
+      "schedule-mirror-sync",
+      "cancel-mirror-sync",
       "initialize-repository",
       "delete-repository",
       "create-branch",

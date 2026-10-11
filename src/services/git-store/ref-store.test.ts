@@ -93,3 +93,23 @@ it("commits refs, HEAD and migration metadata in one transaction, or rolls every
     "1"
   );
 });
+
+it("detects every prefix conflict among thousands of tags and allows atomic replacement", () => {
+  const refs = new RefStore(testStore().storage);
+  const update = { oldOid: undefined, newOid: "a".repeat(40) };
+  const tags = Array.from({ length: 3000 }, (_, i) => ({
+    ...update, name: `refs/tags/release-${i}`
+  }));
+  expect(refs.updateRefs(tags).every((status) => status.status === "ok")).toBe(true);
+  const conflicts = refs.updateRefs([
+    { ...update, name: "refs/tags/release-1/a" },
+    { ...update, name: "refs/tags/release-1/a/deep" },
+    { ...update, name: "refs/tags/unrelated" }
+  ]);
+  expect(conflicts.map((status) => status.status))
+    .toEqual(["refname conflict", "refname conflict", "atomic update failed"]);
+  expect(refs.updateRefs([
+    { ...update, name: "refs/tags/release-1", newOid: null },
+    { ...update, name: "refs/tags/release-1/a" }
+  ]).every((status) => status.status === "ok")).toBe(true);
+});

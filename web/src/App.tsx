@@ -47,6 +47,11 @@ const TokensPage = lazyPage(async () => ({
   default: (await import("@/pages/tokens-page")).TokensPage
 }));
 
+const SyncPage = lazyPage(async () => ({ default: (await import("@/pages/sync-page")).SyncPage }));
+const SyncSourcePage = lazyPage(async () => ({
+  default: (await import("@/pages/sync-source-page")).SyncSourcePage
+}));
+
 const APP_NAME = "gits";
 
 function formatRepositoryName(owner?: string, repo?: string): string {
@@ -77,7 +82,10 @@ function titleForPath(pathname: string): string {
 
   const repoCollaborators = matchPath("/repo/:owner/:repo/collaborators", pathname);
   if (repoCollaborators) {
-    const repository = formatRepositoryName(repoCollaborators.params.owner, repoCollaborators.params.repo);
+    const repository = formatRepositoryName(
+      repoCollaborators.params.owner,
+      repoCollaborators.params.repo
+    );
     return `协作者 · ${repository} · ${APP_NAME}`;
   }
 
@@ -99,6 +107,8 @@ function titleForPath(pathname: string): string {
   if (pathname === "/repositories/new") {
     return `新建仓库 · ${APP_NAME}`;
   }
+  if (pathname === "/sync" || matchPath("/sync/sources/:sourceId", pathname))
+    return `GitHub 同步 · ${APP_NAME}`;
   if (pathname === "/tokens") {
     return `访问令牌 · ${APP_NAME}`;
   }
@@ -152,6 +162,8 @@ function App() {
               path="/register"
               element={<RegisterPage user={user} onAuthChanged={refreshAuth} />}
             />
+            <Route path="/sync" element={<SyncPage user={user} />} />
+            <Route path="/sync/sources/:sourceId" element={<SyncSourcePage user={user} />} />
             <Route path="/dashboard" element={<MyRepositoriesPage user={user} />} />
             <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
             <Route path="/tokens" element={<TokensPage user={user} />} />

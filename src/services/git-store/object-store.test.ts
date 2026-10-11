@@ -47,7 +47,7 @@ describe("ObjectStore", () => {
     const row = store.getRow(oid);
     expect(row.data).toBe(null);
     expect(storage.sql.exec("SELECT COUNT(*) AS n FROM object_chunks").one().n).toBe(4);
-    expect(store.read(oid).content).toEqual(new Uint8Array(content));
+    expect(Buffer.from(store.read(oid).content).equals(content)).toBe(true);
     const writer = new PayloadWriter(storage.sql);
     writer.write(deflate(content));
     store.insert(

@@ -1,3 +1,5 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatRelativeTime } from "@/lib/format";
 import { Code2, History, GitBranch, Settings, type LucideIcon } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -20,6 +22,7 @@ export function RepositoryLayout({
   const { pathname } = useLocation();
   const key = `${owner}/${repo}`;
   const snapshot = repositoryLayoutCache.get(key);
+  const mirror = detail ? detail.mirror : snapshot?.mirror;
   const repository = detail?.repository ?? snapshot;
   const base = `/repo/${owner}/${repo}`;
   const settings = pathname === `${base}/settings` || pathname === `${base}/collaborators`;
@@ -29,7 +32,8 @@ export function RepositoryLayout({
       repositoryLayoutCache.set(key, {
         is_private: detail.repository.is_private,
         description: detail.repository.description,
-        viewerPermission: detail.viewerPermission
+        viewerPermission: detail.viewerPermission,
+        mirror: detail.mirror
       });
     }
   }, [detail, key]);
@@ -73,6 +77,21 @@ export function RepositoryLayout({
               {repo}
             </Link>
           </h1>
+          {mirror && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a href={mirror.htmlUrl} target="_blank" rel="noreferrer">
+                  <Badge variant="outline">镜像</Badge>
+                </a>
+              </TooltipTrigger>
+              <TooltipContent>
+                同步自 GitHub · 上次同步{" "}
+                {mirror.lastSyncedAt === null
+                  ? "尚未同步"
+                  : formatRelativeTime(mirror.lastSyncedAt)}
+              </TooltipContent>
+            </Tooltip>
+          )}
           {repository ? (
             <Badge variant="outline">{repository.is_private ? "私有" : "公开"}</Badge>
           ) : (

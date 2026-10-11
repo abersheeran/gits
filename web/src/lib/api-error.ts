@@ -1,3 +1,4 @@
+import { githubErrorMessage } from "./github-errors";
 export class ApiError extends Error {
   status: number;
 
@@ -27,6 +28,9 @@ const messages: Record<string, string> = {
 
 export function formatApiError(error: unknown): string {
   if (error instanceof ApiError) {
+    const githubMessage = githubErrorMessage(error.message);
+    if (githubMessage !== error.message && githubMessage) return githubMessage;
+    if (/[\u3400-\u9fff]/.test(error.message)) return error.message;
     if (messages[error.message]) return messages[error.message];
     if (error.message.startsWith("Invalid username"))
       return "用户名需为 1–32 位字母、数字或 ._-，首尾不能是标点。";
@@ -43,4 +47,11 @@ export function formatApiError(error: unknown): string {
     return "请求失败，请稍后重试。";
   }
   return "无法完成请求，请检查网络后重试。";
+}
+
+// GitHub forms retain server validation details, including future error reasons.
+export function formatGithubApiError(error: unknown): string {
+  return error instanceof ApiError
+    ? (githubErrorMessage(error.message) ?? formatApiError(error))
+    : formatApiError(error);
 }

@@ -4,7 +4,7 @@
 
 ## 1. 产品范围
 
-`gits` 是运行在 Cloudflare Workers 上的个人 Git 仓库托管服务，提供账户与 PAT、仓库管理、分支管理、代码浏览和提交历史。仓库可公开或私有，协作者按仓库授权。完整功能边界见 [PRD 索引](../prd/README.md#2-功能边界)。
+`gits` 是运行在 Cloudflare Workers 上的个人 Git 仓库托管服务，提供账户与 PAT、仓库管理、分支管理、代码浏览、提交历史和 GitHub 同步。仓库可公开或私有，协作者按仓库授权。完整功能边界见 [PRD 索引](../prd/README.md#2-功能边界)。
 
 ## 2. 前置要求
 
@@ -22,7 +22,7 @@ npm run secret:dev
 npm run build:web
 ```
 
-按提示输入本地 JWT 密钥。首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
+按提示依次输入本地 JWT 密钥和 GitHub 令牌加密密钥。首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
 
 ## 4. Cloudflare 资源与配置
 
@@ -59,23 +59,30 @@ Preview 绑定与变量在 `previews` 中显式配置，不继承生产设置；
 
 ```dotenv
 JWT_SECRET=replace-with-a-strong-secret
+GITHUB_TOKEN_ENCRYPTION_KEY=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
-- `JWT_SECRET`：必须替换为自己的密钥；本地用 `npm run secret:dev`，生产用 `npm run secret:prod` 设置。
-- `ALLOW_USER_REGISTRATION`：设为 `true`（不区分大小写）启用注册，其他值或未设置时关闭。
-- `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES`：可选的 fetch / push 请求体上限，fetch 默认 8 MiB；push 未设置时仅受平台请求体限制。
+| 变量 | 用途与配置 |
+| --- | --- |
+| `JWT_SECRET` | 登录 JWT 密钥；本地 `npm run secret:dev:jwt`，生产 `npm run secret:prod:jwt` |
+| `GITHUB_TOKEN_ENCRYPTION_KEY` | GitHub PAT 加密密钥；本地 `npm run secret:dev:github`，生产 `npm run secret:prod:github`；未设置时停用同步，更换后需重新填写 PAT |
+| `ALLOW_USER_REGISTRATION` | `true`（不区分大小写）启用注册，其他值或未设置时关闭 |
+| `UPLOAD_PACK_MAX_BODY_BYTES` / `RECEIVE_PACK_MAX_BODY_BYTES` | fetch 默认 8 MiB；push 未设置时仅受平台请求体限制 |
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
 
-生产与 Preview 首次部署前分别设置 JWT 密钥：
+生产与 Preview 首次部署前分别设置 JWT 与 GitHub 加密密钥：
 
 ```bash
 npm run secret:prod
 npx wrangler preview base-config secret put JWT_SECRET
+npx wrangler preview base-config secret put GITHUB_TOKEN_ENCRYPTION_KEY
 ```
 
 Base 密钥用于新建的 Preview；已有 Preview 使用 `npx wrangler preview secret put JWT_SECRET --name <preview>` 更新。Preview 已在 `previews.vars` 中设置 `ALLOW_USER_REGISTRATION="true"`。
+
+生产环境的 Cron 每 5 分钟运行一次同步调度。Preview 不运行 Cron，只能通过同步源或镜像的「立即同步」手动触发；任务完成后通过 alarm 接续派发队列。`previews` 不需要配置 Cron。
 
 ### 4.4 数据库迁移
 
@@ -304,7 +311,7 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 
 ## 12. 功能边界
 
-- 个人仓库加协作者，不提供组织或团队。
+- 仓库归个人所有，通过协作者共享；GitHub 组织仓库可同步到个人命名空间。
 - 只做 Git 仓库托管，不提供 Issue、Pull Request、CI 或 Agent。
 - 仅 HTTP Git；Workers 无法承载入站 SSH 服务，不提供 SSH Git。
 - 网页只读，不提供文件编辑；不提供 Git LFS、代码搜索或分支保护。
@@ -312,3 +319,31 @@ curl -sS -b cookies.txt -X DELETE "$BASE_URL/api/repos/alice/demo/collaborators/
 - 仓库硬删除，不可恢复。
 
 各模块的详细规则见 [PRD 索引](../prd/README.md)。
+
+
+## 13. GitHub 同步
+
+1. 在 GitHub 创建 PAT。经典 PAT 需要 `repo`、`read:org` 范围；细粒度 PAT 需要目标所有者的 Contents 与 Metadata 只读权限，每个所有者单独添加连接。组织要求 SAML SSO 时先授权令牌。
+2. 登录 gits，进入「同步」并添加 GitHub 账号，填写 PAT。
+3. 选择要同步的所有者（本人或组织），设置前缀、Fork/归档过滤、可见性与频率。组织默认使用 `<组织登录名>.` 前缀。
+4. 查看同步源仓库列表；可手动纳入、排除、处理名称冲突或立即同步。镜像只读，名称可以修改；停止同步后保留数据并恢复 push。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/github/connections` | 配置状态、连接与同步源摘要 |
+| `POST /api/github/connections` | 校验并保存 `{ token }` |
+| `PATCH /api/github/connections/:connectionId` | 更换同一 GitHub 账号的令牌 |
+| `DELETE /api/github/connections/:connectionId` | 移除连接，保留本地仓库 |
+| `GET /api/github/connections/:connectionId/owners` | 实时获取本人及组织 |
+| `POST /api/github/sources` | 启用 `{ connectionId, ownerLogin, ...settings }` |
+| `GET /api/github/sources/:sourceId` | 设置、状态与计数 |
+| `PATCH /api/github/sources/:sourceId` | 修改设置或暂停 |
+| `DELETE /api/github/sources/:sourceId` | 移除同步源，保留本地仓库 |
+| `POST /api/github/sources/:sourceId/sync` | 立即发现并派发 |
+| `GET /api/github/sources/:sourceId/repositories` | `status`、`page` 筛选分页，每页 50 条 |
+| `PATCH /api/github/sources/:sourceId/repositories/:githubRepoId` | `selection`、`localName` |
+| `POST /api/repos/:owner/:repo/mirror/sync` | 所有者立即同步镜像 |
+| `DELETE /api/repos/:owner/:repo/mirror` | 所有者停止同步，转为普通仓库 |
+
+仓库详情增加 `mirror`（普通仓库为 `null`），仓库列表增加 `is_mirror`（0 或 1）。
+镜像 push 返回 403；修改描述、可见性与分支返回 409。接口时间均为毫秒时间戳。

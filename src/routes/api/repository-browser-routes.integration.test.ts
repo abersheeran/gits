@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import app from "../../app";
 import { createMockD1Database } from "../../test-utils/mock-d1";
 import { seedSampleRepositoryToR2 } from "../../test-utils/git-fixture";
-import { createMockRepositoryObjectNamespace } from "../../test-utils/mock-repository-object-namespace";
+import {
+  createMockRepositoryObjectNamespace
+} from "../../test-utils/mock-repository-object-namespace";
 import { MockR2Bucket } from "../../test-utils/mock-r2";
 import type { AppEnv } from "../../types";
 
@@ -62,6 +64,7 @@ describe("API repository browser route integration", () => {
       "branches",
       "defaultBranch",
       "headOid",
+      "mirror",
       "readme",
       "repository",
       "selectedRef",

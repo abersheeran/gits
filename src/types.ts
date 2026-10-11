@@ -15,6 +15,8 @@ export type RepositoryRecord = {
   created_at: number;
 };
 
+export type RepositoryListRecord = RepositoryRecord & { is_mirror: 0 | 1 };
+
 export type CollaboratorPermission = "read" | "write" | "admin";
 
 export type AppBindings = {
@@ -23,6 +25,8 @@ export type AppBindings = {
   REPOSITORY_OBJECTS: DurableObjectNamespace;
   ASSETS?: Fetcher;
   JWT_SECRET: string;
+  GITHUB_TOKEN_ENCRYPTION_KEY?: string;
+  githubHttp?: import("./services/github/types").GithubHttpOptions;
   ALLOW_USER_REGISTRATION?: string;
   UPLOAD_PACK_MAX_BODY_BYTES?: string;
   RECEIVE_PACK_MAX_BODY_BYTES?: string;

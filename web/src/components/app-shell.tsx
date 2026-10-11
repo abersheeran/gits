@@ -36,6 +36,7 @@ export function AppShell({
     ...(user
       ? [
           ["/dashboard", "我的仓库"],
+          ["/sync", "同步"],
           ["/tokens", "访问令牌"]
         ]
       : [])
@@ -44,7 +45,9 @@ export function AppShell({
     <nav aria-label="主导航" className="flex flex-col gap-1 md:flex-row">
       {items.map(([path, label]) => {
         const active =
-          pathname === path || (path === "/dashboard" && pathname === "/repositories/new");
+          pathname === path ||
+          (path === "/sync" && pathname.startsWith("/sync/sources/")) ||
+          (path === "/dashboard" && pathname === "/repositories/new");
         return (
           <Link
             key={path}

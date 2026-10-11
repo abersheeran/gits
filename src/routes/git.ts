@@ -56,6 +56,17 @@ async function resolveGitRepositoryAccess(args: {
     }
   }
 
+  if (args.write) {
+    const mirror = await args.repositoryService.findMirror(repository.id);
+    if (mirror) {
+      const message = `This repository is a read-only mirror of ${mirror.full_name} on GitHub.`;
+      throw new HTTPException(403, {
+        res: new Response(message, {
+          status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" }
+        })
+      });
+    }
+  }
   return repository;
 }
 

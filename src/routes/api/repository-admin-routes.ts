@@ -1,3 +1,5 @@
+import { createInitializedRepository } from "../../services/repository-creation";
+import { stopMirror } from "../../services/github/removal";
 import {
   HTTPException,
   RepositoryService,
@@ -23,55 +25,16 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     const payload = await parseJsonObject(c.req.raw);
     const name = assertString(payload.name, "name");
     assertRepositoryName(name);
-    const repositoryService = new RepositoryService(c.env.DB);
-    const repositoryClient = createRepositoryObjectClient(c.env);
     const sessionUser = mustSessionUser(c);
-    let createdRepoId: string | null = null;
-
-    try {
-      const isPrivate = assertOptionalBoolean(payload.isPrivate, "isPrivate") ?? true;
-      const createRepoInput: {
-        ownerId: string;
-        name: string;
-        description?: string;
-        isPrivate: boolean;
-      } = {
-        ownerId: sessionUser.id,
-        name,
-        isPrivate
-      };
-
-      const description =
-        payload.description === undefined
-          ? undefined
-          : assertString(payload.description, "description");
-      if (description) {
-        createRepoInput.description = description;
-      }
-
-      const created = await repositoryService.createRepository(createRepoInput);
-      createdRepoId = created.id;
-      await repositoryClient.initializeRepository({
-        repositoryId: created.id,
-        owner: sessionUser.username,
-        repo: name
-      });
-    } catch (error) {
-      if (createdRepoId) {
-        await repositoryService.deleteRepositoryById(createdRepoId).catch(() => undefined);
-        await repositoryClient
-          .deleteRepository({
-            repositoryId: createdRepoId,
-            owner: sessionUser.username,
-            repo: name
-          })
-          .catch(() => undefined);
-      }
-      if (isUniqueConstraintError(error)) {
-        throw new HTTPException(409, { message: "Repository already exists" });
-      }
-      throw error;
-    }
+    const description = payload.description === undefined
+      ? undefined : assertString(payload.description, "description");
+    await createInitializedRepository(c.env, {
+      ownerId: sessionUser.id,
+      owner: sessionUser.username,
+      name,
+      isPrivate: assertOptionalBoolean(payload.isPrivate, "isPrivate") ?? true,
+      ...(description ? { description } : {})
+    });
 
     return c.json({ ok: true }, 201);
   });
@@ -90,6 +53,11 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
     }
     if (repository.owner_id !== sessionUser.id) {
       throw new HTTPException(403, { message: "Forbidden" });
+    }
+
+    if ((payload.description !== undefined || payload.isPrivate !== undefined)
+      && await repositoryService.findMirror(repository.id)) {
+      throw new HTTPException(409, { message: "Mirror metadata is managed by GitHub" });
     }
 
     const nextNameRaw = assertOptionalString(payload.name, "name");
@@ -161,6 +129,10 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
+    const mirror = await repositoryService.findMirror(repository.id);
+    if (mirror) {
+      await stopMirror(c.env, mirror);
+    }
     await repositoryClient.deleteRepository({
       repositoryId: repository.id,
       owner,
@@ -186,10 +158,15 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
+    if (await repositoryService.findMirror(repository.id)) {
+      throw new HTTPException(409, { message: "Mirror branches are read-only" });
+    }
     const branchName = normalizeBranchRef(payload.branchName, "branchName");
     const sourceOid = assertString(payload.sourceOid, "sourceOid").trim().toLowerCase();
     if (!/^[0-9a-f]{40}$/.test(sourceOid)) {
-      throw new HTTPException(400, { message: "Field 'sourceOid' must be a 40-character commit oid" });
+      throw new HTTPException(400, {
+        message: "Field 'sourceOid' must be a 40-character commit oid"
+      });
     }
 
     const result = await repositoryClient.createBranch({
@@ -218,6 +195,9 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
+    if (await repositoryService.findMirror(repository.id)) {
+      throw new HTTPException(409, { message: "Mirror branches are read-only" });
+    }
     const branchName = normalizeBranchRef(payload.branchName, "branchName");
     const result = await repositoryClient.setDefaultBranch({
       repositoryId: repository.id,
@@ -244,6 +224,9 @@ export function registerRepositoryAdminRoutes(router: ApiRouter): void {
       throw new HTTPException(403, { message: "Forbidden" });
     }
 
+    if (await repositoryService.findMirror(repository.id)) {
+      throw new HTTPException(409, { message: "Mirror branches are read-only" });
+    }
     const branchName = normalizeBranchRef(branchParam, "branch");
     const result = await repositoryClient.deleteBranch({
       repositoryId: repository.id,

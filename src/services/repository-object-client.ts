@@ -292,6 +292,22 @@ export class RepositoryObjectClient {
     });
   }
 
+  async scheduleMirrorSync(task: import("./github/types").MirrorTask): Promise<void> {
+    await this.sendJsonRequest({
+      repositoryId: task.repositoryId,
+      operation: "schedule-mirror-sync",
+      payload: { ...task }
+    });
+  }
+
+  async cancelMirrorSync(repositoryId: string): Promise<void> {
+    await this.sendJsonRequest({
+      repositoryId,
+      operation: "cancel-mirror-sync",
+      payload: {}
+    });
+  }
+
   private streamRequest(body: ReadableStream<Uint8Array>) {
     return { method: "POST", body, duplex: "half" as const };
   }

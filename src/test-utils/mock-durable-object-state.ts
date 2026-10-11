@@ -26,6 +26,7 @@ class MockDurableObjectStorage {
 
   async deleteAll(): Promise<void> {
     this.values.clear();
+    this.alarm = null;
     this.sql.clear();
   }
 

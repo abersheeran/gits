@@ -1,5 +1,7 @@
 export type RepositoryObjectJsonOperation =
   | "browse-repository-contents"
+  | "schedule-mirror-sync"
+  | "cancel-mirror-sync"
   | "create-branch"
   | "delete-repository"
   | "delete-branch"
