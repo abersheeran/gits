@@ -11,11 +11,25 @@ import { Panel } from "./panel";
 import { PageHeader } from "./page-header";
 export function GithubTableSkeleton({
   sources = false,
+  issues = false,
   announce = true
 }: {
   sources?: boolean;
+  issues?: boolean;
   announce?: boolean;
 }) {
+  if (issues) return (
+    <SkeletonRegion announce={announce} className="divide-y divide-border-subtle">
+      {[0, 1, 2].map((index) => (
+        <div key={index} className="space-y-3 p-4">
+          <Skeleton className="h-5 w-48 max-w-full" />
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-10 w-32 md:h-8" />
+        </div>
+      ))}
+    </SkeletonRegion>
+  );
   return (
     <SkeletonRegion announce={announce}>
       <Table>
@@ -26,7 +40,7 @@ export function GithubTableSkeleton({
               {sources ? "仓库" : "本地仓库"}
             </TableHead>
             <TableHead
-              className={sources ? "hidden w-32 md:table-cell" : "hidden w-44 md:table-cell"}
+              className={sources ? "hidden w-40 md:table-cell" : "hidden w-44 md:table-cell"}
             >
               状态
             </TableHead>
@@ -82,7 +96,7 @@ export function GithubTableSkeleton({
     </SkeletonRegion>
   );
 }
-export function GithubSyncSkeleton({ source = false }: { source?: boolean }) {
+export function GithubSyncSkeleton({ source = false, issues = false }: { source?: boolean; issues?: boolean }) {
   return (
     <SkeletonRegion announce>
       {source && <Skeleton className="mb-4 h-10 w-24 md:h-8" />}
@@ -114,7 +128,7 @@ export function GithubSyncSkeleton({ source = false }: { source?: boolean }) {
         </div>
       )}
       <Panel>
-        <GithubTableSkeleton sources={!source} announce={false} />
+        <GithubTableSkeleton sources={!source} issues={issues} announce={false} />
       </Panel>
     </SkeletonRegion>
   );

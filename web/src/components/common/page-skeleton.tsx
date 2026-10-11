@@ -19,9 +19,9 @@ const titles: Record<string, string> = {
 };
 
 export function PageSkeleton({ user }: { user?: AuthUser | null }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   if (pathname === "/sync" || matchPath("/sync/sources/:sourceId", pathname))
-    return <GithubSyncSkeleton source={pathname !== "/sync"} />;
+    return <GithubSyncSkeleton source={pathname !== "/sync"} issues={pathname !== "/sync" && new URLSearchParams(search).get("status") === "attention"} />;
   const match = matchPath("/repo/:owner/:repo/*", pathname);
   if (match?.params.owner && match.params.repo) {
     return (

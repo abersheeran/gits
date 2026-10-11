@@ -12,6 +12,7 @@ import { RelativeTime } from "@/components/common/relative-time";
 import { GithubAvatar } from "@/components/common/github-avatar";
 import { GithubSyncSkeleton, GithubTableSkeleton } from "@/components/common/github-sync-skeleton";
 import { GithubSourceSettingsSheet } from "@/components/common/github-source-settings-sheet";
+import { GithubRepositoryIssues } from "@/components/common/github-repository-issues";
 import { GithubRepositoryTable } from "@/components/common/github-repository-table";
 import { GithubLocalNameDialog } from "@/components/common/github-local-name-dialog";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,14 @@ function SourceContent({ sourceId }: { sourceId: string }) {
   useEffect(() => {
     if (source) document.title = `${source.accountLogin} · GitHub 同步 · gits`;
   }, [source]);
+  useEffect(() => {
+    if (!repositories || repositories.page <= 1 || repositories.items.length > 0) return;
+    setSearch((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("page", String(Math.max(1, Math.ceil(repositories.total / repositories.perPage))));
+      return next;
+    }, { replace: true });
+  }, [repositories, setSearch]);
   function navigate(filter: GithubRepositoryFilter, nextPage: number) {
     setSearch((previous) => {
       const next = new URLSearchParams(previous);
@@ -71,7 +80,8 @@ function SourceContent({ sourceId }: { sourceId: string }) {
       setPendingId(null);
     }
   }
-  if (!source && !error) return <GithubSyncSkeleton source />;
+  if (!source && !error) return <GithubSyncSkeleton source issues={status === "attention"} />;
+  const RepositoryList = status === "attention" ? GithubRepositoryIssues : GithubRepositoryTable;
   const counts = source?.counts;
   const filters: Array<[GithubRepositoryFilter, string, number]> = counts
     ? [
@@ -109,7 +119,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
             <span className="flex flex-wrap items-center gap-2">
               <span>
                 {source.status === "ok"
-                  ? "正常"
+                  ? source.attentionCount > 0 ? `${source.attentionCount} 个仓库需处理` : "正常"
                   : source.status === "paused"
                     ? "已暂停"
                     : source.status === "suspended"
@@ -182,20 +192,23 @@ function SourceContent({ sourceId }: { sourceId: string }) {
       <Panel>
         <ErrorAlert inset error={error ?? actionError} />
         {!repositories ? (
-          !error && <GithubTableSkeleton />
+          !error && <GithubTableSkeleton issues={status === "attention"} />
         ) : (
           <>
             {repositories.items.length === 0 ? (
               <EmptyState
-                title="暂无仓库"
+                title={status === "attention" ? "没有需要处理的仓库" : "暂无仓库"}
                 description={
-                  status === "all"
-                    ? "立即同步以发现 GitHub 仓库。"
-                    : "此状态下暂无仓库，可切换筛选查看。"
+                  status === "attention"
+                    ? "可切换到全部查看同步进度。"
+                    : status === "all"
+                      ? "立即同步以发现 GitHub 仓库。"
+                      : "此状态下暂无仓库，可切换筛选查看。"
                 }
               />
             ) : (
-              <GithubRepositoryTable
+              <RepositoryList
+                manageUrl={source?.manageUrl ?? ""}
                 items={repositories.items}
                 pendingId={pendingId}
                 onSync={(item) =>

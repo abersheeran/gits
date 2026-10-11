@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ExternalLink, RefreshCw, Settings, Unplug } from "lucide-react";
+import { ArrowRight, ExternalLink, RefreshCw, Settings, Unplug } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -34,11 +34,18 @@ export function GithubSourceTable({
   function status(source: GithubSourceSummary) {
     return (
       <div className="flex flex-wrap items-center gap-1">
-        <GithubStatusBadge status={source.status} error={source.lastError} />
+        {(source.status !== "ok" || source.attentionCount === 0) && (
+          <GithubStatusBadge status={source.status} error={source.lastError} />
+        )}
         {source.attentionCount > 0 && (
-          <span className="text-body-micro text-text-tertiary">
-            {source.attentionCount} 个需处理
-          </span>
+          <Link
+            to={`/sync/sources/${encodeURIComponent(source.id)}?status=attention&page=1`}
+            aria-label={`查看 ${source.accountLogin} 的 ${source.attentionCount} 个需处理仓库`}
+            className="inline-flex min-h-10 items-center gap-1 text-body-micro text-danger-text underline underline-offset-4 hover:no-underline"
+          >
+            {source.attentionCount} 个仓库需处理
+            <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
+          </Link>
         )}
       </div>
     );
@@ -50,7 +57,7 @@ export function GithubSourceTable({
           <TableRow>
             <TableHead>账号</TableHead>
             <TableHead className="hidden w-24 md:table-cell">仓库</TableHead>
-            <TableHead className="hidden w-32 md:table-cell">状态</TableHead>
+            <TableHead className="hidden w-40 md:table-cell">状态</TableHead>
             <TableHead className="hidden w-28 lg:table-cell">上次同步</TableHead>
             <TableHead className="w-28 text-right md:w-40">操作</TableHead>
           </TableRow>
