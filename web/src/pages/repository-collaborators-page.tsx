@@ -15,7 +15,7 @@ import { PermissionSelect } from "@/components/common/permission-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageLoadingState, InlineLoadingState } from "@/components/ui/loading-state";
+import { TableSkeleton } from "@/components/common/list-skeletons";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Dialog,
@@ -92,15 +92,15 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
   }
   if (!user) return <Navigate to="/login" replace />;
   if (pageError) return <ErrorAlert error={pageError} />;
-  if (!detail) return <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail}>
+    <RepositoryLayout owner={owner} repo={repo} detail={detail}>
       <Panel
         header={
           <>
             <PanelTitle>协作者</PanelTitle>
             <Button
               size="sm"
+              disabled={!detail}
               onClick={() => {
                 setFormError(null);
                 setOpen(true);
@@ -112,8 +112,8 @@ export function RepositoryCollaboratorsPage({ user }: { user: AuthUser | null })
         }
       >
         <ErrorAlert inset error={error} />
-        {loading ? (
-          <InlineLoadingState />
+        {!detail || loading ? (
+          <TableSkeleton variant="collaborators" />
         ) : !error && items.length === 0 ? (
           <EmptyState title="暂无协作者" description="添加已有用户一起管理仓库。" />
         ) : (

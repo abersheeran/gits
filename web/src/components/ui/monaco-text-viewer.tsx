@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { estimateMonacoHeight } from "@/lib/monaco";
+import { CodeViewerSkeleton } from "@/components/ui/code-viewer-skeleton";
 import { cn } from "@/lib/utils";
 
 export type MonacoTextViewerProps = {
@@ -20,18 +21,10 @@ const LazyMonacoTextViewerImpl = lazy(async () => {
   return { default: module.MonacoTextViewerImpl };
 });
 
-function MonacoTextViewerFallback(props: {
-  height: number | string;
-  className?: string;
-}) {
+function MonacoTextViewerFallback(props: { height: number | string; className?: string }) {
   return (
     <div className={cn("min-w-0 overflow-hidden bg-surface-base", props.className)}>
-      <div
-        className="flex items-center justify-center px-3 py-2 text-xs text-text-secondary"
-        style={{ height: props.height }}
-      >
-        正在加载…
-      </div>
+      <CodeViewerSkeleton height={props.height} />
     </div>
   );
 }

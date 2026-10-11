@@ -5,7 +5,10 @@ import { RepositoryDiffView } from "@/components/repository/repository-diff-view
 import { ErrorAlert } from "@/components/common/error-alert";
 import { ShaCopyButton } from "@/components/common/sha-copy-button";
 import { Button } from "@/components/ui/button";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import {
+  CommitDetailHeaderSkeleton,
+  CommitDetailSkeleton
+} from "@/components/common/commit-detail-skeleton";
 import {
   Sheet,
   SheetContent,
@@ -48,18 +51,14 @@ export function RepositoryCommitDetailSheet({
   const authoredAt = detail ? formatDateTime(detail.commit.author.timestamp * 1000) : null;
   const title = detail
     ? commitTitle(detail.commit.message)
-    : loading
-      ? "正在加载"
-      : error
-        ? "无法加载提交详情"
-        : "提交详情";
+    : error
+      ? "无法加载提交详情"
+      : "提交详情";
   const description = detail
     ? `${detail.commit.author.name} · ${authoredAt}`
-    : loading
-      ? "正在加载"
-      : error
-        ? "无法加载提交详情"
-        : "查看提交改动";
+    : error
+      ? "无法加载提交详情"
+      : "查看提交改动";
 
   function updateHeaderVisibility(hidden: boolean) {
     if (headerHiddenRef.current === hidden) {
@@ -106,50 +105,61 @@ export function RepositoryCommitDetailSheet({
               : "max-h-56 border-b border-border-subtle py-4 opacity-100"
           )}
         >
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 items-center gap-3">
-                {detail ? (
-                  <AuthorAvatar name={detail.commit.author.name} className="h-9 w-9 text-[12px]" />
-                ) : null}
-                <div className="min-w-0">
-                  <SheetTitle className="line-clamp-2 text-heading-3-16-semibold">
-                    {title}
-                  </SheetTitle>
-                  <SheetDescription className="text-body-micro text-text-secondary">
-                    {description}
-                  </SheetDescription>
+          {loading ? (
+            <>
+              <SheetTitle className="sr-only">提交详情</SheetTitle>
+              <SheetDescription className="sr-only">正在加载…</SheetDescription>
+              <CommitDetailHeaderSkeleton />
+            </>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  {detail ? (
+                    <AuthorAvatar
+                      name={detail.commit.author.name}
+                      className="h-9 w-9 text-[12px]"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <SheetTitle className="line-clamp-2 text-heading-3-16-semibold">
+                      {title}
+                    </SheetTitle>
+                    <SheetDescription className="text-body-micro text-text-secondary">
+                      {description}
+                    </SheetDescription>
+                  </div>
                 </div>
+
+                {detail ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onBrowseSnapshot(detail.commit.oid)}
+                  >
+                    浏览此时的文件
+                  </Button>
+                ) : null}
               </div>
 
               {detail ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onBrowseSnapshot(detail.commit.oid)}
-                >
-                  浏览此时的文件
-                </Button>
+                <div className="flex flex-wrap items-center gap-3 text-body-micro text-text-secondary">
+                  <ShaCopyButton oid={detail.commit.oid} />
+                  <span className="text-text-tertiary">{detail.filesChanged} 个文件</span>
+                  <span className="text-success">+{detail.additions}</span>
+                  <span className="text-danger-text">-{detail.deletions}</span>
+                </div>
               ) : null}
             </div>
-
-            {detail ? (
-              <div className="flex flex-wrap items-center gap-3 text-body-micro text-text-secondary">
-                <ShaCopyButton oid={detail.commit.oid} />
-                <span className="text-text-tertiary">{detail.filesChanged} 个文件</span>
-                <span className="text-success">+{detail.additions}</span>
-                <span className="text-danger-text">-{detail.deletions}</span>
-              </div>
-            ) : null}
-          </div>
+          )}
         </SheetHeader>
 
         <div
           className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-4 sm:py-4"
           onScroll={handleContentScroll}
         >
-          {loading ? <InlineLoadingState /> : null}
+          {loading ? <CommitDetailSkeleton /> : null}
 
           {!loading && error ? <ErrorAlert error={error} title="加载失败" /> : null}
 

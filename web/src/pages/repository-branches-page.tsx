@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageLoadingState } from "@/components/ui/loading-state";
+import { TableSkeleton } from "@/components/common/list-skeletons";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Dialog,
@@ -57,7 +57,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const isOwner = detail?.repository.owner_username === user?.username;
+  const isOwner = owner === user?.username;
   async function create(event: FormEvent) {
     event.preventDefault();
     if (pending || !detail) return;
@@ -86,13 +86,13 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
       setPending(false);
     }
   }
-  if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
-  const branches = detail.branches.map((branch) => ({
+  if (!detail && error) return <ErrorAlert error={error} />;
+  const branches = (detail?.branches ?? []).map((branch) => ({
     ...branch,
     shortName: branch.name.replace(/^refs\/heads\//, "")
   }));
   return (
-    <RepositoryLayout detail={detail}>
+    <RepositoryLayout owner={owner} repo={repo} detail={detail}>
       <Panel
         header={
           <>
@@ -100,9 +100,10 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
             {isOwner && (
               <Button
                 size="sm"
+                disabled={!detail}
                 onClick={() => {
                   setSource(
-                    branches.find((branch) => branch.shortName === detail.defaultBranch)?.name ??
+                    branches.find((branch) => branch.shortName === detail?.defaultBranch)?.name ??
                       branches[0]?.name ??
                       "__sha__"
                   );
@@ -117,7 +118,9 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
         }
       >
         <ErrorAlert inset error={error} />
-        {branches.length === 0 ? (
+        {!detail ? (
+          <TableSkeleton variant="branches" />
+        ) : branches.length === 0 ? (
           <EmptyState title="暂无分支" description="推送首次提交后即可浏览和管理分支。" />
         ) : (
           <>
@@ -278,7 +281,7 @@ export function RepositoryBranchesPage({ user }: { user: AuthUser | null }) {
         title="删除分支"
         description={`删除分支「${target ?? ""}」？此操作无法撤销。`}
         onConfirm={async () => {
-          if (target) {
+          if (target && detail) {
             setDetail({ ...detail, ...(await deleteRepositoryBranch(owner, repo, target)) });
             setPage(1);
           }

@@ -1,3 +1,4 @@
+import { CodeViewerSkeleton } from "@/components/ui/code-viewer-skeleton";
 import Editor from "@monaco-editor/react";
 import type { MonacoTextViewerProps } from "@/components/ui/monaco-text-viewer";
 import { buildMonacoModelPath, guessMonacoLanguage, monacoViewerFontFamily } from "@/lib/monaco";
@@ -25,7 +26,7 @@ export function MonacoTextViewerImpl({
           path={path ? buildMonacoModelPath(path, scope) : undefined}
           theme="gits-light"
           height={height}
-          loading={<div className="px-3 py-2 text-xs text-text-secondary">正在加载…</div>}
+          loading={<CodeViewerSkeleton height={height} />}
           beforeMount={configureMonaco}
           options={{
             automaticLayout: true,

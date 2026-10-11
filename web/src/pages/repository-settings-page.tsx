@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { PageLoadingState } from "@/components/ui/loading-state";
+import { FormSkeleton } from "@/components/common/form-skeleton";
 import { PendingButton } from "@/components/ui/pending-button";
 import { VisibilityField } from "@/components/common/visibility-field";
 import { Check } from "lucide-react";
@@ -135,13 +135,16 @@ function SettingsForm({
   );
 }
 export function RepositorySettingsPage({ user }: { user: AuthUser | null }) {
-  const { detail, setDetail, error } = useRepository();
+  const { owner, repo, detail, setDetail, error } = useRepository();
   if (!user) return <Navigate to="/login" replace />;
   if (error) return <ErrorAlert error={error} />;
-  if (!detail) return <PageLoadingState />;
   return (
-    <RepositoryLayout detail={detail}>
-      {detail.repository.owner_username === user.username ? (
+    <RepositoryLayout owner={owner} repo={repo} detail={detail}>
+      {!detail ? (
+        <Panel header="常规">
+          <FormSkeleton variant="settings" />
+        </Panel>
+      ) : detail.repository.owner_username === user.username ? (
         <SettingsForm key={detail.repository.name} detail={detail} onSaved={setDetail} />
       ) : (
         <ErrorAlert error="只有仓库所有者可以修改设置。" />

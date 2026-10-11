@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { RepositoryList } from "@/components/common/repository-list";
 import { ErrorAlert } from "@/components/common/error-alert";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import { TableSkeleton } from "@/components/common/list-skeletons";
 import { Button } from "@/components/ui/button";
 import {
   listMyRepositories,
@@ -46,7 +46,7 @@ export function MyRepositoriesPage({ user }: { user: AuthUser | null }) {
       <Panel>
         <ErrorAlert inset error={error} />
         {loading ? (
-          <InlineLoadingState />
+          <TableSkeleton variant="repositories" />
         ) : (
           !error && <RepositoryList repositories={repositories} />
         )}

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import { TableSkeleton } from "@/components/common/list-skeletons";
 import { PendingButton } from "@/components/ui/pending-button";
 import {
   Dialog,
@@ -131,7 +131,7 @@ export function TokensPage({ user }: { user: AuthUser | null }) {
       <Panel>
         <ErrorAlert inset error={error} />
         {loading ? (
-          <InlineLoadingState />
+          <TableSkeleton variant="tokens" />
         ) : tokens.length === 0 ? (
           <EmptyState
             icon={KeyRound}

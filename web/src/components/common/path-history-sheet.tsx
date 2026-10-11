@@ -7,7 +7,7 @@ import {
   SheetDescription
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import { CommitListSkeleton } from "@/components/common/list-skeletons";
 import { CommitRow } from "./commit-row";
 import { EmptyState } from "./empty-state";
 import { ErrorAlert } from "./error-alert";
@@ -77,7 +77,9 @@ export function PathHistorySheet({
             ))}
           </ul>
           {loading ? (
-            <InlineLoadingState />
+            <div className={commits.length ? "border-t border-border-subtle" : undefined}>
+              <CommitListSkeleton rows={commits.length ? 3 : 6} />
+            </div>
           ) : !error && commits.length === 0 ? (
             <EmptyState title="此路径暂无提交记录" />
           ) : null}

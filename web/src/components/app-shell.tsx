@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
 import { Menu } from "lucide-react";
+import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -16,10 +17,12 @@ import { formatApiError, logout, type AuthUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 export function AppShell({
   user,
+  authPending = false,
   onAuthChanged,
   children
 }: {
   user: AuthUser | null;
+  authPending?: boolean;
   onAuthChanged: () => Promise<void>;
   children: ReactNode;
 }) {
@@ -63,7 +66,12 @@ export function AppShell({
   );
   const account = (mobile = false) => (
     <div className={cn("flex gap-3", mobile ? "flex-col items-stretch" : "flex-wrap items-center")}>
-      {user ? (
+      {authPending ? (
+        <SkeletonRegion className="flex items-center gap-2">
+          <Skeleton className="size-7 rounded-full" />
+          <Skeleton className="h-3.5 w-20" />
+        </SkeletonRegion>
+      ) : user ? (
         <>
           <span
             className={cn(

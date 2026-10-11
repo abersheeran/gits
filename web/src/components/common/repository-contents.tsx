@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { BookOpen, FileCode2, FileX2, FolderOpen, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import { ReadmeSkeleton } from "@/components/common/code-skeletons";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import type { CommitSummary, RepositoryContentsResponse } from "@/lib/api";
 import { commitTitle } from "@/lib/repository-navigation";
@@ -26,12 +26,14 @@ function formatBytes(value: number) {
 export function RepositoryContents({
   contents,
   latest,
+  loading = false,
   link,
   onHistory,
   onCommit
 }: {
   contents: RepositoryContentsResponse;
   latest: CommitSummary | null;
+  loading?: boolean;
   link: LocationLink;
   onHistory: () => void;
   onCommit: (oid: string) => void;
@@ -147,6 +149,7 @@ export function RepositoryContents({
             )}
             <Pagination
               page={page}
+              disabled={loading}
               hasNext={page * 50 < contents.entries.length}
               onChange={setPage}
             />
@@ -165,7 +168,7 @@ export function RepositoryContents({
           }
         >
           <div className="min-w-0 overflow-hidden p-4">
-            <Suspense fallback={<InlineLoadingState />}>
+            <Suspense fallback={<ReadmeSkeleton />}>
               <ReadmeMarkdown content={contents.readme.content} />
             </Suspense>
           </div>

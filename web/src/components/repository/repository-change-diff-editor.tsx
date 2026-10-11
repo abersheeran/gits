@@ -1,3 +1,4 @@
+import { CodeViewerSkeleton } from "@/components/ui/code-viewer-skeleton";
 import { useEffect, useRef, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 import { buildMonacoModelPath, guessMonacoLanguage, monacoViewerFontFamily } from "@/lib/monaco";
@@ -54,7 +55,7 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
             resize();
             cleanup.current = () => subscriptions.forEach((subscription) => subscription.dispose());
           }}
-          loading={<div className="px-3 py-2 text-xs text-text-secondary">正在加载…</div>}
+          loading={<CodeViewerSkeleton height={contentHeight} />}
           beforeMount={configureMonaco}
           options={{
             automaticLayout: true,

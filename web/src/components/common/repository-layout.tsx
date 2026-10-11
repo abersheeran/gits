@@ -1,26 +1,47 @@
 import { Code2, History, GitBranch, Settings, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
+import { repositoryLayoutCache } from "@/lib/repository-layout-cache";
 import { Badge } from "@/components/ui/badge";
 import type { RepositoryDetailResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 export function RepositoryLayout({
+  owner,
+  repo,
   detail,
   children
 }: {
-  detail: RepositoryDetailResponse;
+  owner: string;
+  repo: string;
+  detail: RepositoryDetailResponse | null;
   children: ReactNode;
 }) {
   const { pathname } = useLocation();
-  const repository = detail.repository;
-  const base = `/repo/${repository.owner_username}/${repository.name}`;
+  const key = `${owner}/${repo}`;
+  const snapshot = repositoryLayoutCache.get(key);
+  const repository = detail?.repository ?? snapshot;
+  const base = `/repo/${owner}/${repo}`;
+  const settings = pathname === `${base}/settings` || pathname === `${base}/collaborators`;
+  const permission = detail ? detail.viewerPermission : snapshot?.viewerPermission;
+  useEffect(() => {
+    if (detail) {
+      repositoryLayoutCache.set(key, {
+        is_private: detail.repository.is_private,
+        description: detail.repository.description,
+        viewerPermission: detail.viewerPermission
+      });
+    }
+  }, [detail, key]);
   const settingsItems: Array<[string, string]> =
-    detail.viewerPermission === "owner"
-      ? [["settings", "常规"], ["collaborators", "协作者"]]
-      : detail.viewerPermission === "admin"
+    permission === "owner" || (!detail && !snapshot && settings)
+      ? [
+          ["settings", "常规"],
+          ["collaborators", "协作者"]
+        ]
+      : permission === "admin"
         ? [["collaborators", "协作者"]]
         : [];
-  const settings = pathname === `${base}/settings` || pathname === `${base}/collaborators`;
   const tab = settings
     ? "settings"
     : pathname === `${base}/branches`
@@ -28,7 +49,7 @@ export function RepositoryLayout({
       : pathname === `${base}/commits`
         ? "commits"
         : "";
-  const ref = detail.selectedRef?.replace(/^refs\/heads\//, "");
+  const ref = detail?.selectedRef?.replace(/^refs\/heads\//, "");
   const tabs: Array<[string, string, string, LucideIcon]> = [
     ["", "代码", base, Code2],
     [
@@ -47,14 +68,20 @@ export function RepositoryLayout({
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="min-w-0 break-all font-display text-[22px] leading-8">
-            <span className="text-text-secondary">{repository.owner_username} / </span>
+            <span className="text-text-secondary">{owner} / </span>
             <Link className="font-semibold hover:underline" to={base}>
-              {repository.name}
+              {repo}
             </Link>
           </h1>
-          <Badge variant="outline">{repository.is_private ? "私有" : "公开"}</Badge>
+          {repository ? (
+            <Badge variant="outline">{repository.is_private ? "私有" : "公开"}</Badge>
+          ) : (
+            <SkeletonRegion>
+              <Skeleton className="h-5 w-10 rounded-full" />
+            </SkeletonRegion>
+          )}
         </div>
-        {repository.description && (
+        {repository?.description && (
           <p className="break-words text-body-xs text-text-secondary">{repository.description}</p>
         )}
       </header>

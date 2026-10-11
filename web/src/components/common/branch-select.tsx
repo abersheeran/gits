@@ -1,3 +1,4 @@
+import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -37,5 +38,13 @@ export function BranchSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+export function BranchSelectSkeleton() {
+  return (
+    <SkeletonRegion className="w-full shrink-0 md:w-56">
+      <Skeleton className="h-10 w-full md:h-9" />
+    </SkeletonRegion>
   );
 }

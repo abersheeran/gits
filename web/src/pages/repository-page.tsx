@@ -3,15 +3,15 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useCommitDetail } from "@/hooks/use-commit-detail";
 import { RepositoryLayout } from "@/components/common/repository-layout";
 import { RepositoryContents } from "@/components/common/repository-contents";
-import { PathBreadcrumbs } from "@/components/common/path-breadcrumbs";
+import { RepositoryCodeToolbar } from "@/components/common/repository-code-toolbar";
 import { PathHistorySheet } from "@/components/common/path-history-sheet";
-import { BranchSelect } from "@/components/common/branch-select";
+import { BranchSelect, BranchSelectSkeleton } from "@/components/common/branch-select";
 import { EmptyRepositoryGuide } from "@/components/common/empty-repository-guide";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { Panel } from "@/components/common/panel";
-import { CopyField } from "@/components/common/copy-field";
 import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
-import { InlineLoadingState, PageLoadingState } from "@/components/ui/loading-state";
+import { RepositoryContentsSkeleton } from "@/components/common/code-skeletons";
+import { useLoadingSkeleton } from "@/hooks/use-loading-skeleton";
 import {
   formatApiError,
   getRepositoryCommits,
@@ -41,6 +41,7 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
   const [contents, setContents] = useState<RepositoryContentsResponse | null>(null);
   const [latest, setLatest] = useState<CommitSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const showSkeleton = useLoadingSkeleton(loading, contents !== null);
   const [error, setError] = useState<string | null>(null);
   const [oid, setOid] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -78,7 +79,7 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
     };
   }, [owner, repo, ref, path]);
   const selected =
-    selectedBranchName(detail?.selectedRef ?? null) ?? detail?.defaultBranch ?? undefined;
+    selectedBranchName(detail?.selectedRef ?? null) ?? ref ?? detail?.defaultBranch ?? undefined;
   function link(nextKind: CodeViewKind, nextPath: string, nextRef = selected) {
     return buildCodePath({
       owner,
@@ -90,10 +91,10 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
     });
   }
   const cloneUrl = `${window.location.origin}/${owner}/${repo}.git`;
-  if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
+  if (!detail && error) return <ErrorAlert error={error} />;
   return (
-    <RepositoryLayout detail={detail}>
-      {detail.branches.length === 0 && !loading && !error ? (
+    <RepositoryLayout owner={owner} repo={repo} detail={detail}>
+      {detail && detail.branches.length === 0 && !loading && !error ? (
         <EmptyRepositoryGuide
           cloneUrl={cloneUrl}
           defaultBranch={detail.defaultBranch}
@@ -101,30 +102,35 @@ export function RepositoryPage({ user }: { user: AuthUser | null }) {
         />
       ) : (
         <>
-          <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
-              <BranchSelect
-                detail={detail}
-                disabled={loading}
-                onChange={(value) => navigate(link(kind, path ?? "", value))}
-              />
-              <PathBreadcrumbs repositoryName={repo} path={path ?? ""} kind={kind} link={link} />
-            </div>
-            <CopyField
-              className="md:ml-auto md:w-96 md:shrink-0"
-              value={cloneUrl}
-              label="Clone 地址"
-            />
-          </div>
-          {loading || error ? (
+          <RepositoryCodeToolbar
+            owner={owner}
+            repo={repo}
+            kind={kind}
+            path={path ?? ""}
+            link={link}
+            branch={
+              detail ? (
+                <BranchSelect
+                  detail={detail}
+                  disabled={loading}
+                  onChange={(value) => navigate(link(kind, path ?? "", value))}
+                />
+              ) : (
+                <BranchSelectSkeleton />
+              )
+            }
+          />
+          {showSkeleton ? (
+            <RepositoryContentsSkeleton kind={kind} />
+          ) : error ? (
             <Panel>
               <ErrorAlert inset error={error} />
-              {loading && <InlineLoadingState />}
             </Panel>
           ) : (
             contents && (
               <RepositoryContents
-                key={`${ref}/${path}`}
+                key={`${contents.selectedRef}/${contents.path}`}
+                loading={loading}
                 contents={contents}
                 latest={latest}
                 link={link}

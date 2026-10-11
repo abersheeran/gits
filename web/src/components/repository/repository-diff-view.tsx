@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { CodeViewerSkeleton } from "@/components/ui/code-viewer-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { MonacoTextViewer } from "@/components/ui/monaco-text-viewer";
 import { estimateMonacoHeight } from "@/lib/monaco";
@@ -125,21 +126,6 @@ function diffEditorHeight(change: RepositoryCommitChange): number {
   });
 }
 
-function RepositoryDiffEditorFallback(props: { height: number }) {
-  return (
-    <div className="min-w-0 overflow-hidden">
-      <div className="min-w-0">
-        <div
-          className="flex items-center justify-center px-3 py-2 text-body-micro text-text-secondary"
-          style={{ height: props.height }}
-        >
-          正在加载…
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function RepositoryDiffView({
   changes,
   onChangeActivate,
@@ -184,9 +170,7 @@ export function RepositoryDiffView({
               </div>
             ) : change.oldContent !== null || change.newContent !== null ? (
               <div className="min-w-0">
-                <Suspense
-                  fallback={<RepositoryDiffEditorFallback height={diffEditorHeight(change)} />}
-                >
+                <Suspense fallback={<CodeViewerSkeleton height={diffEditorHeight(change)} />}>
                   <LazyRepositoryChangeDiffEditor
                     change={change}
                     height={diffEditorHeight(change)}

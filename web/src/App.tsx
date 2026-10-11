@@ -1,7 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useState, type ComponentType } from "react";
 import { Navigate, Route, Routes, matchPath, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
-import { PageLoadingState } from "@/components/ui/loading-state";
+import { PageSkeleton } from "@/components/common/page-skeleton";
+import { repositoryLayoutCache } from "@/lib/repository-layout-cache";
 import { getCurrentUser, type AuthUser } from "@/lib/api";
 
 function lazyPage<TProps>(
@@ -124,6 +125,7 @@ function App() {
     } catch {
       setUser(null);
     } finally {
+      repositoryLayoutCache.clear();
       setAuthLoading(false);
     }
   }, []);
@@ -136,49 +138,45 @@ function App() {
     document.title = titleForPath(location.pathname);
   }, [location.pathname]);
 
-  if (authLoading) {
-    return (
-      <div className="app-container py-6 md:py-8">
-        <PageLoadingState />
-      </div>
-    );
-  }
-
   return (
-    <AppShell user={user} onAuthChanged={refreshAuth}>
+    <AppShell user={user} authPending={authLoading} onAuthChanged={refreshAuth}>
       {/* AppShell 的 main 已提供 app-container 与页面留白。 */}
-      <Suspense fallback={<PageLoadingState />}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
-          <Route
-            path="/register"
-            element={<RegisterPage user={user} onAuthChanged={refreshAuth} />}
-          />
-          <Route path="/dashboard" element={<MyRepositoriesPage user={user} />} />
-          <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
-          <Route path="/tokens" element={<TokensPage user={user} />} />
-          <Route
-            path="/repo/:owner/:repo/settings"
-            element={<RepositorySettingsPage user={user} />}
-          />
-          <Route
-            path="/repo/:owner/:repo/collaborators"
-            element={<RepositoryCollaboratorsPage user={user} />}
-          />
-          <Route path="/repo/:owner/:repo/commits" element={<RepositoryCommitsPage />} />
-          <Route
-            path="/repo/:owner/:repo/branches"
-            element={<RepositoryBranchesPage user={user} />}
-          />
-          <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
-          <Route
-            path="/repo/:owner/:repo/:kind/:ref/*"
-            element={<RepositoryPage user={user} />}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+      {authLoading ? (
+        <PageSkeleton />
+      ) : (
+        <Suspense fallback={<PageSkeleton user={user} />}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage user={user} onAuthChanged={refreshAuth} />} />
+            <Route
+              path="/register"
+              element={<RegisterPage user={user} onAuthChanged={refreshAuth} />}
+            />
+            <Route path="/dashboard" element={<MyRepositoriesPage user={user} />} />
+            <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
+            <Route path="/tokens" element={<TokensPage user={user} />} />
+            <Route
+              path="/repo/:owner/:repo/settings"
+              element={<RepositorySettingsPage user={user} />}
+            />
+            <Route
+              path="/repo/:owner/:repo/collaborators"
+              element={<RepositoryCollaboratorsPage user={user} />}
+            />
+            <Route path="/repo/:owner/:repo/commits" element={<RepositoryCommitsPage />} />
+            <Route
+              path="/repo/:owner/:repo/branches"
+              element={<RepositoryBranchesPage user={user} />}
+            />
+            <Route path="/repo/:owner/:repo" element={<RepositoryPage user={user} />} />
+            <Route
+              path="/repo/:owner/:repo/:kind/:ref/*"
+              element={<RepositoryPage user={user} />}
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      )}
     </AppShell>
   );
 }

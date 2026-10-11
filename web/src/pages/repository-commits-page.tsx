@@ -2,14 +2,15 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useCommitDetail } from "@/hooks/use-commit-detail";
 import { RepositoryLayout } from "@/components/common/repository-layout";
-import { BranchSelect } from "@/components/common/branch-select";
+import { BranchSelect, BranchSelectSkeleton } from "@/components/common/branch-select";
 import { CommitRow } from "@/components/common/commit-row";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorAlert } from "@/components/common/error-alert";
 import { Panel } from "@/components/common/panel";
 import { Pagination } from "@/components/common/pagination";
 import { RepositoryCommitDetailSheet } from "@/components/repository/repository-commit-detail-sheet";
-import { PageLoadingState, InlineLoadingState } from "@/components/ui/loading-state";
+import { CommitListSkeleton } from "@/components/common/list-skeletons";
+import { useLoadingSkeleton } from "@/hooks/use-loading-skeleton";
 import {
   formatApiError,
   getRepositoryCommits,
@@ -27,6 +28,7 @@ export function RepositoryCommitsPage() {
   const [detail, setDetail] = useState<RepositoryDetailResponse | null>(null);
   const [history, setHistory] = useState<CommitHistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const showSkeleton = useLoadingSkeleton(loading, history !== null);
   const [error, setError] = useState<string | null>(null);
   const commit = useCommitDetail(owner, repo, oid);
   useEffect(() => {
@@ -65,18 +67,22 @@ export function RepositoryCommitsPage() {
   function browse(commitOid: string) {
     navigate(`/repo/${owner}/${repo}/tree/${encodeURIComponent(commitOid)}`);
   }
-  if (!detail) return error ? <ErrorAlert error={error} /> : <PageLoadingState />;
+  if (!detail && error) return <ErrorAlert error={error} />;
   return (
-    <RepositoryLayout detail={detail}>
-      <BranchSelect
-        detail={detail}
-        disabled={loading}
-        onChange={(value) => update({ ref: value, page: null, oid: null })}
-      />
+    <RepositoryLayout owner={owner} repo={repo} detail={detail}>
+      {detail ? (
+        <BranchSelect
+          detail={detail}
+          disabled={loading}
+          onChange={(value) => update({ ref: value, page: null, oid: null })}
+        />
+      ) : (
+        <BranchSelectSkeleton />
+      )}
       <Panel>
         <ErrorAlert inset error={error} />
-        {loading ? (
-          <InlineLoadingState />
+        {showSkeleton ? (
+          <CommitListSkeleton rows={8} browseAction />
         ) : history?.commits.length ? (
           <>
             <ul className="divide-y divide-border-subtle">

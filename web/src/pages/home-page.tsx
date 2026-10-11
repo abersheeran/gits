@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { RepositoryList } from "@/components/common/repository-list";
 import { ErrorAlert } from "@/components/common/error-alert";
-import { InlineLoadingState } from "@/components/ui/loading-state";
+import { TableSkeleton } from "@/components/common/list-skeletons";
 
 import { listPublicRepositories, formatApiError, type RepositoryRecord } from "@/lib/api";
 export function HomePage() {
@@ -34,7 +34,7 @@ export function HomePage() {
       <Panel>
         <ErrorAlert inset error={error} />
         {loading ? (
-          <InlineLoadingState />
+          <TableSkeleton variant="repositories" />
         ) : (
           !error && <RepositoryList repositories={repositories} publicOnly />
         )}
