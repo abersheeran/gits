@@ -20,7 +20,7 @@ describe("AuthService token lifecycle", () => {
         ]
       }
     ]);
-    const service = new AuthService(db, "test-secret");
+    const service = new AuthService(db);
     const tokens = await service.listAccessTokens("user-1");
 
     expect(tokens).toHaveLength(1);
@@ -34,7 +34,7 @@ describe("AuthService token lifecycle", () => {
         first: () => null
       }
     ]);
-    const service = new AuthService(db, "test-secret");
+    const service = new AuthService(db);
     const result = await service.revokeAccessToken("user-1", "tok-missing");
     expect(result).toBe(false);
   });
@@ -54,7 +54,7 @@ describe("AuthService token lifecycle", () => {
         }
       }
     ]);
-    const service = new AuthService(db, "test-secret");
+    const service = new AuthService(db);
     const result = await service.revokeAccessToken("user-1", "tok-1");
 
     expect(result).toBe(true);

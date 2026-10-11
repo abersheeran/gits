@@ -41,3 +41,5 @@
 | GithubSyncSkeleton / GithubTableSkeleton | `github-sync-skeleton.tsx` | 同步总览单面板与源详情的同形状骨架；source / sources 区分内容，announce 控制播报。 |
 | RepositoryMirrorPanel | `repository-mirror-panel.tsx` | 仓库设置的同步区，展示来源与状态，支持立即同步、确认停止并刷新详情。 |
 | GithubSourceTable | `github-source-table.tsx` | GitHub App 同步源表格，每页 50 条，复用 Pagination；展示账号、仓库范围与状态，通过回调同步、设置和解除绑定，manageUrl 打开 GitHub 安装设置。 |
+
+`TableSkeleton` 的 `sessions` 变体用于登录设备列表，配合 `Pagination`、`RelativeTime`、`IconButton` 和 `ConfirmDialog` 复用分页与吊销交互。

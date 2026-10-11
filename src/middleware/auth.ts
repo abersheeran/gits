@@ -37,7 +37,7 @@ function parseBasicAuthHeader(headerValue: string | null): {
 }
 
 function authServiceFromContext(c: Context<AppEnv>) {
-  return new AuthService(c.env.DB, c.env.JWT_SECRET);
+  return new AuthService(c.env.DB);
 }
 
 export const optionalSession: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -45,7 +45,7 @@ export const optionalSession: MiddlewareHandler<AppEnv> = async (c, next) => {
   const bearerToken = parseBearerToken(authHeader);
   const cookieToken = getCookie(c, "session");
   const authService = authServiceFromContext(c);
-  let user: AuthUser | null = null;
+  let user: (AuthUser & { sessionId?: string }) | null = null;
 
   if (bearerToken) {
     user = await authService.verifySessionToken(bearerToken);
@@ -63,7 +63,8 @@ export const optionalSession: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   if (user) {
-    c.set("sessionUser", user);
+    c.set("sessionUser", { id: user.id, username: user.username });
+    if (user.sessionId) c.set("sessionId", user.sessionId);
   }
 
   await next();

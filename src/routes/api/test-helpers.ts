@@ -18,7 +18,6 @@ export function createBaseEnv(db: D1Database): AppEnv["Bindings"] {
     REPOSITORY_OBJECTS: {
       getByName: vi.fn()
     } as unknown as DurableObjectNamespace,
-    JWT_SECRET: "test-secret",
     ALLOW_USER_REGISTRATION: "true"
   };
 }

@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { SignJWT, jwtVerify } from "jose";
+import { SessionService, type SessionContext } from "./session-service";
 import type { AuthUser } from "../types";
 
 type UserRow = {
@@ -30,14 +30,7 @@ type AccessTokenMetadata = {
 };
 
 export class AuthService {
-  constructor(
-    private readonly db: D1Database,
-    private readonly jwtSecret: string
-  ) {}
-
-  private get jwtSecretKey(): Uint8Array {
-    return new TextEncoder().encode(this.jwtSecret);
-  }
+  constructor(private readonly db: D1Database) {}
 
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 12);
@@ -109,40 +102,12 @@ export class AuthService {
     return row ?? null;
   }
 
-  async createSessionToken(user: AuthUser): Promise<string> {
-    return new SignJWT({ username: user.username })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setSubject(user.id)
-      .setIssuedAt()
-      .setExpirationTime("7d")
-      .sign(this.jwtSecretKey);
+  async createSessionToken(user: AuthUser, context: SessionContext = {}): Promise<string> {
+    return new SessionService(this.db).create(user, context);
   }
 
-  async verifySessionToken(token: string): Promise<AuthUser | null> {
-    try {
-      const payload = await jwtVerify(token, this.jwtSecretKey, {
-        algorithms: ["HS256"]
-      });
-      const userId = payload.payload.sub;
-      const username = payload.payload.username;
-
-      if (typeof userId !== "string" || typeof username !== "string") {
-        return null;
-      }
-
-      const user = await this.getUserById(userId);
-      if (!user) {
-        return null;
-      }
-
-      if (user.username !== username) {
-        return null;
-      }
-
-      return user;
-    } catch {
-      return null;
-    }
+  async verifySessionToken(token: string): Promise<(AuthUser & { sessionId: string }) | null> {
+    return new SessionService(this.db).verify(token);
   }
 
   async createAccessToken(input: {

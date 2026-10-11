@@ -11,13 +11,13 @@ import { sessionCookieSecure, type ApiRouter } from "./shared";
 export function registerGithubOauthRoutes(router: ApiRouter) {
   router.get("/github/authorize", optionalSession, async (c) => {
     const user = c.get("sessionUser");
-    if (!user) {
+    if (!user || !c.get("sessionId")) {
       return c.redirect("/login", 302);
     }
     if (!githubConfigured(c.env)) {
       return c.redirect("/sync?error=not_configured", 302);
     }
-    const result = await authorizeGithub(c.env, new URL(c.req.url).origin, user.id);
+    const result = await authorizeGithub(c.env, new URL(c.req.url).origin, user.id, c.get("sessionId")!);
     setCookie(c, OAUTH_COOKIE, result.cookie, {
       path: "/api/github", httpOnly: true, sameSite: "Lax",
       secure: sessionCookieSecure(c.req.url), maxAge: 600
@@ -42,7 +42,7 @@ export function registerGithubOauthRoutes(router: ApiRouter) {
       return c.redirect("/sync?error=not_configured", 302);
     }
     const user = c.get("sessionUser");
-    const verifier = await verifyOauthState(c.env, cookie, c.req.query("state"), user?.id);
+    const verifier = await verifyOauthState(c.env, cookie, c.req.query("state"), user?.id, c.get("sessionId"));
     if (!verifier || !user) {
       return c.redirect("/sync?error=state", 302);
     }

@@ -8,7 +8,6 @@ function createEnv(): AppEnv["Bindings"] {
   return {
     DB: {} as D1Database,
     GIT_BUCKET: {} as R2Bucket,
-    JWT_SECRET: "test-secret"
   };
 }
 

@@ -66,7 +66,7 @@ export async function githubFixture(repos: GithubRepository[] = []) {
   const env: AppBindings = {
     DB: db, GIT_BUCKET: new MockR2Bucket() as unknown as R2Bucket,
     REPOSITORY_OBJECTS: createMockRepositoryObjectNamespace(() => env),
-    JWT_SECRET: "test-jwt", GITHUB_APP_ID: "789", GITHUB_APP_SLUG: "gits-test",
+    GITHUB_APP_ID: "789", GITHUB_APP_SLUG: "gits-test",
     GITHUB_APP_CLIENT_ID: `test-client-${crypto.randomUUID()}`,
     GITHUB_APP_CLIENT_SECRET: "test-client-secret",
     GITHUB_APP_WEBHOOK_SECRET: "test-webhook-secret",

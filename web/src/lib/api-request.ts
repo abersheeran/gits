@@ -42,6 +42,9 @@ export async function requestJson<T>(path: string, init: ApiRequestInit = {}): P
   });
 
   if (!response.ok) {
+    if (response.status === 401 && path !== "/api/auth/login") {
+      window.dispatchEvent(new Event("auth-expired"));
+    }
     throw new ApiError(response.status, await parseErrorMessage(response));
   }
 

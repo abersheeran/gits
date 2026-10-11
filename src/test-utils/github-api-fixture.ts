@@ -5,7 +5,7 @@ import type { GithubRepository } from "../services/github/github-client";
 
 export async function githubApiFixture(repos: GithubRepository[] = []) {
   const fixture = await githubFixture(repos);
-  const auth = new AuthService(fixture.db, fixture.env.JWT_SECRET);
+  const auth = new AuthService(fixture.db);
   const alice = await auth.createSessionToken({ id: "user", username: "alice" });
   const bob = await auth.createSessionToken({ id: "other", username: "bob" });
   const pending: Promise<unknown>[] = [];

@@ -12,6 +12,7 @@ const titles: Record<string, string> = {
   "/": "探索",
   "/dashboard": "我的仓库",
   "/tokens": "访问令牌",
+  "/sessions": "登录设备",
   "/login": "登录",
   "/register": "注册",
   "/repositories/new": "新建仓库"
@@ -29,7 +30,7 @@ export function PageSkeleton({ user }: { user?: AuthUser | null }) {
   }
   const auth = pathname === "/login" || pathname === "/register";
   const creating = pathname === "/repositories/new";
-  const action = pathname === "/dashboard" || pathname === "/tokens";
+  const action = pathname === "/dashboard" || pathname === "/tokens" || pathname === "/sessions";
   return (
     <div className={auth ? "mx-auto max-w-md" : creating ? "mx-auto max-w-xl" : undefined}>
       {titles[pathname] && (
@@ -50,7 +51,7 @@ export function PageSkeleton({ user }: { user?: AuthUser | null }) {
             variant={creating ? "repository" : pathname === "/login" ? "login" : "register"}
           />
         ) : (
-          <TableSkeleton variant={pathname === "/tokens" ? "tokens" : "repositories"} />
+          <TableSkeleton variant={pathname === "/sessions" ? "sessions" : pathname === "/tokens" ? "tokens" : "repositories"} />
         )}
       </Panel>
     </div>

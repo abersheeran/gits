@@ -117,7 +117,7 @@ it("imports, incrementally fetches, force-aligns and clones a valid repository",
   expect((await runGit(["rev-parse", "HEAD"], finalClone)).trim()).toBe(second);
 
   await stopMirror(env, remote());
-  const auth = new AuthService(env.DB, env.JWT_SECRET);
+  const auth = new AuthService(env.DB);
   const token = await auth.createAccessToken({ userId: "user", name: "test" });
   const pushUrl = appServer.origin.replace("http://", `http://alice:${token.token}@`)
     + "/alice/repo-1.git";

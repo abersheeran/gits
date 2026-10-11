@@ -169,6 +169,7 @@ describe("API platform routes", () => {
   it("preserves leading and trailing spaces in password before hashing", async () => {
     let insertedHash = "";
     const originalPassword = "  KeepSpaces123  ";
+    vi.spyOn(AuthService.prototype, "createSessionToken").mockResolvedValue("session-token");
     const db = createMockD1Database([
       {
         when: "INSERT INTO users",

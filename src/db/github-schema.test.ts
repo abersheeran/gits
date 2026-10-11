@@ -8,7 +8,7 @@ import { dispatchMirrorTasks } from "../services/github/scheduler";
 it("applies all migrations with the same tables and indexes as schema.sql", () => {
   const migrated = new DatabaseSync(":memory:", { enableDoubleQuotedStringLiterals: true });
   const schema = new DatabaseSync(":memory:", { enableDoubleQuotedStringLiterals: true });
-  for (const filename of ["0001_init.sql", "0002_github_sync.sql"]) {
+  for (const filename of ["0001_init.sql", "0002_github_sync.sql", "0003_user_sessions.sql"]) {
     migrated.exec(readFileSync(new URL(`./migrations/${filename}`, import.meta.url), "utf8"));
   }
   schema.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));

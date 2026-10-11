@@ -6,7 +6,7 @@ A personal Git repository host built on Cloudflare Workers, focused on Git stora
 
 - **Git hosting** — Smart HTTP clone, fetch, and push, with shallow clone and object filters. Each repository stores Git objects and refs in its Durable Object SQLite database; packs stream in and out without loading the entire repository. R2 is used only to import legacy repositories.
 - **GitHub sync** — Install a GitHub App to mirror personal or organization repositories, with Webhook updates. Mirrors are read-only until you stop synchronization.
-- **Authentication** — Register, login, logout, JWT sessions, and Personal Access Tokens (PAT). Git Basic Auth uses a username and PAT.
+- **Authentication** — Register, login, logout, revocable server-side sessions and login device management, and Personal Access Tokens (PAT). Git Basic Auth uses a username and PAT.
 - **Repositories** — Create, rename, update visibility and description, delete, and manage collaborators with `read / write / admin` permissions.
 - **Branches** — Owners can create and delete branches and set the default branch through the web UI or API.
 - **Code browsing** — README, directory trees, text files, paginated commits, commit details with diffs, and path history.
@@ -39,12 +39,11 @@ Use Node.js 22.12+ with npm and Git.
 npm install
 npm --prefix web install
 cp .env.example .env
-npm run secret:dev
 npm run build:web
 npm run dev
 ```
 
-Enter a local JWT secret when prompted. `npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
+`npm run dev` applies local D1 migrations and starts the Worker with `.env`. The initial build supplies the static assets configured in `wrangler.jsonc`.
 
 In another terminal:
 
@@ -61,13 +60,11 @@ Open the URL printed by Vite. Its proxy sends API, health, and Git requests to `
 The local `.env` template contains:
 
 ```dotenv
-JWT_SECRET=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
 | Variable | Behavior |
 | --- | --- |
-| `JWT_SECRET` | Required secret for signing login JWTs |
 | `GITHUB_APP_ID` | GitHub App numeric ID |
 | `GITHUB_APP_SLUG` | GitHub App URL slug |
 | `GITHUB_APP_CLIENT_ID` | App OAuth client ID and JWT issuer |
@@ -78,7 +75,7 @@ ALLOW_USER_REGISTRATION=true
 | `UPLOAD_PACK_MAX_BODY_BYTES` | Fetch request body limit; defaults to 8 MiB |
 | `RECEIVE_PACK_MAX_BODY_BYTES` | Optional push request body limit; unset means platform limits only |
 
-Local `.env` values are loaded by the development script. Configure production variables separately; use `npm run secret:prod` for the production JWT secret. All six GitHub App settings are required to enable synchronization.
+Local `.env` values are loaded by the development script. Configure production variables separately. Login sessions do not require a signing secret. All six GitHub App settings are required to enable synchronization.
 
 ### Cloudflare Bindings
 
@@ -107,14 +104,10 @@ npx wrangler r2 bucket create gits-preview
 
 Copy the returned production D1 ID into `wrangler.jsonc` → `d1_databases[0].database_id`. Copy the Preview D1 ID into both `wrangler.jsonc` → `previews.d1_databases[0].database_id` and `wrangler.preview-migrations.jsonc` → `d1_databases[0].database_id`; both Preview entries must point at the same database.
 
-Set separate production and Preview JWT secrets once before deploying:
-
-```bash
-npm run secret:prod
-npx wrangler preview base-config secret put JWT_SECRET
-```
-
-The Preview base secret applies to new Previews. To update an existing Preview, use `npx wrangler preview secret put JWT_SECRET --name <preview>`.
+Login uses random, server-side sessions stored in D1. When upgrading, apply migration
+`0003_user_sessions.sql` before deploying the new Worker (the deploy scripts do this automatically).
+Existing JWT sessions are invalidated; users must log in again. Existing PATs remain valid.
+`JWT_SECRET` is no longer used. GitHub App authentication still uses GitHub's required App JWTs.
 
 ### Workers Builds + Worker Previews
 
@@ -171,9 +164,7 @@ These target local D1, production D1, and preview D1 respectively.
 | `npm run cf-typegen` | Generate Cloudflare binding types |
 | `npm run d1:create:remote` | Create the remote D1 database named `gits` |
 | `npm run db:migrate:local` / `npm run db:migrate` | Apply local / remote D1 migrations |
-| `npm run secret:dev` / `npm run secret:dev:jwt` | Set the local JWT secret |
 | `npm run secret:dev:set -- KEY FILE` | Prompt for a local variable and write it to the specified file |
-| `npm run secret:prod` / `npm run secret:prod:jwt` | Set the production JWT secret |
 | `npm run github-app:create -- --url <origin> --target <prod\|dev> [--org <org>]` | Register a GitHub App and save its six credentials |
 
 ## Project Structure
@@ -206,8 +197,15 @@ gits/
 - `GET /api/me` — Current user
 - `POST /api/auth/tokens`, `GET /api/auth/tokens` — Create and list PATs
 - `DELETE /api/auth/tokens/:tokenId` — Revoke a PAT
+- `GET /api/auth/sessions?page=1` — List active login devices, 20 per page
+- `DELETE /api/auth/sessions/:sessionId` — Revoke another login session
+- `DELETE /api/auth/sessions` — Revoke every other session, keeping the current one
 
-API authentication accepts the login cookie or Bearer JWT/PAT. Public repository reads do not require authentication.
+API authentication accepts the login cookie or Bearer session tokens/PATs. Public repository reads do not require authentication.
+Sessions expire after seven days. Logout revokes the server-side session. Manage devices at
+`/sessions`; revoking a device blocks subsequent requests using its token. Device management
+requires a login session, not a PAT. API responses are not cached, and cross-origin mutations
+are rejected. Browser/OS labels come from User-Agent and identify login sessions, not physical devices.
 
 ### Repositories and Collaborators
 

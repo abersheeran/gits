@@ -24,7 +24,6 @@ export type AppBindings = {
   GIT_BUCKET: R2Bucket;
   REPOSITORY_OBJECTS: DurableObjectNamespace;
   ASSETS?: Fetcher;
-  JWT_SECRET: string;
   GITHUB_APP_ID?: string;
   GITHUB_APP_SLUG?: string;
   GITHUB_APP_CLIENT_ID?: string;
@@ -41,6 +40,7 @@ export type AppEnv = {
   Bindings: AppBindings;
   Variables: {
     sessionUser?: AuthUser;
+    sessionId?: string;
     basicAuthUser?: AuthUser;
   };
 };

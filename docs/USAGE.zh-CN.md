@@ -18,11 +18,10 @@
 npm install
 npm --prefix web install
 cp .env.example .env
-npm run secret:dev
 npm run build:web
 ```
 
-按提示输入本地 JWT 密钥。首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
+首次构建生成 `wrangler.jsonc` 所需的前端静态资源。可运行 `npm run typecheck` 和 `npm run test` 检查后端，前端构建也会检查前端 TypeScript。
 
 ## 4. Cloudflare 资源与配置
 
@@ -58,13 +57,11 @@ Preview 绑定与变量在 `previews` 中显式配置，不继承生产设置；
 本地 `.env` 模板：
 
 ```dotenv
-JWT_SECRET=replace-with-a-strong-secret
 ALLOW_USER_REGISTRATION=true
 ```
 
 | 变量 | 用途与配置 |
 | --- | --- |
-| `JWT_SECRET` | 登录 JWT 密钥；本地 `npm run secret:dev:jwt`，生产 `npm run secret:prod:jwt` |
 | `GITHUB_APP_ID` | GitHub App 数字 ID |
 | `GITHUB_APP_SLUG` | App 地址中的 slug |
 | `GITHUB_APP_CLIENT_ID` | OAuth Client ID，也是 App JWT 的签发者 |
@@ -76,14 +73,9 @@ ALLOW_USER_REGISTRATION=true
 
 开发脚本读取 `.env`，生产变量需要单独配置。部署时可用 `--var ALLOW_USER_REGISTRATION:true` 开放注册。
 
-生产与 Preview 首次部署前分别设置 JWT 密钥：
+登录使用 D1 服务端会话，无需 JWT 密钥。升级时先应用 `0003_user_sessions.sql`（部署脚本会自动迁移），旧 JWT 登录态会失效，用户需要重新登录；既有 PAT 不受影响。`JWT_SECRET` 不再使用。GitHub App 调用 GitHub API 仍使用其协议要求的 App JWT。
 
-```bash
-npm run secret:prod
-npx wrangler preview base-config secret put JWT_SECRET
-```
-
-Base 密钥用于新建的 Preview；已有 Preview 使用 `npx wrangler preview secret put JWT_SECRET --name <preview>` 更新。Preview 已在 `previews.vars` 中设置 `ALLOW_USER_REGISTRATION="true"`。
+Preview 已在 `previews.vars` 中设置 `ALLOW_USER_REGISTRATION="true"`。
 
 生产环境每 5 分钟运行 Cron，检查到期的发现和镜像任务。Webhook 即时触发同步，每 6 小时完整发现一次兜底。Worker Previews 不支持 GitHub 同步：App 只有一组 Webhook 与 Setup 地址，指向生产环境。不要在 `previews` 配置 App 密钥或 Cron。
 
@@ -133,7 +125,6 @@ Preview 地址格式为 `<branch>-gits.<subdomain>.workers.dev`。手动运行 `
 远程资源配置完成后部署：
 
 ```bash
-npm run secret:prod
 npm run deploy -- --var ALLOW_USER_REGISTRATION:true
 ```
 
@@ -151,7 +142,7 @@ curl -sS "$BASE_URL/api/healthz"
 
 ## 6. 认证与权限
 
-注册和登录设置有效期为 7 天的 JWT 登录 cookie。API 也接受 `Authorization: Bearer <JWT或PAT>`；Git Basic Auth 使用用户名和该用户的 PAT，不能用账户密码代替。
+注册和登录设置固定有效期为 7 天的随机会话 cookie，每次请求校验服务端记录。API 也接受 `Authorization: Bearer <会话令牌或PAT>`；Git Basic Auth 使用用户名和该用户的 PAT，不能用账户密码代替。
 
 | 身份 | 能力 |
 | --- | --- |
@@ -161,7 +152,7 @@ curl -sS "$BASE_URL/api/healthz"
 | `admin` 协作者 | 读取、Git push、管理协作者 |
 | 所有者 | 上述全部能力，以及仓库设置、删除、分支管理 |
 
-PAT 明文只在创建时返回，可设置到期时间或撤销；PAT 不限制到单个仓库。登出只清除登录 cookie，不撤销已有 JWT 或 PAT。
+PAT 明文只在创建时返回，可设置到期时间或撤销；PAT 不限制到单个仓库。登出删除服务端会话并清除 cookie，该会话不能继续使用；PAT 需单独撤销。
 
 登录 cookie 使用 HttpOnly 和 SameSite=Lax；HTTPS 下设置 Secure，本地 HTTP 不设置 Secure，可直接使用浏览器或 curl cookie 文件。
 
@@ -174,6 +165,8 @@ PAT 明文只在创建时返回，可设置到期时间或撤销；PAT 不限制
 - `/dashboard`：拥有或参与协作的仓库。
 - `/repositories/new`：创建仓库。
 - `/tokens`：创建、查看和撤销 PAT；创建后保存令牌明文。
+- `/sessions`：从顶栏设备图标或移动端「登录设备」进入，查看登录 IP、浏览器/系统、登录时间与最近活动。每页 20 条，可确认退出指定其他设备或全部其他设备，保留当前登录。设备表示独立登录会话，不保证对应不同物理设备。
+- API：`GET /api/auth/sessions?page=1` 返回 `{ sessions, hasNext }`，`DELETE /api/auth/sessions/:sessionId` 吊销单台，`DELETE /api/auth/sessions` 吊销全部其他登录。仅登录会话可用，PAT 不可管理设备。吊销在后续请求生效，最近活动最多每分钟更新一次。
 
 ### 7.2 仓库与代码浏览
 

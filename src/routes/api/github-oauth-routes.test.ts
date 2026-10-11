@@ -1,4 +1,4 @@
-import { jwtVerify, SignJWT } from "jose";
+
 import { afterEach, expect, it, vi } from "vitest";
 import { githubApiFixture } from "../../test-utils/github-api-fixture";
 import { githubInstallation, oauthUserToken } from "../../test-utils/github-fixture";
@@ -16,9 +16,10 @@ it("uses state and PKCE to bind personal and administrator installations", async
   expect(url.searchParams.get("client_id")).toBe(env.GITHUB_APP_CLIENT_ID);
   expect(url.searchParams.get("redirect_uri")).toBe("https://gits.test/api/github/oauth/callback");
   expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-  const { payload } = await jwtVerify(cookie.split("=")[1]!, encoder.encode(env.JWT_SECRET));
-  expect(payload.userId).toBe("user");
-  expect(payload.exp! - payload.iat!).toBe(600);
+  const payload = sqlite.prepare("SELECT * FROM github_oauth_states").get()!;
+  expect(payload.user_id).toBe("user");
+  expect(Number(payload.expires_at) - Date.now()).toBeGreaterThan(590_000);
+  expect(cookie).not.toContain(String(payload.code_verifier));
   const digest = await crypto.subtle.digest(
     "SHA-256", encoder.encode(payload.code_verifier as string)
   );
@@ -67,15 +68,11 @@ it("reports not_owner, not_admin and taken, and ignores installations for other 
 
 it.each(["mismatch", "expired", "session", "missing", "tampered"])(
   "rejects invalid OAuth state: %s", async (reason) => {
-    const { env, request, oauth, fetcher } = await githubApiFixture();
+    const { sqlite, request, oauth, fetcher } = await githubApiFixture();
     const auth = await oauth();
     let cookie = auth.cookie;
     if (reason === "expired") {
-      const expired = await new SignJWT({
-        userId: "user", state: auth.state, code_verifier: "verifier"
-      }).setProtectedHeader({ alg: "HS256" }).setIssuer("gits-github-oauth")
-        .setExpirationTime(Math.floor(Date.now() / 1000) - 1).sign(encoder.encode(env.JWT_SECRET));
-      cookie = `gits_github_oauth=${expired}`;
+      sqlite.exec("UPDATE github_oauth_states SET expires_at = 0");
     }
     if (reason === "tampered") {
       cookie += "broken";
@@ -141,4 +138,16 @@ it("handles setup and login/configuration redirects without trusting installatio
   expect((await request("/github/authorize")).headers.get("Location"))
     .toBe("/sync?error=not_configured");
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("consumes OAuth state once and invalidates it when the initiating session is revoked", async () => {
+  const { oauth, request, flush, sqlite } = await githubApiFixture();
+  const { cookie, state } = await oauth();
+  const path = `/github/oauth/callback?code=once&state=${state}`;
+  expect((await request(path, { headers: { cookie } })).headers.get("Location")).toBe("/sync?bound=1");
+  await flush();
+  expect((await request(path, { headers: { cookie } })).headers.get("Location")).toBe("/sync?error=state");
+  await oauth();
+  sqlite.exec("DELETE FROM user_sessions WHERE user_id = 'user'");
+  expect(sqlite.prepare("SELECT count(*) n FROM github_oauth_states").get()!.n).toBe(0);
 });

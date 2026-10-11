@@ -21,7 +21,6 @@ function createEnv(): AppEnv["Bindings"] {
   return {
     DB: createMockD1Database([]),
     GIT_BUCKET: new MockR2Bucket() as unknown as R2Bucket,
-    JWT_SECRET: "test-secret"
   };
 }
 
@@ -47,7 +46,6 @@ function createPrivateRepositoryEnv(owner: string, repo: string): AppEnv["Bindin
       }
     ]),
     GIT_BUCKET: new MockR2Bucket() as unknown as R2Bucket,
-    JWT_SECRET: "test-secret"
   };
 }
 

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthorAvatar } from "@/components/repository/author-avatar";
-import { Menu } from "lucide-react";
+import { Menu, Monitor } from "lucide-react";
 import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +85,17 @@ export function AppShell({
             <AuthorAvatar name={user.username} className="h-7 w-7 shrink-0" />
             <span className="truncate">{user.username}</span>
           </span>
+          {mobile ? (
+            <Button size="sm" variant="ghost" className="w-full justify-start px-3" asChild>
+              <Link to="/sessions" onClick={() => setOpen(false)}>登录设备</Link>
+            </Button>
+          ) : (
+            <IconButton label="登录设备" asChild>
+              <Link to="/sessions" aria-current={pathname === "/sessions" ? "page" : undefined}>
+                <Monitor className="h-4 w-4" />
+              </Link>
+            </IconButton>
+          )}
           <Button
             size="sm"
             variant="ghost"

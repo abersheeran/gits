@@ -12,7 +12,6 @@ function createEnv(db: D1Database, bucket: R2Bucket): AppEnv["Bindings"] {
   const env = {
     DB: db,
     GIT_BUCKET: bucket,
-    JWT_SECRET: "test-secret"
   } as AppEnv["Bindings"];
   env.REPOSITORY_OBJECTS = createMockRepositoryObjectNamespace(() => env);
   return env;

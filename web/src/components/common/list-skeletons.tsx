@@ -1,7 +1,7 @@
 import { Skeleton, SkeletonRegion } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-type TableVariant = "repositories" | "tokens" | "collaborators" | "branches";
+type TableVariant = "repositories" | "sessions" | "tokens" | "collaborators" | "branches";
 const widths = ["w-2/5", "w-1/3", "w-1/2", "w-1/4", "w-3/5"];
 
 export function TableSkeleton({
@@ -14,7 +14,7 @@ export function TableSkeleton({
   announce?: boolean;
 }) {
   const hasPermission = variant === "collaborators";
-  const hasStatus = variant === "tokens";
+  const hasStatus = variant === "tokens" || variant === "sessions";
   const columns = cn(
     "grid items-center",
     variant === "repositories" && "grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem]",

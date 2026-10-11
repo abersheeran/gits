@@ -24,9 +24,9 @@ it("maps conversion results to six secrets and updates env while preserving othe
   expect(secrets.GITHUB_APP_PRIVATE_KEY).not.toContain("\n");
   expect(Buffer.from(secrets.GITHUB_APP_PRIVATE_KEY, "base64").toString())
     .toContain("BEGIN PRIVATE KEY");
-  const current = "JWT_SECRET=keep\r\nGITHUB_APP_CLIENT_SECRET=old\r\n";
+  const current = "OTHER_SECRET=keep\r\nGITHUB_APP_CLIENT_SECRET=old\r\n";
   const updated = updateEnv(current, secrets);
-  expect(updated).toContain("JWT_SECRET=keep\n");
+  expect(updated).toContain("OTHER_SECRET=keep\n");
   expect(updated).toContain("GITHUB_APP_CLIENT_SECRET=secret$&\n");
   expect(updated.match(/^GITHUB_APP_CLIENT_SECRET=/gm)).toHaveLength(1);
   expect(updateEnv(updated, secrets)).toBe(updated);

@@ -43,6 +43,9 @@ const RepositoryPage = lazyPage(async () => ({
 const RepositorySettingsPage = lazyPage(async () => ({
   default: (await import("@/pages/repository-settings-page")).RepositorySettingsPage
 }));
+const SessionsPage = lazyPage(async () => ({
+  default: (await import("@/pages/sessions-page")).SessionsPage
+}));
 const TokensPage = lazyPage(async () => ({
   default: (await import("@/pages/tokens-page")).TokensPage
 }));
@@ -109,6 +112,7 @@ function titleForPath(pathname: string): string {
   }
   if (pathname === "/sync" || matchPath("/sync/sources/:sourceId", pathname))
     return `GitHub 同步 · ${APP_NAME}`;
+  if (pathname === "/sessions") return `登录设备 · ${APP_NAME}`;
   if (pathname === "/tokens") {
     return `访问令牌 · ${APP_NAME}`;
   }
@@ -142,6 +146,9 @@ function App() {
 
   useEffect(() => {
     void refreshAuth();
+    const onExpired = () => { void refreshAuth(); };
+    window.addEventListener("auth-expired", onExpired);
+    return () => window.removeEventListener("auth-expired", onExpired);
   }, [refreshAuth]);
 
   useEffect(() => {
@@ -166,6 +173,7 @@ function App() {
             <Route path="/sync/sources/:sourceId" element={<SyncSourcePage user={user} />} />
             <Route path="/dashboard" element={<MyRepositoriesPage user={user} />} />
             <Route path="/repositories/new" element={<NewRepositoryPage user={user} />} />
+            <Route path="/sessions" element={<SessionsPage user={user} />} />
             <Route path="/tokens" element={<TokensPage user={user} />} />
             <Route
               path="/repo/:owner/:repo/settings"

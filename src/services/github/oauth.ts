@@ -1,11 +1,10 @@
-import { SignJWT, jwtVerify } from "jose";
+import { hashToken, randomToken } from "../session-service";
 import type { AppBindings } from "../../types";
 import { githubWebBase } from "./config";
 import { GithubClient, GithubError } from "./github-client";
 import { bindInstallations } from "./oauth-binding";
 
 const encoder = new TextEncoder();
-const issuer = "gits-github-oauth";
 export const OAUTH_COOKIE = "gits_github_oauth";
 
 function base64url(bytes: Uint8Array): string {
@@ -17,15 +16,20 @@ export function callbackUrl(origin: string): string {
   return `${origin}/api/github/oauth/callback`;
 }
 
-export async function authorizeGithub(env: AppBindings, origin: string, userId: string) {
+export async function authorizeGithub(env: AppBindings, origin: string, userId: string, sessionId: string) {
   const state = base64url(crypto.getRandomValues(new Uint8Array(32)));
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest(
     "SHA-256", encoder.encode(verifier)
   )));
-  const cookie = await new SignJWT({ userId, state, code_verifier: verifier })
-    .setProtectedHeader({ alg: "HS256" }).setIssuer(issuer).setIssuedAt()
-    .setExpirationTime("10m").sign(encoder.encode(env.JWT_SECRET));
+  const cookie = randomToken();
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM github_oauth_states WHERE expires_at <= ?").bind(now),
+    env.DB.prepare(`INSERT INTO github_oauth_states
+      (token_hash, user_id, session_id, state, code_verifier, expires_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(await hashToken(cookie), userId, sessionId, state, verifier, now + 600_000)
+  ]);
   const url = new URL(`${githubWebBase(env)}/login/oauth/authorize`);
   url.search = new URLSearchParams({
     client_id: env.GITHUB_APP_CLIENT_ID!, state, code_challenge: challenge,
@@ -36,23 +40,16 @@ export async function authorizeGithub(env: AppBindings, origin: string, userId: 
 
 export async function verifyOauthState(
   env: AppBindings, cookie: string | undefined,
-  state: string | undefined, userId: string | undefined
+  state: string | undefined, userId: string | undefined, sessionId: string | undefined
 ): Promise<string | null> {
-  if (!cookie || !state || !userId) {
-    return null;
-  }
-  try {
-    const { payload } = await jwtVerify(cookie, encoder.encode(env.JWT_SECRET), {
-      algorithms: ["HS256"], issuer
-    });
-    if (payload.state !== state || payload.userId !== userId ||
-      typeof payload.code_verifier !== "string") {
-      return null;
-    }
-    return payload.code_verifier;
-  } catch {
-    return null;
-  }
+  if (!cookie || !/^[a-f0-9]{64}$/.test(cookie) || !state || !userId || !sessionId) return null;
+  // Consume atomically, so the callback cannot replay a previously accepted state.
+  const row = await env.DB.prepare(`DELETE FROM github_oauth_states
+    WHERE token_hash = ? AND state = ? AND user_id = ? AND session_id = ? AND expires_at > ?
+    RETURNING code_verifier`)
+    .bind(await hashToken(cookie), state, userId, sessionId, Date.now())
+    .first<{ code_verifier: string }>();
+  return row?.code_verifier ?? null;
 }
 
 export async function finishGithubOauth(

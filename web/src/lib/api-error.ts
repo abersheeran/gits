@@ -17,6 +17,8 @@ const messages: Record<string, string> = {
   "Repository already exists": "仓库名已被使用，请更换后重试。",
   "Repository not found": "仓库不存在或你没有访问权限。",
   "User not found": "用户不存在，请检查用户名。",
+  "Session not found": "该设备已退出，请刷新列表。",
+  "Login required": "请重新登录后管理登录设备。",
   "Token not found": "令牌不存在，请刷新列表。",
   "Commit not found": "提交不存在，请选择其他提交。",
   "Path not found": "路径不存在，请返回目录查看。",

@@ -1,3 +1,5 @@
+import { getCookie } from "hono/cookie";
+import { SessionService, SESSION_MAX_AGE } from "../../services/session-service";
 import {
   AuthService,
   HTTPException,
@@ -43,7 +45,7 @@ export function registerPlatformRoutes(router: ApiRouter): void {
       throw new HTTPException(400, { message: "Password must be at least 8 characters" });
     }
 
-    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const authService = new AuthService(c.env.DB);
     let user;
     try {
       user = await authService.createUser({
@@ -58,13 +60,16 @@ export function registerPlatformRoutes(router: ApiRouter): void {
       throw error;
     }
 
-    const sessionToken = await authService.createSessionToken(user);
+    const sessionToken = await authService.createSessionToken(user, {
+      userAgent: c.req.header("user-agent") ?? "",
+      ipAddress: c.req.header("cf-connecting-ip") ?? ""
+    });
     setCookie(c, "session", sessionToken, {
       path: "/",
       httpOnly: true,
       secure: sessionCookieSecure(c.req.url),
       sameSite: "Lax",
-      maxAge: 60 * 60 * 24 * 7
+      maxAge: SESSION_MAX_AGE
     });
 
     return c.json({ user }, 201);
@@ -78,25 +83,36 @@ export function registerPlatformRoutes(router: ApiRouter): void {
       : usernameOrEmailInput;
     const password = assertString(payload.password, "password", { trim: false });
 
-    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const authService = new AuthService(c.env.DB);
     const user = await authService.verifyUserCredentials(usernameOrEmail, password);
     if (!user) {
       throw new HTTPException(401, { message: "Invalid credentials" });
     }
 
-    const sessionToken = await authService.createSessionToken(user);
+    const sessionToken = await authService.createSessionToken(user, {
+      userAgent: c.req.header("user-agent") ?? "",
+      ipAddress: c.req.header("cf-connecting-ip") ?? ""
+    });
     setCookie(c, "session", sessionToken, {
       path: "/",
       httpOnly: true,
       secure: sessionCookieSecure(c.req.url),
       sameSite: "Lax",
-      maxAge: 60 * 60 * 24 * 7
+      maxAge: SESSION_MAX_AGE
     });
 
     return c.json({ user });
   });
 
-  router.post("/auth/logout", requireSession, async (c) => {
+  router.post("/auth/logout", optionalSession, async (c) => {
+    const service = new SessionService(c.env.DB);
+    const user = c.get("sessionUser");
+    const sessionId = c.get("sessionId");
+    if (user && sessionId) await service.revoke(user.id, sessionId);
+    // Clear and revoke the browser cookie even when an Authorization header takes precedence.
+    const cookie = getCookie(c, "session");
+    const browserSession = cookie ? await service.verify(cookie) : null;
+    if (browserSession) await service.revoke(browserSession.id, browserSession.sessionId);
     deleteCookie(c, "session", {
       path: "/"
     });
@@ -119,7 +135,7 @@ export function registerPlatformRoutes(router: ApiRouter): void {
   router.post("/auth/tokens", requireSession, async (c) => {
     const payload = await parseJsonObject(c.req.raw);
     const name = assertString(payload.name, "name");
-    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const authService = new AuthService(c.env.DB);
     const sessionUser = mustSessionUser(c);
 
     const createTokenInput: { userId: string; name: string; expiresAt?: number } = {
@@ -145,14 +161,14 @@ export function registerPlatformRoutes(router: ApiRouter): void {
   });
 
   router.get("/auth/tokens", requireSession, async (c) => {
-    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const authService = new AuthService(c.env.DB);
     const sessionUser = mustSessionUser(c);
     const tokens = await authService.listAccessTokens(sessionUser.id);
     return c.json({ tokens });
   });
 
   router.delete("/auth/tokens/:tokenId", requireSession, async (c) => {
-    const authService = new AuthService(c.env.DB, c.env.JWT_SECRET);
+    const authService = new AuthService(c.env.DB);
     const sessionUser = mustSessionUser(c);
     const tokenId = assertString(c.req.param("tokenId"), "tokenId");
     const revoked = await authService.revokeAccessToken(sessionUser.id, tokenId);

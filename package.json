@@ -19,11 +19,7 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:preview": "wrangler d1 migrations apply DB --remote --config wrangler.preview-migrations.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "secret:prod:jwt": "wrangler secret put JWT_SECRET",
-    "secret:prod": "npm run secret:prod:jwt",
     "secret:dev:set": "node scripts/set-local-secret.mjs",
-    "secret:dev:jwt": "npm run secret:dev:set -- JWT_SECRET .env",
-    "secret:dev": "npm run secret:dev:jwt",
     "github-app:create": "node scripts/create-github-app.mjs"
   },
   "dependencies": {
