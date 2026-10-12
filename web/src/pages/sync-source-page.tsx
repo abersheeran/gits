@@ -1,7 +1,8 @@
 import { githubErrorMessage } from "@/lib/github-errors";
 import { useEffect, useState } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Settings } from "lucide-react";
+import { Navigate, useParams, useSearchParams } from "react-router-dom";
+import { ExternalLink, Settings } from "lucide-react";
+import { BackLink } from "@/components/common/back-link";
 import { PageHeader } from "@/components/common/page-header";
 import { Panel } from "@/components/common/panel";
 import { ErrorAlert } from "@/components/common/error-alert";
@@ -97,12 +98,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
     : [];
   return (
     <>
-      <Button asChild size="sm" variant="ghost" className="-ml-3 mb-4 gap-3">
-        <Link to="/sync">
-          <span className="flex w-8 justify-center"><ArrowLeft className="size-4" /></span>
-          返回同步
-        </Link>
-      </Button>
+      <BackLink to="/sync">返回同步</BackLink>
       <PageHeader
         leading={source && <GithubAvatar login={source.accountLogin} url={source.avatarUrl} />}
         title={source ? <span className="break-all">{source.accountLogin}</span> : "GitHub 同步"}
@@ -150,7 +146,7 @@ function SourceContent({ sourceId }: { sourceId: string }) {
                 <Settings className="size-4" />
                 设置
               </Button>
-              <Button asChild variant="ghost">
+              <Button asChild variant="outline">
                 <a href={source.manageUrl} target="_blank" rel="noreferrer">
                   <ExternalLink className="size-4" aria-hidden="true" />在 GitHub 上管理
                 </a>

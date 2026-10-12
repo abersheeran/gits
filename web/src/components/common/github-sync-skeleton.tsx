@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Panel } from "./panel";
 import { PageHeader } from "./page-header";
+import { BackLink } from "./back-link";
 export function GithubTableSkeleton({
   sources = false,
   issues = false,
@@ -98,30 +99,32 @@ export function GithubTableSkeleton({
 }
 export function GithubSyncSkeleton({ source = false, issues = false }: { source?: boolean; issues?: boolean }) {
   return (
-    <SkeletonRegion announce>
-      {source && <Skeleton className="mb-4 h-10 w-24 md:h-8" />}
-      <PageHeader
-        leading={source ? <Skeleton className="size-8 rounded-full" /> : undefined}
-        title={source ? <Skeleton className="h-8 w-40" /> : "GitHub 同步"}
-        description={source ? <Skeleton className="h-5 w-48" /> : undefined}
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Skeleton className="h-10 w-36 md:h-9" />
-            <Skeleton className={source ? "h-10 w-20 md:h-9" : "h-10 w-32 md:h-9"} />
-            {source && <Skeleton className="h-10 w-40 md:h-9" />}
+    <>
+      {source && <BackLink to="/sync">返回同步</BackLink>}
+      <SkeletonRegion announce>
+        <PageHeader
+          leading={source ? <Skeleton className="size-8 rounded-full" /> : undefined}
+          title={source ? <Skeleton className="h-8 w-40" /> : "GitHub 同步"}
+          description={source ? <Skeleton className="h-5 w-48" /> : undefined}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Skeleton className="h-10 w-36 md:h-9" />
+              <Skeleton className={source ? "h-10 w-20 md:h-9" : "h-10 w-32 md:h-9"} />
+              {source && <Skeleton className="h-10 w-40 md:h-9" />}
+            </div>
+          }
+        />
+        {source && (
+          <div className="mb-4 flex gap-4 border-b border-border py-3">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-5 w-16" />
+            ))}
           </div>
-        }
-      />
-      {source && (
-        <div className="mb-4 flex gap-4 border-b border-border py-3">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-5 w-16" />
-          ))}
-        </div>
-      )}
-      <Panel>
-        <GithubTableSkeleton sources={!source} issues={issues} announce={false} />
-      </Panel>
-    </SkeletonRegion>
+        )}
+        <Panel>
+          <GithubTableSkeleton sources={!source} issues={issues} announce={false} />
+        </Panel>
+      </SkeletonRegion>
+    </>
   );
 }
