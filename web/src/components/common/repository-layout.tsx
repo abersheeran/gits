@@ -80,7 +80,12 @@ export function RepositoryLayout({
           {mirror && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <a href={mirror.htmlUrl} target="_blank" rel="noreferrer">
+                <a
+                  className="flex rounded-full"
+                  href={mirror.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   <Badge variant="outline">镜像</Badge>
                 </a>
               </TooltipTrigger>
@@ -104,14 +109,17 @@ export function RepositoryLayout({
           <p className="break-words text-body-xs text-text-secondary">{repository.description}</p>
         )}
       </header>
-      <nav aria-label="仓库导航" className="flex min-w-0 overflow-x-auto border-b border-border">
+      <nav
+        aria-label="仓库导航"
+        className="flex min-w-0 gap-8 overflow-x-auto border-b border-border"
+      >
         {tabs.map(([key, label, to, Icon]) => (
           <Link
             key={key}
             aria-current={tab === key ? "page" : undefined}
             to={to}
             className={cn(
-              "inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-body-xs",
+              "inline-flex shrink-0 items-center gap-2 border-b-2 py-3 text-body-xs",
               tab === key
                 ? "border-text-primary text-text-primary"
                 : "border-transparent text-text-secondary hover:text-text-primary"
