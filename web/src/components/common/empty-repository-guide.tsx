@@ -27,7 +27,7 @@ export function EmptyRepositoryGuide({
             <CopyIconButton
               value={commands}
               label="复制推送命令"
-              className="mr-1 mt-1 shrink-0"
+              className="mr-1 shrink-0 md:mt-1"
             />
           </div>
         </div>

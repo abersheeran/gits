@@ -63,11 +63,13 @@ export function GithubRepositoryTable({
               >
                 {item.fullName}
               </a>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {item.isPrivate && <Badge variant="outline">私有</Badge>}
-                {item.isFork && <Badge variant="outline">Fork</Badge>}
-                {item.isArchived && <Badge variant="outline">归档</Badge>}
-              </div>
+              {(item.isPrivate || item.isFork || item.isArchived) && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {item.isPrivate && <Badge variant="outline">私有</Badge>}
+                  {item.isFork && <Badge variant="outline">Fork</Badge>}
+                  {item.isArchived && <Badge variant="outline">归档</Badge>}
+                </div>
+              )}
               <div className="mt-2 space-y-1 md:hidden">
                 <div className="text-body-micro text-text-tertiary">本地：{local(item)}</div>
                 <GithubStatusBadge status={item.state} error={item.lastError} />
@@ -78,7 +80,9 @@ export function GithubRepositoryTable({
             </TableCell>
             <TableCell className="hidden md:table-cell">{local(item)}</TableCell>
             <TableCell className="hidden md:table-cell">
-              <GithubStatusBadge status={item.state} error={item.lastError} />
+              <div className="flex">
+                <GithubStatusBadge status={item.state} error={item.lastError} />
+              </div>
             </TableCell>
             <TableCell className="hidden text-body-micro text-text-tertiary lg:table-cell">
               <RelativeTime timestamp={item.lastSyncedAt} />

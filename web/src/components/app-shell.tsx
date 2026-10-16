@@ -55,7 +55,7 @@ export function AppShell({
             onClick={() => setOpen(false)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-md px-3 py-3 text-body-xs md:py-2",
+              "rounded-md px-3 py-3 text-body-xs md:py-1.5",
               active
                 ? "bg-surface-focus text-text-primary"
                 : "text-text-secondary hover:bg-surface-hover"

@@ -41,7 +41,7 @@ export function GithubSourceTable({
           <Link
             to={`/sync/sources/${encodeURIComponent(source.id)}?status=attention&page=1`}
             aria-label={`查看 ${source.accountLogin} 的 ${source.attentionCount} 个需处理仓库`}
-            className="inline-flex min-h-10 items-center gap-1 text-body-micro text-danger-text underline underline-offset-4 hover:no-underline"
+            className="inline-flex min-h-10 items-center gap-1 text-body-micro text-danger-text underline underline-offset-4 hover:no-underline md:min-h-0"
           >
             {source.attentionCount} 个仓库需处理
             <ArrowRight className="size-3 shrink-0" aria-hidden="true" />

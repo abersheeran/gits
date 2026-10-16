@@ -164,8 +164,8 @@ function TreeBranch({
               <button
                 type="button"
                 onClick={() => onToggleDirectory(node.path)}
-                className="flex h-10 md:h-8 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                style={{ paddingLeft: `${depth * 16 + 12}px` }}
+                className="flex h-10 md:h-8 w-full items-center gap-2 rounded-md px-4 py-2 text-left text-body-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                style={{ paddingLeft: `${depth * 16 + 16}px` }}
                 aria-expanded={isExpanded}
               >
                 {isExpanded ? (
@@ -199,12 +199,12 @@ function TreeBranch({
               onClick={() => onSelectPath(node.change.path)}
               aria-current={isActive ? "true" : undefined}
               className={cn(
-                "flex w-full items-center gap-2 h-10 md:h-8 text-body-xs rounded-md px-3 py-2 text-left transition-colors",
+                "flex w-full items-center gap-2 h-10 md:h-8 text-body-xs rounded-md px-4 py-2 text-left transition-colors",
                 isActive
                   ? "bg-surface-focus font-medium text-text-primary"
                   : "bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary"
               )}
-              style={{ paddingLeft: `${depth * 16 + 12}px` }}
+              style={{ paddingLeft: `${depth * 16 + 16}px` }}
             >
               <FileCode2 className="size-4 shrink-0 text-text-supporting" />
               <span className="min-w-0 flex-1 truncate text-body-xs">
@@ -252,7 +252,7 @@ export function ChangesFileTree({
   }
 
   return (
-    <div className={cn("overflow-y-auto p-3", className)}>
+    <div className={cn("overflow-y-auto py-3", className)}>
       <TreeBranch
         nodes={tree}
         depth={0}
