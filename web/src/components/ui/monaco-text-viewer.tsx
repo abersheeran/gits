@@ -23,7 +23,7 @@ const LazyMonacoTextViewerImpl = lazy(async () => {
 
 function MonacoTextViewerFallback(props: { height: number | string; className?: string }) {
   return (
-    <div className={cn("min-w-0 overflow-hidden bg-surface-base", props.className)}>
+    <div className={cn("min-w-0 overflow-hidden bg-surface-canvas", props.className)}>
       <CodeViewerSkeleton height={props.height} />
     </div>
   );

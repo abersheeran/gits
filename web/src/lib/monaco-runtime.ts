@@ -37,11 +37,10 @@ loader.config({ monaco });
 let monacoConfigured = false;
 
 function readThemeColor(
-  rootStyles: CSSStyleDeclaration | null,
-  variable: string,
-  fallback: string
+  rootStyles: CSSStyleDeclaration,
+  variable: string
 ) {
-  return rootStyles?.getPropertyValue(variable).trim() || fallback;
+  return rootStyles.getPropertyValue(variable).trim();
 }
 
 type ParsedColor = {
@@ -155,129 +154,186 @@ export function configureMonaco(instance: Monaco) {
   }
   monacoConfigured = true;
 
-  const rootStyles = globalThis.document
-    ? getComputedStyle(globalThis.document.documentElement)
-    : null;
-  const surfaceBase = readThemeColor(rootStyles, "--color-surface-base", "#ffffff");
-  const surfaceCanvas = readThemeColor(rootStyles, "--color-surface-canvas", "#f7f7f5");
-  const surfaceHover = readThemeColor(rootStyles, "--color-surface-hover", "#f6f4f4");
-  const fillPrimary = readThemeColor(rootStyles, "--color-fill-primary", "#ebe4e0");
-  const fillSecondary = readThemeColor(rootStyles, "--color-fill-secondary", "#d1cecc");
-  const fillTertiary = readThemeColor(rootStyles, "--color-fill-tertiary", "#bbb6b4");
-  const textPrimary = readThemeColor(rootStyles, "--text-primary", "#0f0e0d");
-  const textSecondary = readThemeColor(rootStyles, "--text-secondary", "#766f6a");
-  const textTertiary = readThemeColor(rootStyles, "--text-tertiary", "#a6a09b");
-  const textSupporting = readThemeColor(rootStyles, "--text-supporting", "#6e6e6e");
-  const textSupportingStrong = readThemeColor(
-    rootStyles,
-    "--text-supporting-strong",
-    "#44403b"
-  );
-  const borderSubtle = readThemeColor(rootStyles, "--border-subtle", "#efe9e7");
-  const borderDefault = readThemeColor(rootStyles, "--border-default", "#e5e5e5");
-  const dangerSurface = readThemeColor(rootStyles, "--color-danger-surface", "#f9ece8");
-  const dangerBorder = readThemeColor(rootStyles, "--border-danger", "#e9c6bf");
-  const dangerText = readThemeColor(rootStyles, "--text-danger", "#7f3128");
-  const success = readThemeColor(rootStyles, "--color-status-success", "#5d7b67");
-  const successMuted = readThemeColor(rootStyles, "--color-status-success-muted", "#edf3ee");
-  const syntaxComment = blendColors(textTertiary, 74, surfaceBase);
-  const syntaxKeyword = blendColors(success, 62, textSupportingStrong);
-  const syntaxOperator = blendColors(textSupporting, 86, fillSecondary);
-  const syntaxString = blendColors(success, 76, fillTertiary);
-  const syntaxConstant = blendColors(dangerText, 54, fillTertiary);
-  const syntaxType = blendColors(success, 42, textPrimary);
-  const syntaxFunction = blendColors(textPrimary, 62, success);
-  const syntaxTag = blendColors(success, 58, textSupportingStrong);
-  const syntaxAttribute = blendColors(textSupportingStrong, 62, success);
-  const syntaxDelimiter = blendColors(textSupporting, 82, surfaceBase);
-  const insertedTextBackground = blendColors(
-    successMuted,
-    82,
-    blendColors(success, 18, surfaceBase)
-  );
-  const insertedLineBackground = blendColors(
-    successMuted,
-    68,
-    blendColors(success, 16, surfaceBase)
-  );
-  const removedTextBackground = blendColors(
-    dangerSurface,
-    84,
-    blendColors(dangerText, 10, surfaceBase)
-  );
-  const removedLineBackground = blendColors(
-    dangerSurface,
-    70,
-    blendColors(dangerText, 8, surfaceBase)
-  );
+  const rootStyles = getComputedStyle(document.documentElement);
+  const surfaceCanvas = readThemeColor(rootStyles, "--color-surface-canvas");
+  const fillPrimary = readThemeColor(rootStyles, "--color-fill-primary");
+  const fillSecondary = readThemeColor(rootStyles, "--color-fill-secondary");
+  const fillTertiary = readThemeColor(rootStyles, "--color-fill-tertiary");
+  const textPrimary = readThemeColor(rootStyles, "--text-primary");
+  const textSecondary = readThemeColor(rootStyles, "--text-secondary");
+  const textTertiary = readThemeColor(rootStyles, "--text-tertiary");
+  const textSupportingStrong = readThemeColor(rootStyles, "--text-supporting-strong");
+  const borderSubtle = readThemeColor(rootStyles, "--border-subtle");
+  const borderDefault = readThemeColor(rootStyles, "--border-default");
+  const dangerText = readThemeColor(rootStyles, "--text-danger");
+  const success = readThemeColor(rootStyles, "--color-status-success");
+  const syntaxComment = blendColors(textTertiary, 40, textSecondary);
+  const syntaxSecondary = blendColors(textSecondary, 80, textSupportingStrong);
+  const syntaxString = blendColors(success, 40, textSupportingStrong);
+  const syntaxConstant = blendColors(dangerText, 65, textSecondary);
+  const highlightBackground = blendColors(fillPrimary, 40, surfaceCanvas);
+  const widgetBackground = blendColors(fillPrimary, 20, surfaceCanvas);
+  // Text highlights overlay line highlights on the canvas without hiding selections.
+  const insertedLineBackground = mixColor(success, 10);
+  const insertedTextBackground = mixColor(success, 13);
+  const removedLineBackground = mixColor(dangerText, 8);
+  const removedTextBackground = mixColor(dangerText, 11);
   const transparentBorder = mixColor(textPrimary, 0);
 
   instance.editor.defineTheme("gits-light", {
     base: "vs",
-    inherit: true,
+    // Default to the site text color; do not inherit more specific VS token rules.
+    inherit: false,
     colors: {
+      foreground: textPrimary,
+      descriptionForeground: textSecondary,
+      disabledForeground: syntaxComment,
+      errorForeground: dangerText,
+      focusBorder: textSecondary,
+      "icon.foreground": textSecondary,
+      "textLink.foreground": textSecondary,
+      "textLink.activeForeground": textSupportingStrong,
+      "textPreformat.foreground": textSupportingStrong,
+      "textPreformat.background": surfaceCanvas,
+      "textCodeBlock.background": surfaceCanvas,
       "editor.foreground": textPrimary,
-      "editor.background": surfaceBase,
+      "editor.background": surfaceCanvas,
       "editorGutter.background": surfaceCanvas,
       "editorLineNumber.foreground": textSecondary,
       "editorLineNumber.activeForeground": textSupportingStrong,
-      "editor.lineHighlightBackground": mixColor(surfaceCanvas, 84),
-      "editor.selectionBackground": mixColor(fillPrimary, 88),
-      "editor.inactiveSelectionBackground": mixColor(fillPrimary, 56),
-      "editor.selectionHighlightBackground": mixColor(fillPrimary, 34),
-      "editor.wordHighlightBackground": mixColor(fillPrimary, 26),
-      "editor.wordHighlightStrongBackground": mixColor(fillSecondary, 24),
-      "editor.hoverHighlightBackground": mixColor(surfaceHover, 76),
+      "editorLineNumber.dimmedForeground": textSecondary,
+      "editor.lineHighlightBackground": highlightBackground,
+      "editor.lineHighlightBorder": transparentBorder,
+      "editor.selectionBackground": mixColor(fillSecondary, 60),
+      "editor.selectionForeground": textPrimary,
+      "editor.inactiveSelectionBackground": mixColor(fillSecondary, 35),
+      "editor.selectionHighlightBackground": mixColor(fillTertiary, 25),
+      "editor.wordHighlightBackground": mixColor(fillSecondary, 40),
+      "editor.wordHighlightStrongBackground": mixColor(fillTertiary, 30),
+      "editor.wordHighlightTextBackground": mixColor(fillSecondary, 40),
+      "editor.hoverHighlightBackground": mixColor(fillPrimary, 50),
+      "editor.findMatchBackground": mixColor(fillTertiary, 55),
+      "editor.findMatchBorder": textSecondary,
+      "editor.findMatchHighlightBackground": mixColor(fillSecondary, 40),
+      "editor.findRangeHighlightBackground": mixColor(fillPrimary, 35),
+      "editor.rangeHighlightBackground": mixColor(fillPrimary, 35),
+      "editor.symbolHighlightBackground": mixColor(fillSecondary, 40),
       "editorCursor.foreground": textSupportingStrong,
-      "editorWhitespace.foreground": mixColor(textSecondary, 22),
-      "editorIndentGuide.background1": blendColors(borderSubtle, 78, surfaceBase),
-      "editorIndentGuide.activeBackground1": borderDefault,
-      "editorWidget.background": surfaceBase,
-      "editorWidget.border": borderSubtle,
-      "editorHoverWidget.background": surfaceBase,
-      "editorHoverWidget.border": borderSubtle,
+      "editorCursor.background": surfaceCanvas,
+      "editorWhitespace.foreground": blendColors(textSecondary, 35, surfaceCanvas),
+      "editorIndentGuide.background1": blendColors(fillTertiary, 40, surfaceCanvas),
+      "editorIndentGuide.activeBackground1": blendColors(textSecondary, 45, surfaceCanvas),
+      "editorBracketMatch.background": mixColor(fillSecondary, 40),
+      "editorBracketMatch.border": fillTertiary,
+      "editorBracketHighlight.foreground1": syntaxSecondary,
+      "editorBracketHighlight.foreground2": syntaxSecondary,
+      "editorBracketHighlight.foreground3": syntaxSecondary,
+      "editorBracketHighlight.foreground4": syntaxSecondary,
+      "editorBracketHighlight.foreground5": syntaxSecondary,
+      "editorBracketHighlight.foreground6": syntaxSecondary,
+      "editorBracketHighlight.unexpectedBracket.foreground": dangerText,
+      "editorWidget.background": widgetBackground,
+      "editorWidget.foreground": textPrimary,
+      "editorWidget.border": borderDefault,
+      "editorWidget.resizeBorder": textSecondary,
+      "editorHoverWidget.background": widgetBackground,
+      "editorHoverWidget.foreground": textPrimary,
+      "editorHoverWidget.border": borderDefault,
+      "editorHoverWidget.statusBarBackground": highlightBackground,
+      "input.background": surfaceCanvas,
+      "input.foreground": textPrimary,
+      "input.border": borderDefault,
+      "input.placeholderForeground": textSecondary,
+      "inputOption.activeBackground": highlightBackground,
+      "inputOption.activeForeground": textSupportingStrong,
+      "inputOption.activeBorder": textSecondary,
+      "inputOption.hoverBackground": highlightBackground,
+      "inputValidation.errorBackground": removedLineBackground,
+      "inputValidation.errorForeground": dangerText,
+      "inputValidation.errorBorder": dangerText,
+      "menu.background": widgetBackground,
+      "menu.foreground": textPrimary,
+      "menu.border": borderDefault,
+      "menu.selectionBackground": highlightBackground,
+      "menu.selectionForeground": textPrimary,
+      "menu.selectionBorder": transparentBorder,
+      "menu.separatorBackground": borderDefault,
+      "toolbar.hoverBackground": highlightBackground,
+      "toolbar.activeBackground": blendColors(fillPrimary, 70, surfaceCanvas),
       "widget.shadow": mixColor(textPrimary, 12),
-      "scrollbarSlider.background": mixColor(fillSecondary, 34),
-      "scrollbarSlider.hoverBackground": mixColor(fillSecondary, 52),
-      "scrollbarSlider.activeBackground": mixColor(textSecondary, 30),
-      "editorOverviewRuler.border": "transparent",
-      "editorLink.activeForeground": textPrimary,
+      "widget.border": borderDefault,
+      "scrollbar.shadow": mixColor(textPrimary, 10),
+      "scrollbarSlider.background": mixColor(textSecondary, 22),
+      "scrollbarSlider.hoverBackground": mixColor(textSecondary, 34),
+      "scrollbarSlider.activeBackground": mixColor(textSecondary, 48),
+      "editorOverviewRuler.background": surfaceCanvas,
+      "editorOverviewRuler.border": transparentBorder,
+      "editorOverviewRuler.findMatchForeground": textSecondary,
+      "editorOverviewRuler.selectionHighlightForeground": fillTertiary,
+      "editorOverviewRuler.rangeHighlightForeground": fillTertiary,
+      "editorOverviewRuler.wordHighlightForeground": fillTertiary,
+      "editorOverviewRuler.wordHighlightStrongForeground": textSecondary,
+      "editorOverviewRuler.wordHighlightTextForeground": fillTertiary,
+      "editorOverviewRuler.errorForeground": dangerText,
+      "editorOverviewRuler.warningForeground": textSecondary,
+      "editorOverviewRuler.infoForeground": textSecondary,
+      "editorError.foreground": dangerText,
+      "editorWarning.foreground": textSecondary,
+      "editorInfo.foreground": textSecondary,
+      "editorHint.foreground": textSecondary,
+      "editorLink.activeForeground": textSupportingStrong,
       "diffEditor.border": borderSubtle,
-      "diffEditor.diagonalFill": blendColors(borderSubtle, 72, surfaceBase),
+      "diffEditor.diagonalFill": blendColors(fillTertiary, 45, surfaceCanvas),
       "diffEditor.insertedTextBackground": insertedTextBackground,
       "diffEditor.insertedLineBackground": insertedLineBackground,
       "diffEditor.insertedTextBorder": transparentBorder,
       "diffEditor.removedTextBackground": removedTextBackground,
       "diffEditor.removedLineBackground": removedLineBackground,
       "diffEditor.removedTextBorder": transparentBorder,
-      "diffEditorGutter.insertedLineBackground": blendColors(successMuted, 74, success),
-      "diffEditorGutter.removedLineBackground": blendColors(dangerSurface, 76, dangerBorder),
-      "diffEditor.unchangedRegionBackground": blendColors(surfaceCanvas, 82, surfaceBase),
+      "diffEditorGutter.insertedLineBackground": blendColors(success, 26, surfaceCanvas),
+      "diffEditorGutter.removedLineBackground": blendColors(dangerText, 22, surfaceCanvas),
+      "diffEditor.unchangedRegionBackground": highlightBackground,
       "diffEditor.unchangedRegionForeground": textSecondary,
-      "diffEditor.unchangedRegionShadow": mixColor(textPrimary, 16)
+      "diffEditor.unchangedCodeBackground": transparentBorder,
+      "diffEditor.unchangedRegionShadow": mixColor(textPrimary, 12)
     },
     rules: [
+      {
+        token: "",
+        foreground: toMonacoTokenColor(textPrimary),
+        background: toMonacoTokenColor(surfaceCanvas)
+      },
       { token: "comment", foreground: toMonacoTokenColor(syntaxComment), fontStyle: "italic" },
-      { token: "comment.doc", foreground: toMonacoTokenColor(syntaxComment), fontStyle: "italic" },
-      { token: "keyword", foreground: toMonacoTokenColor(syntaxKeyword) },
-      { token: "keyword.operator", foreground: toMonacoTokenColor(syntaxOperator) },
-      { token: "operator", foreground: toMonacoTokenColor(syntaxOperator) },
-      { token: "storage", foreground: toMonacoTokenColor(syntaxKeyword) },
+      { token: "keyword", foreground: toMonacoTokenColor(textSupportingStrong) },
+      { token: "keyword.operator", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "keyword.md", foreground: toMonacoTokenColor(textSupportingStrong), fontStyle: "bold" },
+      { token: "operator", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "storage", foreground: toMonacoTokenColor(textSupportingStrong) },
       { token: "string", foreground: toMonacoTokenColor(syntaxString) },
-      { token: "regexp", foreground: toMonacoTokenColor(syntaxString) },
+      { token: "string.key", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "string.escape", foreground: toMonacoTokenColor(syntaxConstant) },
+      { token: "string.link", foreground: toMonacoTokenColor(syntaxSecondary), fontStyle: "underline" },
+      { token: "string.target", foreground: toMonacoTokenColor(syntaxSecondary), fontStyle: "underline" },
+      { token: "string.md", foreground: toMonacoTokenColor(textSupportingStrong) },
+      { token: "variable.md", foreground: toMonacoTokenColor(textSupportingStrong) },
+      { token: "regexp", foreground: toMonacoTokenColor(syntaxConstant) },
       { token: "number", foreground: toMonacoTokenColor(syntaxConstant) },
       { token: "constant", foreground: toMonacoTokenColor(syntaxConstant) },
-      { token: "constant.language", foreground: toMonacoTokenColor(syntaxConstant) },
-      { token: "type", foreground: toMonacoTokenColor(syntaxType) },
-      { token: "type.identifier", foreground: toMonacoTokenColor(syntaxType) },
-      { token: "class", foreground: toMonacoTokenColor(syntaxType) },
-      { token: "interface", foreground: toMonacoTokenColor(syntaxType) },
-      { token: "function", foreground: toMonacoTokenColor(syntaxFunction) },
-      { token: "function.call", foreground: toMonacoTokenColor(syntaxFunction) },
-      { token: "tag", foreground: toMonacoTokenColor(syntaxTag) },
-      { token: "attribute.name", foreground: toMonacoTokenColor(syntaxAttribute) },
-      { token: "delimiter", foreground: toMonacoTokenColor(syntaxDelimiter) },
-      { token: "delimiter.bracket", foreground: toMonacoTokenColor(syntaxDelimiter) }
+      { token: "constants", foreground: toMonacoTokenColor(syntaxConstant) },
+      { token: "tag", foreground: toMonacoTokenColor(textSupportingStrong) },
+      { token: "metatag", foreground: toMonacoTokenColor(textSupportingStrong) },
+      { token: "key", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "attribute.name", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "attribute.value", foreground: toMonacoTokenColor(syntaxString) },
+      { token: "attribute.value.number", foreground: toMonacoTokenColor(syntaxConstant) },
+      { token: "attribute.value.unit", foreground: toMonacoTokenColor(syntaxConstant) },
+      { token: "attribute.value.hex", foreground: toMonacoTokenColor(syntaxConstant) },
+      { token: "delimiter", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "meta.separator", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "annotation", foreground: toMonacoTokenColor(syntaxSecondary) },
+      { token: "strong", foreground: toMonacoTokenColor(textPrimary), fontStyle: "bold" },
+      { token: "emphasis", foreground: toMonacoTokenColor(textPrimary), fontStyle: "italic" },
+      { token: "invalid", foreground: toMonacoTokenColor(dangerText) }
     ]
   });
 

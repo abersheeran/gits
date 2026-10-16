@@ -135,8 +135,8 @@
   .monaco-editor .diff-hidden-lines .center {
     background: color-mix(
       in srgb,
-      var(--color-surface-canvas) 84%,
-      var(--color-surface-base)
+      var(--color-fill-primary) 40%,
+      var(--color-surface-canvas)
     );
     border-top: 1px solid var(--border-subtle);
     border-bottom: 1px solid var(--border-subtle);

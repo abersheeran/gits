@@ -25,7 +25,7 @@ Token 定义在 `web/src/index.css`（CSS 变量）与 `web/tailwind.config.js`�
 | --- | --- |
 | 页面画布 | `bg-surface-canvas` |
 | 面板、表格、输入框底色 | `bg-surface-base` |
-| 面板内次级区域（表头、工具栏、代码行号区） | `bg-surface-canvas` |
+| 面板内次级区域（表头、工具栏）、代码查看器与 diff | `bg-surface-canvas` |
 | 行悬停 | `hover:bg-surface-hover` |
 | 主文字 / 次要文字 / 弱化文字 | `text-text-primary` / `text-text-secondary` / `text-text-tertiary` |
 | 默认边框 / 分隔线 | `border-border` / `border-border-subtle` |
@@ -34,6 +34,8 @@ Token 定义在 `web/src/index.css`（CSS 变量）与 `web/tailwind.config.js`�
 | 成功状态 | `success` 系列 |
 
 `bg-surface-focus` 只用于选中态（当前导航项、当前文件树项、Select 高亮项）。
+
+代码查看器与 diff（Monaco）整体使用 `bg-surface-canvas`，代码区与行号区同色，与 Markdown 代码块一致；加载占位也使用同一底色。语法颜色只从现有文字 / 状态 token 派生，以主文字色为主，少量暖色或低饱和状态色强调；普通代码与行号对比度不低于 4.5:1，注释不低于 3:1。不显示彩色括号、Unicode 歧义或不可见字符方框。
 
 暗色 token 已在 `.dark` 中定义，当前未启用；新增颜色时必须同时给出亮色和暗色值。
 

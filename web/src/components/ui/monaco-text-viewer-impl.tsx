@@ -18,7 +18,7 @@ export function MonacoTextViewerImpl({
   const resolvedLanguage = language ?? guessMonacoLanguage(path);
 
   return (
-    <div className={cn("min-w-0 overflow-hidden", className)}>
+    <div className={cn("min-w-0 overflow-hidden bg-surface-canvas", className)}>
       <div className="min-w-0">
         <Editor
           value={value}
@@ -36,6 +36,7 @@ export function MonacoTextViewerImpl({
             fontFamily: monacoViewerFontFamily(),
             fontSize: 12,
             glyphMargin: false,
+            hideCursorInOverviewRuler: true,
             lineHeight: 20,
             lineNumbers,
             lineNumbersMinChars: lineNumbers === "on" ? 4 : 0,
@@ -58,6 +59,11 @@ export function MonacoTextViewerImpl({
             selectionHighlight: false,
             stickyScroll: {
               enabled: false
+            },
+            unicodeHighlight: {
+              ambiguousCharacters: false,
+              invisibleCharacters: false,
+              nonBasicASCII: false
             },
             wordWrap: wrap
           }}

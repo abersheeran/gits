@@ -26,7 +26,7 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
   const language = guessMonacoLanguage(props.change.path || props.change.previousPath || undefined);
 
   return (
-    <div className="min-w-0 overflow-hidden">
+    <div className="min-w-0 overflow-hidden bg-surface-canvas">
       <div className="min-w-0">
         <DiffEditor
           original={props.change.oldContent ?? ""}
@@ -66,6 +66,7 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
             fontFamily: monacoViewerFontFamily(),
             fontSize: 12,
             glyphMargin: true,
+            hideCursorInOverviewRuler: true,
             lineDecorationsWidth: 12,
             lineHeight: 20,
             minimap: {
@@ -85,6 +86,7 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
               minimumLineCount: DIFF_HIDDEN_REGION_MINIMUM_LINE_COUNT
             },
             renderIndicators: true,
+            renderLineHighlight: "none",
             renderMarginRevertIcon: false,
             renderOverviewRuler: false,
             renderSideBySide: true,
@@ -96,6 +98,11 @@ export function RepositoryChangeDiffEditor(props: RepositoryChangeDiffEditorProp
             },
             stickyScroll: {
               enabled: false
+            },
+            unicodeHighlight: {
+              ambiguousCharacters: false,
+              invisibleCharacters: false,
+              nonBasicASCII: false
             },
             useInlineViewWhenSpaceIsLimited: true,
             wordWrap: "off"
